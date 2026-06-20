@@ -1,0 +1,15 @@
+# Logs
+*.log
+logs/
+
+# Python caches
+__pycache__/
+*.py[cod]
+
+# Local test/browser artifacts
+.playwright-cli/
+.superpowers/**/state/
+
+# PyInstaller intermediate output
+build/
+*.spec

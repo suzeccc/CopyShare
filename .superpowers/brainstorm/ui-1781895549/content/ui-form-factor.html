@@ -1,0 +1,210 @@
+<style>
+  .ui-lab {
+    display: grid;
+    gap: 22px;
+  }
+  .ui-note {
+    color: #5b6472;
+    max-width: 760px;
+    line-height: 1.7;
+  }
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 18px;
+  }
+  .card {
+    min-height: 380px;
+  }
+  .device {
+    background: #14171d;
+    color: #eef4ff;
+    border-radius: 22px;
+    padding: 14px;
+    box-shadow: 0 18px 40px rgba(28, 35, 48, .18);
+    border: 1px solid rgba(255,255,255,.12);
+  }
+  .device-top {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 14px;
+  }
+  .dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: #63e6be;
+  }
+  .dot:nth-child(2) { background: #ffd43b; }
+  .dot:nth-child(3) { background: #ff8787; }
+  .pane {
+    background: #f5f7fb;
+    color: #111827;
+    border-radius: 14px;
+    padding: 12px;
+    min-height: 250px;
+  }
+  .title-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 12px;
+    color: #536072;
+    margin-bottom: 12px;
+  }
+  .pulse {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: #087f5b;
+    font-weight: 700;
+  }
+  .pulse:before {
+    content: "";
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #20c997;
+    box-shadow: 0 0 0 5px rgba(32,201,151,.16);
+  }
+  .metric-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .metric {
+    border: 1px solid #d8dee8;
+    border-radius: 10px;
+    padding: 9px;
+    background: white;
+  }
+  .metric b {
+    display: block;
+    font-size: 18px;
+  }
+  .peer-list {
+    display: grid;
+    gap: 7px;
+  }
+  .peer {
+    display: flex;
+    justify-content: space-between;
+    border: 1px solid #d8dee8;
+    border-radius: 10px;
+    padding: 9px;
+    background: white;
+    font-size: 12px;
+  }
+  .mini-tray {
+    width: 210px;
+    margin: 28px auto 0;
+    background: #fff;
+    color: #111827;
+    border: 1px solid #ccd3df;
+    border-radius: 16px;
+    padding: 12px;
+    box-shadow: 0 20px 45px rgba(20,23,29,.3);
+  }
+  .tiny-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid #e6ebf2;
+    font-size: 12px;
+  }
+  .tiny-row:last-child { border-bottom: 0; }
+  .linkline {
+    height: 34px;
+    margin: 12px 0;
+    border: 2px dashed #4dabf7;
+    border-radius: 999px;
+    position: relative;
+  }
+  .linkline:after {
+    content: "";
+    position: absolute;
+    right: 15px;
+    top: 9px;
+    width: 12px;
+    height: 12px;
+    border-top: 3px solid #4dabf7;
+    border-right: 3px solid #4dabf7;
+    transform: rotate(45deg);
+  }
+  @media (max-width: 900px) {
+    .cards { grid-template-columns: 1fr; }
+  }
+</style>
+
+<div class="ui-lab">
+  <div>
+    <h2>先选 UI 形态</h2>
+    <p class="subtitle">这个剪贴板同步工具最重要的体验是“安静地运行，但出问题时一眼看懂”。你更想要哪种第一版界面？</p>
+  </div>
+
+  <div class="cards">
+    <div class="card" data-choice="desktop" onclick="toggleSelect(this)">
+      <div class="card-image">
+        <div class="device">
+          <div class="device-top"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+          <div class="pane">
+            <div class="title-row"><strong>LAN Clipboard Sync</strong><span class="pulse">同步中</span></div>
+            <div class="metric-grid">
+              <div class="metric"><b>2</b><span>已连接设备</span></div>
+              <div class="metric"><b>48 ms</b><span>最近延迟</span></div>
+            </div>
+            <div class="peer-list">
+              <div class="peer"><span>device-a</span><strong>在线</strong></div>
+              <div class="peer"><span>device-b</span><strong>在线</strong></div>
+              <div class="peer"><span>192.168.1.20</span><strong>重连中</strong></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="card-body">
+        <h3>A. 桌面控制台</h3>
+        <p>一个清晰的窗口：连接状态、peer 列表、端口、日志和启动/停止按钮都在里面。最适合现在这个 Python MVP。</p>
+      </div>
+    </div>
+
+    <div class="card" data-choice="web" onclick="toggleSelect(this)">
+      <div class="card-image">
+        <div class="device">
+          <div class="device-top"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+          <div class="pane">
+            <div class="title-row"><strong>浏览器控制台</strong><span>localhost</span></div>
+            <div class="linkline"></div>
+            <div class="metric-grid">
+              <div class="metric"><b>8765</b><span>服务端口</span></div>
+              <div class="metric"><b>ws://</b><span>连接协议</span></div>
+            </div>
+            <div class="peer"><span>手动添加 peer</span><strong>+</strong></div>
+          </div>
+        </div>
+      </div>
+      <div class="card-body">
+        <h3>B. 浏览器面板</h3>
+        <p>运行命令后打开本地网页管理。更轻、更跨平台，但需要给现有核心补一个 HTTP 控制层。</p>
+      </div>
+    </div>
+
+    <div class="card" data-choice="tray" onclick="toggleSelect(this)">
+      <div class="card-image">
+        <div class="device">
+          <div class="device-top"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+          <div class="mini-tray">
+            <div class="tiny-row"><strong>剪贴板同步</strong><span class="pulse">在线</span></div>
+            <div class="tiny-row"><span>2 台设备</span><strong>48 ms</strong></div>
+            <div class="tiny-row"><span>暂停同步</span><strong>⏸</strong></div>
+            <div class="tiny-row"><span>打开设置</span><strong>↗</strong></div>
+          </div>
+        </div>
+      </div>
+      <div class="card-body">
+        <h3>C. 托盘小浮窗</h3>
+        <p>最接近日常工具的形态：常驻后台，点托盘查看状态。体验漂亮，但第一版实现复杂度最高。</p>
+      </div>
+    </div>
+  </div>
+</div>

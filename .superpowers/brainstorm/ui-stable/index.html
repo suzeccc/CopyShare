@@ -1,0 +1,1011 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>剪贴板同步 · UI UX Pro Max 深色托盘控制台</title>
+  <style>
+    :root {
+      --theme-name: "UI UX Pro Max / Dark Tray Console Glass";
+      --font-ui: "Microsoft YaHei UI", "Noto Sans SC", "PingFang SC", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+      --font-data: "Cascadia Mono", "SFMono-Regular", "Consolas", "Liberation Mono", monospace;
+      --tray-bg: #162231;
+      --surface: #26313D;
+      --surface-strong: #2D3A48;
+      --field: #1B2938;
+      --ink: #F8FAFC;
+      --muted: #C7D5E6;
+      --mist: #162231;
+      --glass: rgba(38, 49, 61, .82);
+      --glass-strong: rgba(38, 49, 61, .94);
+      --line: #344454;
+      --blue: #22C55E;
+      --blue-end: #86EFAC;
+      --green: #22C55E;
+      --yellow: #FACC15;
+      --red: #EF4444;
+      --shadow: 0 22px 56px rgba(2, 6, 23, .46);
+      --radius-card: 22px;
+      --radius-pill: 999px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: var(--font-ui);
+      font-feature-settings: "tnum" 1;
+      color: var(--ink);
+      background:
+        repeating-linear-gradient(90deg, rgba(199,213,230,.045) 0 1px, transparent 1px 28px),
+        repeating-linear-gradient(0deg, rgba(199,213,230,.035) 0 1px, transparent 1px 28px),
+        linear-gradient(180deg, #162231 0%, #101A27 100%);
+    }
+    button, input {
+      font: inherit;
+    }
+    b,
+    .metric b,
+    .side-card b,
+    .compact-row b,
+    #sidePort,
+    #compactPort,
+    #compactPeers,
+    #compactLatency {
+      font-variant-numeric: tabular-nums;
+    }
+    button {
+      cursor: pointer;
+    }
+    main {
+      width: min(1080px, calc(100% - 24px));
+      min-height: 100vh;
+      margin: 0 auto;
+      padding: 20px 0;
+      display: grid;
+      align-content: center;
+    }
+    .shell {
+      background: rgba(22,34,49,.88);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-card);
+      box-shadow: var(--shadow);
+      padding: 10px;
+      backdrop-filter: blur(24px) saturate(170%);
+      -webkit-backdrop-filter: blur(24px) saturate(170%);
+    }
+    .windowbar {
+      height: 34px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 8px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 0 4px rgba(18,184,134,.12);
+    }
+    .dot:nth-child(2) { background: var(--yellow); box-shadow: 0 0 0 4px rgba(242,183,5,.13); }
+    .dot:nth-child(3) { background: var(--red); box-shadow: 0 0 0 4px rgba(224,49,49,.1); }
+    .app {
+      min-height: 570px;
+      display: grid;
+      grid-template-columns: 204px minmax(0, 1fr) 260px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-card);
+      overflow: hidden;
+      background: rgba(22,34,49,.74);
+      backdrop-filter: blur(24px) saturate(170%);
+      -webkit-backdrop-filter: blur(24px) saturate(170%);
+    }
+    .sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      padding: 20px 16px;
+      background: var(--tray-bg);
+      border-right: 1px solid var(--line);
+    }
+    .brand {
+      display: grid;
+      gap: 5px;
+    }
+    .brand strong {
+      font-size: 22px;
+      line-height: 1.1;
+      letter-spacing: 0;
+      font-weight: 800;
+    }
+    .brand span,
+    .small,
+    .field-label,
+    .side-label {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+      font-weight: 500;
+    }
+    .nav {
+      display: grid;
+      gap: 7px;
+    }
+    .nav-item {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border: 1px solid transparent;
+      border-radius: var(--radius-pill);
+      padding: 10px 12px;
+      background: transparent;
+      color: var(--muted);
+      font-weight: 800;
+      text-align: left;
+      transition: background .16s ease, border-color .16s ease, transform .16s ease, color .16s ease;
+    }
+    .nav-item:after {
+      content: "";
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: transparent;
+    }
+    .nav-item:hover,
+    .nav-item:focus-visible {
+      background: var(--surface);
+      border-color: var(--line);
+      color: var(--ink);
+      outline: none;
+      transform: translateX(2px);
+    }
+    .nav-item.active {
+      background: var(--glass-strong);
+      border-color: rgba(34,197,94,.58);
+      color: var(--ink);
+      box-shadow: 0 12px 28px rgba(2,6,23,.22);
+    }
+    .nav-item.active:after {
+      background: var(--blue);
+      box-shadow: 0 0 0 5px rgba(34,197,94,.12);
+    }
+    .side-card,
+    .tray-panel,
+    .toast {
+      border: 1px solid var(--line);
+      background: var(--glass);
+      backdrop-filter: blur(24px) saturate(170%);
+      -webkit-backdrop-filter: blur(24px) saturate(170%);
+      border-radius: var(--radius-card);
+      box-shadow: 0 12px 32px rgba(30,49,69,.08);
+    }
+    .side-card {
+      margin-top: auto;
+      padding: 18px;
+      display: grid;
+      gap: 8px;
+      min-height: 142px;
+      align-content: center;
+    }
+    .side-card b {
+      font-family: var(--font-ui);
+      font-size: 29px;
+      line-height: 1.05;
+      font-weight: 780;
+      color: var(--ink);
+    }
+    .side-card .side-label {
+      color: var(--muted);
+      font-size: 15px;
+      font-weight: 850;
+    }
+    .side-card .small {
+      color: var(--muted);
+      font-size: 14px;
+      font-weight: 850;
+      line-height: 1.3;
+    }
+    .side-card .status {
+      color: var(--red);
+      font-size: 18px;
+      font-weight: 900;
+      gap: 12px;
+      margin-top: 2px;
+    }
+    #sideStatus:before {
+      content: none;
+      display: none;
+    }
+    .main-panel {
+      padding: 20px;
+      display: grid;
+      grid-template-rows: auto auto 1fr;
+      gap: 14px;
+      min-width: 0;
+    }
+    .topline {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+    }
+    h1, h2, h3, p {
+      margin: 0;
+    }
+    h1 {
+      font-size: 22px;
+      font-weight: 760;
+    }
+    h2 {
+      font-size: 26px;
+      line-height: 1.1;
+      letter-spacing: 0;
+      font-weight: 780;
+    }
+    h3 {
+      font-size: 16px;
+      font-weight: 760;
+      margin-bottom: 12px;
+    }
+    .top-actions,
+    .inline-actions,
+    .tray-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .btn {
+      border: 1px solid var(--line);
+      background: var(--surface);
+      color: var(--ink);
+      border-radius: var(--radius-pill);
+      min-height: 42px;
+      padding: 9px 24px;
+      font-weight: 800;
+      box-shadow: 0 8px 18px rgba(2,6,23,.22);
+    }
+    .btn:hover,
+    .btn:focus-visible {
+      border-color: var(--green);
+      outline: none;
+    }
+    .primary {
+      color: var(--ink);
+      background: var(--surface);
+      border-color: var(--blue);
+    }
+    .danger {
+      color: var(--red);
+      background: var(--surface);
+      border-color: var(--red);
+    }
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .metric,
+    .card {
+      border: 1px solid var(--line);
+      background: var(--glass);
+      border-radius: var(--radius-card);
+      backdrop-filter: blur(24px) saturate(170%);
+      -webkit-backdrop-filter: blur(24px) saturate(170%);
+    }
+    .metric {
+      padding: 13px;
+      min-height: 82px;
+      display: grid;
+      place-items: center;
+      text-align: center;
+      align-content: center;
+    }
+    .metric b {
+      display: block;
+      font-size: 20px;
+      line-height: 1.1;
+      margin-bottom: 6px;
+      font-family: var(--font-ui);
+      font-weight: 780;
+    }
+    .metric span {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .content-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(250px, .8fr);
+      gap: 10px;
+      min-height: 0;
+      grid-template-rows: minmax(178px, auto) 1fr;
+    }
+    .card {
+      padding: 14px;
+      min-width: 0;
+    }
+    .overview-card {
+      min-height: 178px;
+    }
+    .recent-events-card {
+      grid-column: 1 / -1;
+      min-height: 300px;
+    }
+    .peer-list,
+    .log-list,
+    .form-grid {
+      display: grid;
+      gap: 8px;
+    }
+    .devices-stack {
+      display: grid;
+      gap: 12px;
+      grid-template-rows: auto auto minmax(220px, 1fr);
+      min-height: 0;
+    }
+    .device-form-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) repeat(3, 132px);
+      gap: 10px;
+      align-items: center;
+    }
+    .device-list-card {
+      min-height: 260px;
+      display: grid;
+      align-content: start;
+    }
+    .pair-actions {
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+    }
+    .peer {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-card);
+      padding: 11px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      background: var(--field);
+      color: var(--ink);
+      text-align: left;
+    }
+    .peer.selected {
+      border-color: rgba(34,197,94,.58);
+      box-shadow: inset 3px 0 0 var(--blue);
+    }
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      color: var(--green);
+      font-size: 12px;
+      font-weight: 900;
+      white-space: nowrap;
+    }
+    .status:before {
+      content: "";
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 0 4px rgba(18,184,134,.12);
+    }
+    .status.warn { color: var(--yellow); }
+    .status.warn:before { background: var(--yellow); }
+    .status.off { color: var(--red); }
+    .status.off:before { background: var(--red); }
+    .input {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-pill);
+      min-height: 44px;
+      padding: 10px 16px;
+      background: var(--field);
+      color: var(--ink);
+      outline: none;
+    }
+    .input:focus {
+      border-color: var(--blue);
+      box-shadow: 0 0 0 3px rgba(34,197,94,.12);
+    }
+    .manual-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 132px;
+      gap: 12px;
+      align-items: center;
+    }
+    .log-line {
+      border-radius: var(--radius-card);
+      padding: 9px 10px;
+      background: var(--field);
+      color: var(--muted);
+      font-family: var(--font-data);
+      font-size: 12px;
+      line-height: 1.45;
+      word-break: break-word;
+    }
+    .tray-panel {
+      border-left: 1px solid var(--line);
+      border-radius: 0;
+      padding: 20px 16px;
+      display: grid;
+      align-content: start;
+      gap: 12px;
+      background: var(--tray-bg);
+    }
+    .compact-card {
+      border: 1px solid var(--line);
+      background: rgba(22,34,49,.96);
+      color: var(--ink);
+      border-radius: var(--radius-card);
+      padding: 12px;
+      box-shadow: 0 18px 46px rgba(22,32,43,.22);
+    }
+    .compact-card .status {
+      color: #8cebc8;
+    }
+    .compact-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 11px 0;
+      border-bottom: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .compact-row b {
+      color: var(--ink);
+    }
+    .compact-row:last-of-type {
+      border-bottom: 0;
+    }
+    .tray-note {
+      border: 1px dashed var(--line);
+      border-radius: var(--radius-card);
+      padding: 14px;
+      color: var(--muted);
+      line-height: 1.75;
+      background: var(--field);
+    }
+    .toast {
+      padding: 11px 12px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .hidden {
+      display: none;
+    }
+    @media (max-width: 1100px) {
+      main {
+        align-content: start;
+      }
+      .app {
+        grid-template-columns: 220px minmax(0, 1fr);
+      }
+      .tray-panel {
+        grid-column: 1 / -1;
+        border-left: 0;
+        border-top: 1px solid var(--line);
+      }
+    }
+    @media (max-width: 760px) {
+      .app,
+      .content-grid,
+      .topline,
+      .device-form-row {
+        grid-template-columns: 1fr;
+        display: grid;
+      }
+      .sidebar {
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+      .metrics {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+    @media (max-width: 520px) {
+      main {
+        width: min(100% - 20px, 1080px);
+        padding: 16px 0;
+      }
+      .metrics {
+        grid-template-columns: 1fr;
+      }
+      .top-actions,
+      .inline-actions,
+      .pair-actions,
+      .tray-actions {
+        display: grid;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="shell">
+      <div class="windowbar">
+        <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+        <span>LAN Clipboard Sync · UI UX Pro Max · Dark Tray Console Glass</span>
+      </div>
+      <div class="app">
+        <aside class="sidebar">
+          <div class="brand">
+            <strong>剪贴板同步</strong>
+            <span>局域网剪贴板同步工具</span>
+          </div>
+          <nav class="nav" aria-label="主导航">
+            <button class="nav-item" data-view="overview" type="button">总览</button>
+            <button class="nav-item" data-view="devices" type="button">设备连接</button>
+            <button class="nav-item" data-view="history" type="button">剪贴历史</button>
+            <button class="nav-item" data-view="settings" type="button">设置</button>
+          </nav>
+          <div class="side-card">
+            <span class="side-label">本机端口</span>
+            <b id="sidePort">8765</b>
+            <span class="small" id="sideUrl">等待局域网设备连接</span>
+            <span class="status off" id="sideStatus">未启动</span>
+          </div>
+        </aside>
+
+        <section class="main-panel" id="viewRoot" aria-live="polite"></section>
+
+        <aside class="tray-panel" id="compactPanel">
+          <div class="toast">
+            当前预览按优化方案重排：总览状态、单一主操作、设备卡片和同步流。真实同步仍由 Python 桌面程序负责。
+          </div>
+          <div class="compact-card">
+            <div class="topline">
+              <h1>剪贴板同步</h1>
+              <span class="status off" id="compactStatus">未启动</span>
+            </div>
+            <div class="compact-row"><span>已连接设备</span><b id="compactPeers">0</b></div>
+            <div class="compact-row"><span>最近延迟</span><b id="compactLatency">0 ms</b></div>
+            <div class="compact-row"><span>监听端口</span><b id="compactPort">8765</b></div>
+            <div class="tray-actions">
+              <button class="btn" id="compactPause" type="button">暂停/恢复</button>
+              <button class="btn" id="compactOpen" type="button">打开面板</button>
+            </div>
+          </div>
+          <div class="toast" id="toast">就绪。</div>
+        </aside>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const state = {
+      view: "overview",
+      running: false,
+      paused: false,
+      port: 8765,
+      deviceId: "ui-device",
+      selectedPeer: "",
+      peers: [
+        { name: "device-b", address: "ws://192.168.1.20:8765/", state: "重连中" }
+      ],
+      logs: [
+        "[info] UI 已加载，左侧导航可点击",
+        "[info] 连接和剪贴日志会显示设备连接、文本复制和图片复制"
+      ],
+      syncs: 0,
+      duplicates: 0,
+      latency: 0
+    };
+
+    const viewRoot = document.getElementById("viewRoot");
+    const toast = document.getElementById("toast");
+
+    function statusLabel() {
+      if (!state.running) return "未启动";
+      if (state.paused) return "已暂停";
+      if (onlineCount() === 0) return "未连接设备";
+      return "同步中";
+    }
+
+    function statusKey() {
+      if (!state.running) return "stopped";
+      if (state.paused) return "degraded";
+      if (onlineCount() === 0) return "disconnected";
+      return "running";
+    }
+
+    function statusDisplay() {
+      return statusLabel();
+    }
+
+    function onlineCount() {
+      return state.running && !state.paused ? state.peers.length : 0;
+    }
+
+    function normalizePeer(value) {
+      const text = value.trim();
+      if (!text) return "";
+      if (text.startsWith("ws://")) return text.endsWith("/") ? text : `${text}/`;
+      const hasPort = text.includes(":");
+      return `ws://${text}${hasPort ? "" : `:${state.port}`}/`;
+    }
+
+    function peerName(address) {
+      return address.replace("ws://", "").replace("/", "");
+    }
+
+    function log(message, level = "info") {
+      state.logs.unshift(`[${level}] ${message}`);
+      state.logs = state.logs.slice(0, 40);
+      toast.textContent = message;
+    }
+
+    function switchView(view) {
+      state.view = view;
+      render();
+    }
+
+    function setRunning(next) {
+      state.running = next;
+      if (!next) state.paused = false;
+      if (next) {
+        state.syncs += 1;
+        state.latency = state.peers.length ? 42 : 0;
+        log(`同步服务已启动：端口 ${state.port}`);
+        log("本机复制图片，准备同步");
+      } else {
+        state.latency = 0;
+        log("同步服务已停止");
+      }
+      render();
+    }
+
+    function togglePause() {
+      if (!state.running) {
+        log("请先开始同步", "warn");
+        render();
+        return;
+      }
+      state.paused = !state.paused;
+      log(state.paused ? "同步已暂停" : "同步已恢复");
+      render();
+    }
+
+    function addPeerFromInput() {
+      const input = document.getElementById("peerInput");
+      const peer = normalizePeer(input ? input.value : "");
+      if (!peer) {
+        log("请输入设备地址", "warn");
+        return;
+      }
+      if (!state.peers.some(item => item.address === peer)) {
+        state.peers.push({ name: peerName(peer), address: peer, state: state.running && !state.paused ? "在线" : "重连中" });
+        state.selectedPeer = peer;
+        log(`已添加设备：${peerName(peer)}`);
+      }
+      render();
+    }
+
+    function removeSelectedPeer() {
+      if (!state.selectedPeer) {
+        log("请先选择要移除的设备", "warn");
+        return;
+      }
+      state.peers = state.peers.filter(peer => peer.address !== state.selectedPeer);
+      log(`已移除设备：${peerName(state.selectedPeer)}`);
+      state.selectedPeer = "";
+      render();
+    }
+
+    function clearPeers() {
+      state.peers = [];
+      state.selectedPeer = "";
+      log("已清空设备列表");
+      render();
+    }
+
+    function clearLogs() {
+      state.logs = [];
+      log("剪贴历史已清空");
+      render();
+    }
+
+    async function copyLogs() {
+      const text = state.logs.join("\n");
+      try {
+        await navigator.clipboard.writeText(text);
+        log("剪贴历史已复制到剪贴板");
+      } catch {
+        log("浏览器未允许复制，可手动选择日志内容", "warn");
+      }
+      render();
+    }
+
+    function saveSettings() {
+      const portInput = document.getElementById("portInput");
+      const deviceInput = document.getElementById("deviceInput");
+      const port = Number(portInput ? portInput.value : state.port);
+      if (!Number.isInteger(port) || port < 1 || port > 65535) {
+        log("端口必须是 1 到 65535 之间的数字", "error");
+        return;
+      }
+      if (state.running) {
+        log("运行中不能修改端口，请先断开全部", "error");
+        return;
+      }
+      state.port = port;
+      state.deviceId = deviceInput && deviceInput.value.trim() ? deviceInput.value.trim() : state.deviceId;
+      log(`设置已保存：端口 ${state.port}`);
+      render();
+    }
+
+    function discoverDevices() {
+      log("自动发现会在后续版本开启；当前请手动输入设备 IP。");
+      render();
+    }
+
+    function scanQr() {
+      log("扫码配对会在后续版本开启；当前请手动输入设备 IP。");
+      render();
+    }
+
+    function openCompact() {
+      document.getElementById("compactPanel").scrollIntoView({ behavior: "smooth", block: "nearest" });
+      log("已打开托盘小浮窗");
+    }
+
+    function statusStripHtml() {
+      return `
+        <div class="metrics">
+          <div class="metric" data-state="${statusKey()}"><b>${statusDisplay()}</b><span>状态</span></div>
+          <div class="metric"><b>${onlineCount()}</b><span>已连接设备</span></div>
+          <div class="metric"><b>${state.latency} ms</b><span>最近延迟</span></div>
+        </div>`;
+    }
+
+    function overviewMetricsHtml() {
+      return `
+        <div class="metrics">
+          <div class="metric"><b>${onlineCount()}</b><span>在线设备</span></div>
+          <div class="metric"><b>${state.latency} ms</b><span>最近同步延迟</span></div>
+          <div class="metric"><b>${state.syncs}</b><span>今日同步次数</span></div>
+          <div class="metric"><b>${state.duplicates}</b><span>循环拦截</span></div>
+        </div>`;
+    }
+
+    function primaryActionHtml() {
+      const actionId = state.running ? "stopSync" : "startSync";
+      const actionClass = state.running ? "btn danger" : "btn primary";
+      const actionText = state.running ? "停止同步" : "开始同步";
+      return `
+        <div class="card">
+          <div class="topline">
+            <div>
+              <h3>剪贴板同步</h3>
+              <div class="small">添加同一局域网内的设备后，点击主按钮同步文本和图片剪贴板。</div>
+            </div>
+            <button class="${actionClass}" id="${actionId}" type="button">${actionText}</button>
+          </div>
+        </div>`;
+    }
+
+    function deviceCardsHtml() {
+      if (!state.peers.length) {
+        return `<div class="log-line">暂无连接设备<br>输入对方 IP 后点击“添加设备”</div>`;
+      }
+      return state.peers.map(peer => {
+        const active = peer.address === state.selectedPeer ? " selected" : "";
+        const stateClass = state.running && !state.paused ? "" : " warn";
+        const label = state.running && !state.paused ? "在线" : peer.state;
+        return `
+          <button class="peer${active}" data-peer="${peer.address}" type="button">
+            <span><strong>${peer.name}</strong><br><span class="small">最近同步：暂无 · ${peerName(peer.address)}</span></span>
+            <span class="status${stateClass}">${label}</span>
+          </button>`;
+      }).join("");
+    }
+
+    function activityStreamHtml() {
+      if (!state.logs.length) {
+        return `<div class="log-line">开始同步后会显示连接和剪贴板日志</div>`;
+      }
+      return state.logs.map(item => `<div class="log-line">${item}</div>`).join("");
+    }
+
+    function manualConnectHtml() {
+      return `
+        <div class="card overview-card">
+            <h3>手动连接</h3>
+            <div class="form-grid">
+            <label class="field-label" for="peerInput">输入对方 IP</label>
+            <div class="manual-row">
+              <input class="input" id="peerInput" value="192.168.1.20">
+              <button class="btn primary" id="addPeer" type="button">连接</button>
+            </div>
+          </div>
+        </div>`;
+    }
+
+    function recentEventsHtml() {
+      return `<div class="card recent-events-card"><h3>连接和剪贴日志</h3><div class="log-list">${activityStreamHtml()}</div></div>`;
+    }
+
+    function compactFloatingHtml() {
+      return `
+        <div class="compact-card">
+          <div class="topline"><h1>剪贴板同步</h1><span class="status">${statusLabel()}</span></div>
+          <div class="compact-row"><span>已连接设备</span><b>${onlineCount()}</b></div>
+          <div class="compact-row"><span>最近延迟</span><b>${state.latency} ms</b></div>
+          <div class="compact-row"><span>监听端口</span><b>${state.port}</b></div>
+          <div class="tray-actions"><button class="btn" id="compactPause" type="button">暂停</button><button class="btn" id="compactOpen" type="button">打开面板</button></div>
+        </div>`;
+    }
+
+    function overviewView() {
+      return `
+        <div class="topline">
+          <div>
+            <h2>同步状态</h2>
+            <div class="small">正在监听本机剪贴板，收到远端文本和图片后自动写入。</div>
+          </div>
+          <div class="top-actions">
+            ${state.running ? `<button class="btn danger" id="stopSync" type="button">停止同步</button>` : `<button class="btn primary" id="startSync" type="button">开始同步</button>`}
+            <button class="btn" id="pauseSync" type="button">${state.paused ? "恢复" : "暂停"}</button>
+          </div>
+        </div>
+        ${overviewMetricsHtml()}
+        <div class="content-grid">
+          <div class="card overview-card"><h3>已连接设备</h3><div class="peer-list">${deviceCardsHtml()}</div></div>
+          ${manualConnectHtml()}
+          ${recentEventsHtml()}
+        </div>`;
+    }
+
+    function devicesView() {
+      return `
+        <div class="topline">
+          <div>
+            <h2>设备连接</h2>
+            <div class="small">用对方 IP 连接局域网内的电脑，添加后回到总览开始同步。</div>
+          </div>
+        </div>
+        <div class="devices-stack">
+          <div class="card">
+            <div class="topline">
+              <div>
+                <h3>快速配对</h3>
+                <div class="small">当前版本使用手动 IP 连接；自动发现和扫码配对会在后续版本开启。</div>
+              </div>
+              <div class="pair-actions">
+                <button class="btn" id="discoverDevices" type="button">自动发现</button>
+                <button class="btn" id="scanQr" type="button">扫码配对</button>
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="topline">
+              <h3>添加设备</h3>
+              <div class="small">输入对方 IP</div>
+            </div>
+            <div class="device-form-row">
+              <input class="input" id="peerInput" value="192.168.1.20">
+              <button class="btn primary" id="addPeer" type="button">添加设备</button>
+              <button class="btn" id="removePeer" type="button">移除选中</button>
+              <button class="btn danger" id="clearPeers" type="button">清空列表</button>
+            </div>
+            <div class="small">可以输入 IP 或 host:port，程序会自动补全连接地址。</div>
+          </div>
+          <div class="card device-list-card"><h3>设备列表</h3><div class="peer-list">${deviceCardsHtml()}</div></div>
+        </div>`;
+    }
+
+    function historyView() {
+      return `
+        <div class="topline">
+          <div>
+            <h2>剪贴历史</h2>
+            <div class="small">查看最近的剪贴同步记录和连接反馈。</div>
+          </div>
+          <div class="top-actions">
+            <button class="btn" id="clearLogs" type="button">清空历史</button>
+            <button class="btn primary" id="copyLogs" type="button">复制历史</button>
+          </div>
+        </div>
+        ${statusStripHtml()}
+        <div class="card"><h3>同步记录</h3><div class="log-list">${activityStreamHtml()}</div></div>`;
+    }
+
+    function settingsView() {
+      return `
+        <div class="topline">
+          <div>
+            <h2>设置</h2>
+            <div class="small">调整设备 ID、端口和日常运行选项。</div>
+          </div>
+          <div class="top-actions">
+            <button class="btn" id="openCompact" type="button">托盘小浮窗</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="form-grid">
+            <label class="field-label" for="deviceInput">设备 ID</label>
+            <input class="input" id="deviceInput" value="${state.deviceId}">
+            <label class="field-label" for="portInput">监听端口</label>
+            <input class="input" id="portInput" value="${state.port}">
+            <button class="btn primary" id="saveSettings" type="button">保存设置</button>
+            <div class="small">运行中修改端口需要先“断开全部”。</div>
+          </div>
+        </div>
+        <div class="card"><h3>本机入口</h3><div class="log-line">端口 ${state.port} · 等待局域网设备连接</div></div>`;
+    }
+
+    function bindControls() {
+      document.querySelectorAll("[data-view]").forEach(button => {
+        button.addEventListener("click", () => switchView(button.dataset.view));
+      });
+      document.querySelectorAll("[data-peer]").forEach(button => {
+        button.addEventListener("click", () => {
+          state.selectedPeer = button.dataset.peer;
+          render();
+        });
+      });
+
+      const handlers = {
+        startSync: () => setRunning(true),
+        pauseSync: togglePause,
+        stopSync: () => setRunning(false),
+        openCompact,
+        addPeer: addPeerFromInput,
+        removePeer: removeSelectedPeer,
+        clearPeers,
+        clearLogs,
+        copyLogs,
+        saveSettings,
+        discoverDevices,
+        scanQr,
+        compactPause: togglePause,
+        compactOpen: () => switchView("overview")
+      };
+      Object.entries(handlers).forEach(([id, handler]) => {
+        const element = document.getElementById(id);
+        if (element) element.addEventListener("click", handler);
+      });
+    }
+
+    function renderChrome() {
+      document.querySelectorAll("[data-view]").forEach(button => {
+        button.classList.toggle("active", button.dataset.view === state.view);
+      });
+      const status = statusLabel();
+      document.getElementById("sidePort").textContent = state.port;
+      document.getElementById("sideUrl").textContent = "等待局域网设备连接";
+      document.getElementById("compactPort").textContent = state.port;
+      document.getElementById("compactPeers").textContent = onlineCount();
+      document.getElementById("compactLatency").textContent = `${state.latency} ms`;
+      ["sideStatus", "compactStatus"].forEach(id => {
+        const element = document.getElementById(id);
+        element.textContent = status;
+        element.className = `status ${state.running ? (state.paused ? "warn" : "") : "off"}`;
+      });
+    }
+
+    function render() {
+      const views = {
+        overview: overviewView,
+        devices: devicesView,
+        history: historyView,
+        settings: settingsView
+      };
+      viewRoot.innerHTML = views[state.view]();
+      renderChrome();
+      bindControls();
+    }
+
+    render();
+  </script>
+</body>
+</html>
