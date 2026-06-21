@@ -1,150 +1,89 @@
-# LAN Clipboard Sync MVP
+# 剪贴板同步
 
-这是一个局域网文本和图片剪贴板同步工具。当前实现遵循 `clipboard-sync-design.md`，只使用 Python 标准库，不需要安装第三方依赖。
+剪贴板同步是一款用于局域网内多台 Windows 设备之间共享剪贴板内容的桌面工具。启动后，设备可以在同一网络内同步文本和图片剪贴板，适合在两台电脑之间临时传输文字、截图和常用片段。
 
-## 功能
-- 监听本机文本和图片剪贴板。
-- 通过 `ws://` WebSocket 发送剪贴板更新。
-- 默认监听端口 `8765`。
-- 通过 `--peer` 手动连接其他设备，UI 内会显示为“设备地址 / IP”。
-- 使用消息 ID 和内容 hash 去重，避免循环同步。
-- 对不可用的设备连接自动重连。
+## 产品简介
 
-## 运行要求
-- Python 3.14 或兼容的 Python 3 运行时。
-- 当前 MVP 的系统剪贴板适配器仅支持 Windows：文本使用 PowerShell 的 `Get-Clipboard` / `Set-Clipboard`，图片使用 Windows 剪贴板 API 读写 PNG。
-- 两台设备需要在同一个局域网内互相可达。Windows 防火墙可能需要放行 TCP `8765` 端口。
+本工具采用本地局域网直连方式工作，不依赖云端中转。用户在需要同步的设备上分别启动程序，并在其中一台设备中输入另一台设备的局域网 IP 地址，即可建立连接。
 
-## 运行方式
+程序默认监听端口为 `8765`。如果所在网络或防火墙策略需要使用其他端口，可以在“设置”页面修改监听端口。
 
-### 桌面 UI
+## 主要功能
 
-打开 A+C 混合版桌面控制台：
+- 同步文本剪贴板内容。
+- 同步图片剪贴板内容。
+- 手动添加局域网内的另一台设备。
+- 显示已连接设备、同步状态和最近日志。
+- 支持自定义设备 ID，便于在多设备环境中识别来源。
+- 最小化后可使用小浮窗查看状态并快速恢复主面板。
 
-```powershell
-python -m lan_clipboard_sync.ui
-```
+## 适用环境
 
-带设备 ID 和对端设备启动：
+- 操作系统：Windows 10 或 Windows 11。
+- 网络环境：两台设备需处于同一局域网，并且可以互相访问。
+- 防火墙：首次运行时如出现网络访问提示，请允许程序访问专用网络。
 
-```powershell
-python -m lan_clipboard_sync.ui --device-id device-a --peer 192.168.1.20
-```
+## 快速开始
 
-桌面 UI 使用 Python 标准库 `tkinter` 实现，当前是 **UI UX Pro Max / Dark Tray Console Glass** 深色毛玻璃主题：窗口默认 `1120x680`，使用 Windows Mica/深色玻璃面板、绿色主操作、绿色在线状态和紧凑卡片间距。整窗保持不透明以避免背景文字干扰阅读，玻璃感由系统背景和面板层级承担。字体系统使用 `Microsoft YaHei UI` 承担中文界面，`Cascadia Mono` 承担日志数字。
+1. 在两台需要同步的电脑上分别启动 `LanClipboardSync.exe`。
+2. 在其中一台电脑打开“设备连接”或“总览”页面。
+3. 在“输入对方 IP”处填写另一台电脑的局域网 IPv4 地址，例如 `192.168.1.20`。
+4. 点击“连接”或“添加设备”。
+5. 返回“总览”页面，点击“开始同步”。
 
-当前 UI 已按 `clipboard_ui_optimization.md` 重排为四个页面：
+连接建立后，在任一设备复制文本或图片，另一台设备会自动写入剪贴板。
 
-- **总览**：同步状态、开始/停止同步主按钮、已连接设备、手动连接和连接/剪贴日志。
-- **设备连接**：手动输入“设备地址 / IP”，添加、移除或清空设备。
-- **剪贴历史**：查看、清空和复制连接与剪贴同步记录。
-- **设置**：调整设备 ID、监听端口和紧凑状态入口。
+## 连接另一台设备
 
-“自动发现”和“扫码配对”按钮会给出后续版本提示；当前不会伪装成已实现，仍需要手动输入设备 IP。真正系统托盘会作为后续增强。
-
-如果只想看可交互 UI 预览，可以打开本地预览页：
-
-```text
-http://localhost:61237/
-```
-
-预览页用于查看和点击 UI 交互，不承担真实剪贴板同步；真实同步请运行上面的 `python -m lan_clipboard_sync.ui`。预览页与桌面 UI 使用同一套 Pro Max 深色毛玻璃主题方向，其中浏览器预览页使用真实 CSS `backdrop-filter` 毛玻璃效果，桌面 Tkinter 版使用 Windows Mica 加深色玻璃面板来接近同一视觉风格。
-
-### 命令行模式
-
-在设备 B 上启动监听：
-
-```powershell
-python -m lan_clipboard_sync --device-id device-b
-```
-
-在设备 A 上连接设备 B：
-
-```powershell
-python -m lan_clipboard_sync --device-id device-a --peer 192.168.1.20
-```
-
-把 `192.168.1.20` 换成设备 B 的局域网 IPv4 地址。可以在设备 B 的 PowerShell 里运行下面的命令查看：
+如需查看本机局域网 IP 地址，可以在 Windows 的 PowerShell 或命令提示符中运行：
 
 ```powershell
 ipconfig
 ```
 
-`--peer` 支持裸 IP、`host:port`，也支持完整的 `ws://` URL：
+找到当前网络适配器下的 IPv4 地址，并在另一台设备中输入该地址。
 
-```powershell
-python -m lan_clipboard_sync --peer 192.168.1.20 --peer ws://192.168.1.21:8765/
-```
-
-常用参数：
+默认情况下，只需要输入 IP 地址即可。程序会自动使用默认端口 `8765` 进行连接。如果对方修改了端口，可以输入带端口的地址，例如：
 
 ```text
---host 0.0.0.0            服务端绑定地址。
---port 8765               服务端 WebSocket 端口。
---poll-interval 0.1       剪贴板轮询间隔，单位秒。
---reconnect-delay 2.0     对端设备断开后的重连间隔，单位秒。
---device-id NAME          当前设备在同步消息中的稳定标识。
---verbose                 启用调试日志。
+192.168.1.20:9000
 ```
 
-## 测试
+## 修改设备 ID 和端口
 
-```powershell
-python -m unittest discover -v
-python -m lan_clipboard_sync --help
-python -m lan_clipboard_sync.ui --help
-```
+打开“设置”页面后，可以修改以下内容：
 
-## 打包为 Windows 程序
+- 设备 ID：用于在连接日志和设备列表中显示当前设备名称。
+- 监听端口：用于接收其他设备连接，默认值为 `8765`。
 
-项目已提供 Windows 打包脚本，使用 PyInstaller 生成可双击运行的桌面程序：
+修改后点击“保存设置”。如果程序正在同步中，需要先停止同步，再修改设备 ID 或端口。
 
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\package_windows.ps1
-```
+## 使用注意事项
 
-如果旧版 `dist\LanClipboardSync.exe` 正在运行，先关闭它，或使用：
+- 请确认两台设备处于同一局域网，例如连接到同一个路由器或同一个 Wi-Fi。
+- 如果无法连接，请检查 Windows 防火墙是否允许程序访问专用网络。
+- 设备 ID 建议使用易识别的名称，例如 `office-pc`、`laptop-a`。
+- 图片同步会占用更多网络带宽，较大的截图可能需要稍等片刻。
+- 本工具用于局域网内设备协作，请勿在不可信网络中开放监听端口。
 
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\package_windows.ps1 -StopRunning
-```
+## 常见问题
 
-打包产物：
+### 连接后没有同步怎么办？
+
+请确认两台设备都已经启动程序，并且至少一台设备点击了“开始同步”。同时检查对方 IP 地址和端口是否填写正确。
+
+### 为什么修改端口后连接不上？
+
+两台设备需要使用一致的端口配置。如果设备 B 将监听端口改为 `9000`，设备 A 连接设备 B 时也需要填写 `设备B的IP:9000`。
+
+### 设备列表里的名称从哪里来？
+
+设备列表优先显示对方设置的设备 ID。未识别到设备 ID 时，会显示对方的网络地址。
+
+## 打包文件
+
+Windows 桌面程序文件位于：
 
 ```text
 dist\LanClipboardSync.exe
 ```
-
-已验证该 `.exe` 可以启动 Tkinter 桌面控制台。首次在两台设备之间同步时，Windows 防火墙可能会询问是否允许局域网访问；需要允许 TCP `8765` 端口或当前程序访问局域网。
-
-## 通信协议
-
-剪贴板消息是 JSON 文本帧：
-
-```json
-{
-  "type": "clipboard",
-  "id": "uuid",
-  "deviceId": "device-A",
-  "timestamp": 1710000000,
-  "format": "text",
-  "content": "hello world"
-}
-```
-
-`format` 当前支持 `text` 和 `image`。图片会在本机剪贴板读取后转成 PNG，并以 base64 字符串放入 `content` 字段同步到对端。
-
-程序也接受：
-
-```json
-{ "type": "ping" }
-{ "type": "pong" }
-```
-
-## MVP 限制
-- 支持文本和图片剪贴板。
-- 暂不支持文件剪贴板。
-- 不支持云端中继或跨公网同步。
-- 不支持自动设备发现。
-- 暂不支持加密或 PIN 配对。
-- 当前系统剪贴板适配器仅支持 Windows。

@@ -985,6 +985,8 @@ class SyncDesktopUi:
     def _build_settings_view(self) -> None:
         self._header("设置", "调整设备 ID、端口和日常运行选项。")
         panel_shell, panel = self._rounded_panel(self.main, padding=22)
+        # settings-form-visible-height-lock: keep editable settings visible inside the rounded canvas panel.
+        panel_shell.configure(height=220)
         panel_shell.grid(row=1, column=0, sticky="new", pady=(14, 0))
         panel.columnconfigure(1, weight=1)
         self.device_id_var.set(self.controller.device_id)
