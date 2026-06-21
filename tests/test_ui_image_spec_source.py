@@ -155,6 +155,8 @@ class UiImageSpecSourceTests(unittest.TestCase):
             'self.controller.apply_settings(port_text=self.port_var.get(), device_id_text=self.device_id_var.get())',
             'RoundedButton(panel, text="保存设置", style="Primary.TButton", command=self._save_settings',
             '调整设备 ID、端口和日常运行选项。',
+            'settings-form-visible-height-lock',
+            'panel_shell.configure(height=220)',
         ):
             self.assertIn(fragment, self.source)
 
