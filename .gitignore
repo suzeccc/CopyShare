@@ -1,15 +1,39 @@
 # Logs
 *.log
+*.pid
+*.err
+*.out
 logs/
 
 # Python caches
 __pycache__/
 *.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments and local config
+.venv/
+venv/
+env/
+.env
+.env.*
+!.env.example
 
 # Local test/browser artifacts
 .playwright-cli/
+.superpowers/
 .superpowers/**/state/
+output/
 
 # PyInstaller intermediate output
 build/
+dist/
 *.spec
+
+# Agent scratch notes
+findings.md
+progress.md
+task_plan.md
