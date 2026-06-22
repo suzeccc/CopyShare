@@ -1,119 +1,105 @@
 # Copy-Sharer
 
-Copy-Sharer 是一款局域网剪贴板共享桌面工具。当前主架构已经重构为 **Rust + Tauri 2 + Vue 3 + TypeScript**：Vue 负责界面，Rust 负责剪贴板、WebSocket、设备状态、历史摘要、托盘和系统集成。
+Copy-Sharer 是一个局域网剪贴板共享工具。两台电脑连接后，在其中一台电脑复制文本，另一台电脑可以自动收到并写入剪贴板。
 
-## MVP 范围
+适合在同一个 Wi-Fi、同一个路由器或同一个局域网环境里使用。
 
-第一版聚焦两台电脑在同一局域网内同步文本剪贴板：
+## 主要功能
 
-- 手动输入对方 IP 和端口连接设备。
-- 监听本机文本剪贴板变化。
-- 通过 WebSocket 发送文本剪贴板消息。
-- 收到远端文本后写入本机剪贴板。
-- 通过 `message_id`、`source_device_id`、`content_hash` 防止同步死循环。
-- 显示总览、设备连接、同步历史和设置页面。
-- 历史记录只保存摘要，不保存完整敏感剪贴板内容。
-- 支持系统托盘和开机自启设置。
+- 在局域网内同步文本剪贴板。
+- 手动输入对方电脑 IP 和端口连接。
+- 显示同步状态、连接设备、最近同步内容。
+- 支持主控制面板和小浮窗切换。
+- 小浮窗可显示连接状态、运行状态、延迟和最近剪贴板内容。
+- 最近同步内容最多显示 5 条，并支持一键复制。
+- 支持开机自启和启动后自动同步设置。
 
-暂不做图片同步、文件同步、云端同步、二维码配对、手机端和公网穿透。
+## 下载安装
 
-## 技术结构
-
-```text
-src/
-  Vue 3 + TypeScript UI
-  Pinia stores
-  Vue Router pages
-  Tauri invoke/event 封装
-
-src-tauri/
-  Rust Tauri 2 后端
-  commands / state / sync / network / clipboard
-  config / history / tray / autostart / security
-```
-
-核心原则：
+打包后的安装文件在：
 
 ```text
-UI 只发命令
-Rust 执行逻辑
-Rust 通过事件通知 UI
+src-tauri\target\release\bundle\nsis\Copy-Sharer_1.0.0_x64-setup.exe
+src-tauri\target\release\bundle\msi\Copy-Sharer_1.0.0_x64_en-US.msi
 ```
 
-## 开发命令
+推荐普通用户使用 `Copy-Sharer_1.0.0_x64-setup.exe` 安装。
 
-安装依赖：
-
-```powershell
-npm.cmd install
-```
-
-启动前端开发服务器：
-
-```powershell
-npm.cmd run dev
-```
-
-启动 Tauri 桌面开发模式：
-
-```powershell
-$env:Path = "$env:USERPROFILE\.cargo\bin;$env:Path"
-npm.cmd run tauri:dev
-```
-
-构建前端：
-
-```powershell
-npm.cmd run build
-```
-
-运行 Rust 测试：
-
-```powershell
-$env:Path = "$env:USERPROFILE\.cargo\bin;$env:Path"
-cd src-tauri
-cargo test
-```
-
-打包桌面应用：
-
-```powershell
-$env:Path = "$env:USERPROFILE\.cargo\bin;$env:Path"
-npm.cmd run tauri:build
-```
-
-## 构建产物
-
-成功打包后会生成：
+也可以直接运行：
 
 ```text
 src-tauri\target\release\copy-sharer.exe
-src-tauri\target\release\bundle\msi\Copy-Sharer_1.0.0_x64_en-US.msi
-src-tauri\target\release\bundle\nsis\Copy-Sharer_1.0.0_x64-setup.exe
 ```
 
-## 使用方式
+## 快速开始
 
-1. 在两台同一局域网内的电脑上启动 Copy-Sharer。
-2. 打开“设备连接”页面。
-3. 在其中一台电脑输入另一台电脑的局域网 IPv4 地址，例如 `192.168.1.20`。
-4. 使用默认端口 `8765`，或输入对方设置中的监听端口。
-5. 点击“连接”。
-6. 回到“总览”页面，点击“开始同步”。
+1. 在两台电脑上都打开 Copy-Sharer。
+2. 确认两台电脑在同一个局域网内。
+3. 在其中一台电脑打开“设备连接”。
+4. 输入另一台电脑的局域网 IP 地址。
+5. 端口保持默认，或填写对方设置里的监听端口。
+6. 点击“连接设备”。
+7. 回到“总览”，点击“开始同步”。
+8. 在任意一台电脑复制文本，另一台电脑即可同步收到。
 
-连接后，在任一设备复制文本，另一台设备会自动写入剪贴板。
+## 如何查看本机地址
+
+打开 Copy-Sharer 后，可以在主面板里看到本机地址。
+
+如果暂时显示“等待网络地址”，请确认电脑已连接网络，然后点击刷新。
+
+## 小浮窗
+
+点击顶部的“切换浮窗”可以进入小浮窗模式。
+
+小浮窗会显示：
+
+- 当前是否启动同步。
+- 已连接设备数量。
+- 网络延迟状态。
+- 最近剪贴板内容。
+
+点击“小浮窗”里的“主面板”可以回到完整控制面板。
 
 ## 安全说明
 
-- 本工具默认面向局域网使用，请勿在不可信网络中开放监听端口。
-- MVP 只同步文本，后续再扩展图片和文件。
-- 历史页面只保存文本摘要，避免长期明文保存敏感剪贴板内容。
-- 首次连接陌生设备应通过“信任设备”流程确认。
+- Copy-Sharer 面向局域网使用，不建议在公共网络或不可信网络中使用。
+- 当前版本主要同步文本剪贴板。
+- 剪贴板内容可能包含密码、验证码或隐私信息，使用前请确认连接设备可信。
+- 连接陌生设备前，请先确认对方设备来源。
+- 不需要同步时，可以点击“停止同步”。
 
-## 验证记录
+## 常见问题
 
-本次重构和清理后已通过：
+### 连接不上怎么办？
 
-- `npm.cmd ci --prefer-offline`
-- `npm.cmd run build`
-- `cargo test`
+请检查：
+
+- 两台电脑是否在同一个局域网。
+- 对方电脑是否已经打开 Copy-Sharer。
+- IP 地址是否填写正确。
+- 端口是否和对方设置里的监听端口一致。
+- Windows 防火墙是否拦截了应用。
+
+### 为什么没有同步？
+
+请检查：
+
+- 主面板状态是否为“同步中”。
+- 两台设备是否已经连接。
+- 是否复制的是文本内容。
+- 对方设备是否正在运行 Copy-Sharer。
+
+### 浮窗能不能拖动？
+
+可以。浮窗只支持拖动顶部区域，内容列表和按钮区域不会拖动窗口。
+
+### 主窗口哪里可以拖动？
+
+主窗口只支持拖动最上方标题栏。
+
+## 当前版本
+
+当前版本：`1.0.0`
+
+当前版本重点支持局域网文本剪贴板同步。图片同步、文件同步和跨网络同步暂未开放。
