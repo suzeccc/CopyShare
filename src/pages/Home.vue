@@ -1,113 +1,224 @@
 <script setup lang="ts">
-import { Clock, Monitor, Network, Settings } from "lucide-vue-next";
+import { FileText, FolderOpen, Image as ImageIcon, Monitor, Network, Settings } from "lucide-vue-next";
 import { computed } from "vue";
 import { RouterLink } from "vue-router";
 
-import StatusCard from "@/components/status/StatusCard.vue";
 import SyncSwitch from "@/components/status/SyncSwitch.vue";
-import Card from "@/components/ui/Card.vue";
 import Button from "@/components/ui/Button.vue";
-import HistoryItem from "@/components/history/HistoryItem.vue";
+import Card from "@/components/ui/Card.vue";
+import CopyTextButton from "@/components/ui/CopyTextButton.vue";
 import { formatTime } from "@/lib/format";
+import { CLIPBOARD_PREVIEW_LIMIT, getRecentClipboardItems } from "@/lib/historyPreview";
+import { useConfigStore } from "@/stores/config";
 import { useHistoryStore } from "@/stores/history";
 import { useStatusStore } from "@/stores/status";
 
 const statusStore = useStatusStore();
+const configStore = useConfigStore();
 const historyStore = useHistoryStore();
 
 const address = computed(() => {
-  const ip = statusStore.status.localIp || "未获取";
-  return `${ip}:${statusStore.status.port}`;
+  const ip = statusStore.status.localIp;
+  return ip ? `${ip}:${statusStore.status.port}` : "等待网络地址";
 });
 
-const latestItems = computed(() => historyStore.items.slice(0, 3));
+const syncContentItems = computed(() => [
+  {
+    label: "文本剪贴板",
+    hint: "复制文本后自动广播给已信任设备",
+    state: configStore.config.syncText ? "已启用" : "已关闭",
+    enabled: configStore.config.syncText,
+    icon: FileText,
+  },
+  {
+    label: "图片",
+    hint: "后续版本支持图片剪贴板",
+    state: "暂未开放",
+    enabled: false,
+    icon: ImageIcon,
+  },
+  {
+    label: "文件",
+    hint: "后续版本支持文件列表同步",
+    state: "暂未开放",
+    enabled: false,
+    icon: FolderOpen,
+  },
+]);
+
+const recentSyncItems = computed(() => getRecentClipboardItems(historyStore.items));
 </script>
 
 <template>
-  <div class="grid gap-6">
-    <section class="grid gap-5 lg:grid-cols-[1.25fr_0.75fr]">
+  <div class="grid gap-4">
+    <section class="grid gap-4">
       <Card>
-        <div class="flex flex-wrap items-start justify-between gap-5">
-          <div>
-            <p class="text-xs font-medium text-blue-200">局域网剪贴板同步</p>
-            <h2 class="mt-2 text-2xl font-semibold text-white">Copy-Sharer</h2>
-            <p class="mt-3 max-w-2xl text-sm leading-6 text-slate-400">
-              监听本机文本剪贴板，通过 WebSocket 同步给已信任的局域网设备。
-              MVP 阶段默认只开放文本同步，图片和文件保留为后续能力。
-            </p>
+        <div class="flex h-full flex-col justify-between gap-5">
+          <div class="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p class="text-xs font-medium text-blue-200">局域网剪贴板同步</p>
+              <h2 class="mt-2 text-2xl font-semibold text-white">Copy-Sharer</h2>
+              <p class="mt-3 max-w-2xl text-sm leading-6 text-slate-400">
+                监听本机文本剪贴板，通过 WebSocket 同步给已信任的局域网设备。
+              </p>
+            </div>
+            <SyncSwitch
+              :running="statusStore.status.running"
+              :loading="statusStore.loading"
+              @start="statusStore.start()"
+              @stop="statusStore.stop()"
+            />
           </div>
-          <SyncSwitch
-            :running="statusStore.status.running"
-            :loading="statusStore.loading"
-            @start="statusStore.start()"
-            @stop="statusStore.stop()"
-          />
+
+          <div class="grid gap-3 lg:grid-cols-3">
+            <div class="rounded-lg border border-[color:var(--main-line-soft)] bg-[rgba(28,49,84,0.8)] px-4 py-3">
+              <p class="text-xs text-slate-500">同步状态</p>
+              <p class="mt-1.5 text-xl font-semibold text-white">{{ statusStore.statusLabel }}</p>
+            </div>
+            <div class="rounded-lg border border-[color:var(--main-line-soft)] bg-[rgba(28,49,84,0.8)] px-4 py-3">
+              <p class="text-xs text-slate-500">已连接设备</p>
+              <p class="mt-1.5 text-xl font-semibold text-white">{{ statusStore.status.connectedCount }} 台</p>
+            </div>
+            <div class="rounded-lg border border-[color:var(--main-line-soft)] bg-[rgba(28,49,84,0.8)] px-4 py-3">
+              <p class="text-xs text-slate-500">最近同步</p>
+              <p class="mt-1.5 truncate text-xl font-semibold text-white">{{ formatTime(statusStore.status.lastSyncAt) }}</p>
+            </div>
+          </div>
         </div>
+
         <p v-if="statusStore.error" class="mt-4 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-100">
           {{ statusStore.error }}
         </p>
       </Card>
+    </section>
 
+    <section class="grid gap-3 md:grid-cols-[1fr_1fr]">
+      <Card compact>
+        <div class="flex h-full flex-col justify-between gap-4">
+          <div class="flex items-center justify-between gap-3">
+            <p class="text-base font-semibold text-white">快速操作</p>
+            <p class="truncate text-xs text-slate-500">常用入口</p>
+          </div>
+          <div class="grid gap-3 sm:grid-cols-3">
+            <RouterLink
+              to="/devices"
+              class="group flex min-h-16 items-center justify-center gap-3 rounded-lg border border-[color:var(--main-line)] bg-[color:var(--main-bg-muted)] px-3 py-3 text-sm font-semibold text-white transition hover:border-sky-300/60 hover:bg-[#284771]"
+            >
+              <span class="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-sky-400/[0.12] text-sky-100 ring-1 ring-sky-300/30 transition group-hover:bg-sky-400/20">
+                <Network class="h-5 w-5" />
+              </span>
+              <span class="whitespace-nowrap">连接设备</span>
+            </RouterLink>
+            <RouterLink
+              to="/logs"
+              class="group flex min-h-16 items-center justify-center gap-3 rounded-lg border border-[color:var(--main-line-soft)] bg-[rgba(28,49,84,0.8)] px-3 py-3 text-sm font-semibold text-slate-200 transition hover:border-sky-300/50 hover:bg-[color:var(--main-bg-muted)] hover:text-white"
+            >
+              <span class="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-white/[0.06] text-slate-100 ring-1 ring-white/10 transition group-hover:bg-sky-400/[0.14] group-hover:text-sky-100">
+                <Monitor class="h-5 w-5" />
+              </span>
+              <span class="whitespace-nowrap">日志</span>
+            </RouterLink>
+            <RouterLink
+              to="/settings"
+              class="group flex min-h-16 items-center justify-center gap-3 rounded-lg border border-[color:var(--main-line-soft)] bg-[rgba(28,49,84,0.8)] px-3 py-3 text-sm font-semibold text-slate-200 transition hover:border-sky-300/50 hover:bg-[color:var(--main-bg-muted)] hover:text-white"
+            >
+              <span class="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-white/[0.06] text-slate-100 ring-1 ring-white/10 transition group-hover:bg-sky-400/[0.14] group-hover:text-sky-100">
+                <Settings class="h-5 w-5" />
+              </span>
+              <span class="whitespace-nowrap">设置</span>
+            </RouterLink>
+          </div>
+        </div>
+      </Card>
+
+      <Card compact>
+        <div class="flex h-full items-start gap-3">
+          <Monitor class="mt-0.5 h-5 w-5 text-blue-300" />
+          <div class="min-w-0 flex-1">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <div class="min-w-0">
+                <p class="truncate text-sm font-medium text-white">{{ statusStore.status.deviceName }}</p>
+                <p class="mt-1 truncate font-mono text-xs text-slate-500">{{ statusStore.status.deviceId }}</p>
+              </div>
+              <span class="rounded-md border border-[color:var(--main-line-soft)] bg-[rgba(28,49,84,0.8)] px-3 py-1 text-sm font-semibold text-slate-200">
+                {{ statusStore.status.running ? "运行中" : "等待启动" }}
+              </span>
+            </div>
+            <div class="mt-2 grid gap-2 text-sm text-slate-300 sm:grid-cols-2">
+              <p class="flex min-w-0 items-center justify-between gap-3 rounded-md bg-[rgba(28,49,84,0.6)] px-3 py-2">
+                <span class="shrink-0 whitespace-nowrap text-slate-500">监听端口</span>
+                <span class="font-mono">{{ statusStore.status.port }}</span>
+              </p>
+              <p class="flex min-w-0 items-center justify-between gap-3 rounded-md bg-[rgba(28,49,84,0.6)] px-3 py-2">
+                <span class="shrink-0 whitespace-nowrap text-slate-500">本机地址</span>
+                <span class="min-w-0 truncate text-right font-mono">{{ address }}</span>
+              </p>
+            </div>
+          </div>
+        </div>
+      </Card>
+    </section>
+
+    <section class="grid gap-4">
       <Card>
-        <p class="text-sm font-medium text-white">快速操作</p>
-        <div class="mt-4 grid gap-2">
-          <RouterLink to="/devices">
-            <Button class="w-full justify-start" variant="secondary">
-              <Network class="h-4 w-4" />
-              手动连接设备
-            </Button>
-          </RouterLink>
+        <div class="mb-5 flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p class="text-sm font-semibold text-white">同步内容</p>
+            <p class="mt-2 text-sm leading-6 text-slate-400">
+              当前版本明确展示可同步内容，避免只在设置里隐藏开关。
+            </p>
+          </div>
           <RouterLink to="/settings">
-            <Button class="w-full justify-start" variant="ghost">
+            <Button size="sm" variant="ghost">
               <Settings class="h-4 w-4" />
-              打开设置
+              内容设置
             </Button>
           </RouterLink>
         </div>
-      </Card>
-    </section>
 
-    <section class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-      <StatusCard label="同步状态" :value="statusStore.statusLabel" :hint="statusStore.status.message || undefined" />
-      <StatusCard label="已连接设备" :value="`${statusStore.status.connectedCount} 台`" hint="仅统计当前会话连接" />
-      <StatusCard label="本机地址" :value="address" hint="同一局域网设备可连接此地址" />
-      <StatusCard label="最近同步" :value="formatTime(statusStore.status.lastSyncAt)" hint="历史只保存内容摘要" />
-    </section>
+        <div class="grid gap-3 md:grid-cols-3">
+          <article
+            v-for="item in syncContentItems"
+            :key="item.label"
+            class="rounded-lg border border-[color:var(--main-line-soft)] bg-[rgba(28,49,84,0.8)] p-4"
+          >
+            <div class="mb-4 flex items-center justify-between gap-3">
+              <div class="grid h-9 w-9 place-items-center rounded-md border border-blue-400/30 bg-blue-500/12">
+                <component :is="item.icon" class="h-4 w-4 text-blue-200" />
+              </div>
+              <span
+                class="rounded-md px-2 py-1 text-xs font-medium"
+                :class="item.enabled ? 'bg-emerald-500/[0.14] text-emerald-200' : 'bg-[rgba(19,34,63,0.68)] text-slate-400'"
+              >
+                {{ item.state }}
+              </span>
+            </div>
+            <p class="text-sm font-semibold text-white">{{ item.label }}</p>
+            <p class="mt-2 text-xs leading-5 text-slate-500">{{ item.hint }}</p>
+          </article>
+        </div>
 
-    <section class="grid gap-5 lg:grid-cols-[0.8fr_1.2fr]">
-      <Card>
-        <div class="flex items-center gap-3">
-          <Monitor class="h-5 w-5 text-blue-300" />
-          <div>
-            <p class="text-sm font-medium text-white">{{ statusStore.status.deviceName }}</p>
-            <p class="mt-1 font-mono text-xs text-slate-500">{{ statusStore.status.deviceId }}</p>
+        <div class="mt-4 rounded-lg border border-[color:var(--main-line-soft)] bg-[rgba(28,49,84,0.8)] p-4">
+          <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <p class="text-sm font-semibold text-white">最近同步内容</p>
+            <p class="text-xs text-slate-500">最近 {{ CLIPBOARD_PREVIEW_LIMIT }} 条历史记录</p>
           </div>
-        </div>
-        <div class="mt-5 grid gap-3 text-sm text-slate-300">
-          <p class="flex justify-between gap-4">
-            <span class="text-slate-500">监听端口</span>
-            <span class="font-mono">{{ statusStore.status.port }}</span>
-          </p>
-          <p class="flex justify-between gap-4">
-            <span class="text-slate-500">运行状态</span>
-            <span>{{ statusStore.status.running ? "后台任务运行中" : "等待启动" }}</span>
-          </p>
-        </div>
-      </Card>
 
-      <Card>
-        <div class="mb-4 flex items-center justify-between gap-4">
-          <div>
-            <p class="text-sm font-medium text-white">连接和剪贴日志</p>
-            <p class="mt-1 text-xs text-slate-500">只显示摘要，不保存完整敏感内容。</p>
+          <div v-if="recentSyncItems.length" class="grid gap-2">
+            <div
+              v-for="item in recentSyncItems"
+              :key="item.id"
+              class="flex items-start gap-3 rounded-md border border-[color:var(--main-line-soft)] bg-[rgba(19,34,63,0.72)] px-3 py-2"
+            >
+              <p class="line-clamp-2 min-w-0 flex-1 break-words text-sm leading-5 text-slate-300">
+                {{ item.text }}
+              </p>
+              <CopyTextButton :text="item.text" icon-only label="复制内容" />
+            </div>
           </div>
-          <Clock class="h-5 w-5 text-slate-500" />
-        </div>
-        <div v-if="latestItems.length" class="grid gap-3">
-          <HistoryItem v-for="item in latestItems" :key="item.id" :item="item" />
-        </div>
-        <div v-else class="rounded-lg border border-dashed border-slate-700 px-4 py-8 text-center text-sm text-slate-500">
-          启动同步后，连接和剪贴记录会出现在这里。
+          <p v-else class="rounded-md border border-dashed border-[color:var(--main-line-soft)] px-3 py-4 text-sm text-slate-500">
+            暂无同步内容，启动同步并复制文本后会显示在这里。
+          </p>
         </div>
       </Card>
     </section>

@@ -1,8 +1,8 @@
 import { createRouter, createWebHashHistory } from "vue-router";
 
 import Devices from "@/pages/Devices.vue";
-import History from "@/pages/History.vue";
 import Home from "@/pages/Home.vue";
+import Logs from "@/pages/Logs.vue";
 import Settings from "@/pages/Settings.vue";
 
 const router = createRouter({
@@ -10,7 +10,8 @@ const router = createRouter({
   routes: [
     { path: "/", name: "home", component: Home },
     { path: "/devices", name: "devices", component: Devices },
-    { path: "/history", name: "history", component: History },
+    { path: "/logs", name: "logs", component: Logs },
+    { path: "/history", redirect: "/logs" },
     { path: "/settings", name: "settings", component: Settings },
   ],
 });

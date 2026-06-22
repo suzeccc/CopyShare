@@ -2,12 +2,12 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::watch;
 
 use crate::{
-    autostart,
+    autostart, clipboard,
     config,
     discovery,
     error::{AppError, AppResult},
     history,
-    models::{AppConfig, AppStatus, DeviceInfo, HistoryItem},
+    models::{AppConfig, AppStatus, ClipboardTextItem, DeviceInfo, HistoryItem},
     security,
     state::AppState,
     sync,
@@ -109,7 +109,11 @@ pub async fn update_config(
     next_config.sync_text = true;
     next_config.sync_image = false;
     next_config.sync_files = false;
-    autostart::set_autostart(&app, next_config.auto_start)?;
+    let current_auto_start =
+        autostart::is_autostart_enabled(&app).unwrap_or(current.auto_start);
+    if autostart::should_update_autostart(current_auto_start, next_config.auto_start) {
+        autostart::set_autostart(&app, next_config.auto_start)?;
+    }
     config::save_config(&app, &next_config)?;
     state.set_config(next_config.clone()).await;
     app.emit("config-updated", next_config.clone())?;
@@ -119,6 +123,11 @@ pub async fn update_config(
 #[tauri::command]
 pub async fn get_history(state: State<'_, AppState>) -> AppResult<Vec<HistoryItem>> {
     Ok(state.history().await)
+}
+
+#[tauri::command]
+pub async fn get_clipboard_history() -> AppResult<Vec<ClipboardTextItem>> {
+    clipboard::read_clipboard_history_text(3).await
 }
 
 #[tauri::command]

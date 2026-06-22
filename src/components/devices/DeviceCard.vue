@@ -16,7 +16,7 @@ defineEmits<{
 </script>
 
 <template>
-  <article class="rounded-lg border border-slate-700/80 bg-slate-950/50 p-4">
+  <article class="rounded-lg border border-[color:var(--main-line-soft)] bg-[rgba(19,34,63,0.58)] p-4">
     <div class="flex items-start justify-between gap-4">
       <div class="min-w-0">
         <h3 class="truncate text-sm font-semibold text-white">{{ device.name }}</h3>
@@ -24,7 +24,7 @@ defineEmits<{
       </div>
       <span
         class="rounded-md border px-2 py-1 text-xs"
-        :class="device.connected ? 'border-emerald-400/40 text-emerald-200' : 'border-slate-600 text-slate-400'"
+        :class="device.connected ? 'border-emerald-400/40 text-emerald-200' : 'border-[color:var(--main-line-soft)] text-slate-400'"
       >
         {{ device.connected ? "已连接" : "未连接" }}
       </span>

@@ -17,15 +17,15 @@ const props = withDefaults(
 );
 
 const classes = computed(() => [
-  "inline-flex items-center justify-center gap-2 rounded-md border font-medium transition",
+  "inline-flex items-center justify-center gap-2 rounded-md border font-medium transition duration-150 active:scale-[0.98]",
   "disabled:cursor-not-allowed disabled:opacity-50",
   props.size === "sm" ? "h-8 px-3 text-xs" : "h-10 px-4 text-sm",
   props.variant === "primary" &&
     "border-blue-500 bg-blue-600 text-white hover:bg-blue-500",
   props.variant === "secondary" &&
-    "border-slate-600 bg-slate-800/80 text-slate-100 hover:border-slate-500 hover:bg-slate-700",
+    "border-[color:var(--main-line-soft)] bg-[color:var(--main-bg-soft)] text-slate-100 hover:border-[color:var(--main-line)] hover:bg-[color:var(--main-bg-muted)]",
   props.variant === "ghost" &&
-    "border-transparent bg-transparent text-slate-300 hover:bg-slate-800 hover:text-white",
+    "border-transparent bg-transparent text-slate-300 hover:bg-[color:var(--main-bg-muted)] hover:text-white",
   props.variant === "danger" &&
     "border-red-500/50 bg-red-500/12 text-red-100 hover:bg-red-500/20",
 ]);

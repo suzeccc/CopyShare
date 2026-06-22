@@ -115,9 +115,18 @@ pub struct HistoryItem {
     pub direction: HistoryDirection,
     pub source_device: String,
     pub summary: String,
+    #[serde(default)]
+    pub content: String,
     pub content_type: ClipboardContentType,
     pub success: bool,
     pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ClipboardTextItem {
+    pub id: String,
+    pub text: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

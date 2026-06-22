@@ -1,10 +1,8 @@
 <script setup lang="ts">
-import { RefreshCw } from "lucide-vue-next";
-
 import DeviceCard from "@/components/devices/DeviceCard.vue";
 import ManualConnectForm from "@/components/devices/ManualConnectForm.vue";
 import Card from "@/components/ui/Card.vue";
-import Button from "@/components/ui/Button.vue";
+import RefreshButton from "@/components/ui/RefreshButton.vue";
 import { useConfigStore } from "@/stores/config";
 import { useDevicesStore } from "@/stores/devices";
 
@@ -21,7 +19,7 @@ const configStore = useConfigStore();
           在另一台电脑启动 Copy-Sharer，输入它的局域网 IPv4 地址和端口。
           首次连接会进入待信任状态，确认后才会参与同步。
         </p>
-        <div class="mt-5 rounded-lg border border-slate-700/80 bg-slate-950/48 p-4">
+        <div class="mt-5 rounded-lg border border-[color:var(--main-line-soft)] bg-[rgba(19,34,63,0.58)] p-4">
           <ManualConnectForm
             :loading="devicesStore.loading"
             :default-port="configStore.config.port"
@@ -39,10 +37,7 @@ const configStore = useConfigStore();
             <p class="text-sm font-semibold text-white">已连接设备</p>
             <p class="mt-2 text-sm text-slate-400">当前会话里保持 WebSocket 连接的设备。</p>
           </div>
-          <Button size="sm" variant="ghost" @click="devicesStore.refresh()">
-            <RefreshCw class="h-4 w-4" />
-            刷新
-          </Button>
+          <RefreshButton :refresh="() => devicesStore.refresh()" />
         </div>
         <div v-if="devicesStore.connected.length" class="mt-5 grid gap-3 md:grid-cols-2">
           <DeviceCard
@@ -53,7 +48,7 @@ const configStore = useConfigStore();
             @trust="devicesStore.trust"
           />
         </div>
-        <div v-else class="mt-5 rounded-lg border border-dashed border-slate-700 px-4 py-8 text-center text-sm text-slate-500">
+        <div v-else class="mt-5 rounded-lg border border-dashed border-[color:var(--main-line-soft)] px-4 py-8 text-center text-sm text-slate-500">
           还没有连接设备。输入对方 IP 后点击“连接”。
         </div>
       </Card>
@@ -75,7 +70,7 @@ const configStore = useConfigStore();
           @trust="devicesStore.trust"
         />
       </div>
-      <div v-else class="rounded-lg border border-dashed border-slate-700 px-4 py-10 text-center text-sm text-slate-500">
+      <div v-else class="rounded-lg border border-dashed border-[color:var(--main-line-soft)] px-4 py-10 text-center text-sm text-slate-500">
         输入对方 IP 后点击“连接”，设备会出现在这里。
       </div>
     </Card>

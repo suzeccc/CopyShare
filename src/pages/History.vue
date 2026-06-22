@@ -32,7 +32,7 @@ const historyStore = useHistoryStore();
     <div v-if="historyStore.items.length" class="mt-5 grid gap-3">
       <HistoryItem v-for="item in historyStore.items" :key="item.id" :item="item" />
     </div>
-    <div v-else class="mt-5 rounded-lg border border-dashed border-slate-700 px-4 py-12 text-center text-sm text-slate-500">
+    <div v-else class="mt-5 rounded-lg border border-dashed border-[color:var(--main-line-soft)] px-4 py-12 text-center text-sm text-slate-500">
       暂无同步历史。复制文本并完成一次同步后，这里会显示摘要。
     </div>
   </Card>

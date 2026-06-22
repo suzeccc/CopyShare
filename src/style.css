@@ -4,7 +4,13 @@
 
 :root {
   color: #e5edf7;
-  background: #07111f;
+  background: transparent;
+  --main-bg: #172746;
+  --main-bg-deep: #13223f;
+  --main-bg-soft: #1c3154;
+  --main-bg-muted: #20385f;
+  --main-line: rgba(88, 124, 174, 0.54);
+  --main-line-soft: rgba(88, 124, 174, 0.34);
   font-synthesis: none;
   text-rendering: geometricPrecision;
   -webkit-font-smoothing: antialiased;
@@ -24,12 +30,19 @@ body,
 
 body {
   overflow: hidden;
-  background:
-    linear-gradient(135deg, rgba(37, 99, 235, 0.16), transparent 36%),
-    linear-gradient(315deg, rgba(16, 185, 129, 0.14), transparent 32%),
-    #07111f;
+  background: transparent;
   font-family: "Microsoft YaHei UI", Inter, system-ui, sans-serif;
   letter-spacing: 0;
+}
+
+html[data-window-mode="floating"],
+html[data-window-mode="floating"] body,
+html[data-window-mode="floating"] #app {
+  background: transparent !important;
+}
+
+html[data-window-mode="floating"] {
+  background-color: transparent !important;
 }
 
 button,
@@ -44,9 +57,161 @@ a:focus-visible {
   outline-offset: 2px;
 }
 
+.app-window-shell {
+  transform: translateZ(0);
+  will-change: background-color, border-color, padding;
+}
+
+.main-window-content,
+.floating-window-surface {
+  transform: translateZ(0);
+  transform-origin: center;
+  transition:
+    opacity 170ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 170ms cubic-bezier(0.22, 1, 0.36, 1),
+    filter 170ms cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: opacity, transform, filter;
+}
+
+.window-panel-enter-active,
+.window-panel-leave-active {
+  transition:
+    opacity 170ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 170ms cubic-bezier(0.22, 1, 0.36, 1),
+    filter 170ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.window-panel-enter-from,
+.window-panel-leave-to {
+  opacity: 0;
+  filter: blur(2px);
+  transform: scale(0.985) translateY(5px);
+}
+
+.window-panel-enter-to,
+.window-panel-leave-from {
+  opacity: 1;
+  filter: blur(0);
+  transform: scale(1) translateY(0);
+}
+
+.window-phase-main-exit .main-window-content {
+  opacity: 0;
+  filter: blur(1.5px);
+  transform: scale(0.985) translateY(5px);
+}
+
+.window-phase-floating-exit .floating-window-surface {
+  opacity: 0;
+  filter: blur(1.5px);
+  transform: scale(0.96) translateY(4px);
+}
+
+.window-phase-main-enter .main-window-content {
+  animation: main-window-enter 170ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.window-phase-floating-enter .floating-window-surface {
+  animation: floating-window-enter 170ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes main-window-enter {
+  from {
+    opacity: 0;
+    filter: blur(2px);
+    transform: scale(0.99) translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes floating-window-enter {
+  from {
+    opacity: 0;
+    filter: blur(2px);
+    transform: scale(0.94) translateY(5px);
+  }
+
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: scale(1) translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .main-window-content,
+  .floating-window-surface,
+  .window-panel-enter-active,
+  .window-panel-leave-active {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(23, 39, 70, 0.88);
+}
+
+::-webkit-scrollbar-thumb {
+  border: 3px solid rgba(23, 39, 70, 0.88);
+  border-radius: 999px;
+  background: rgba(94, 130, 180, 0.72);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.9);
+}
+
+::-webkit-scrollbar-corner {
+  background: rgba(23, 39, 70, 0.88);
+}
+
 .glass-panel {
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  background: rgba(15, 23, 42, 0.72);
-  box-shadow: 0 18px 50px rgba(15, 23, 42, 0.28);
+  border: 1px solid var(--main-line);
+  background: rgba(23, 39, 70, 0.84);
+  box-shadow: 0 18px 50px rgba(6, 16, 32, 0.28);
   backdrop-filter: blur(22px) saturate(145%);
+}
+
+.floating-window-surface {
+  border: 1px solid rgba(125, 190, 255, 0.42);
+  background:
+    linear-gradient(135deg, rgba(56, 139, 213, 0.22), transparent 42%),
+    rgba(7, 24, 49, 0.66);
+  box-shadow: 0 16px 42px rgba(0, 6, 18, 0.32);
+  backdrop-filter: blur(20px) saturate(150%);
+}
+
+.floating-stat {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  border: 1px solid rgba(125, 190, 255, 0.22);
+  border-radius: 8px;
+  background: rgba(10, 43, 82, 0.5);
+  padding: 7px;
+}
+
+.floating-stat span {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(186, 230, 253, 0.76);
+}
+
+.floating-stat strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: #f0f9ff;
 }

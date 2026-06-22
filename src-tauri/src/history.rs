@@ -44,6 +44,7 @@ pub fn make_history_item(
         direction,
         source_device: source_device.into(),
         summary: summarize(&message.content),
+        content: message.content.clone(),
         content_type: message.content_type.clone(),
         success: true,
         created_at: Utc::now(),
@@ -107,5 +108,23 @@ mod tests {
         }
 
         assert_eq!(items.len(), 100);
+    }
+
+    #[test]
+    fn history_item_preserves_full_content_for_copying() {
+        let message = ClipboardMessage {
+            message_id: "m".to_string(),
+            source_device_id: "d".to_string(),
+            source_device_name: "Device".to_string(),
+            content_type: crate::models::ClipboardContentType::Text,
+            content: "a".repeat(120),
+            content_hash: "hash".to_string(),
+            timestamp: 1,
+        };
+
+        let item = make_history_item(HistoryDirection::Local, "Device", &message);
+
+        assert_eq!(item.summary.len(), 83);
+        assert_eq!(item.content.len(), 120);
     }
 }

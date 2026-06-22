@@ -42,14 +42,14 @@ function save() {
           <span class="mb-2 block text-xs font-medium text-slate-400">设备名称</span>
           <input
             v-model="draft.deviceName"
-            class="h-10 w-full rounded-md border border-slate-700 bg-slate-950/70 px-3 text-sm text-white"
+            class="h-10 w-full rounded-md border border-[color:var(--main-line-soft)] bg-[rgba(19,34,63,0.72)] px-3 text-sm text-white"
           />
         </label>
         <label>
           <span class="mb-2 block text-xs font-medium text-slate-400">监听端口</span>
           <input
             v-model.number="draft.port"
-            class="h-10 w-full rounded-md border border-slate-700 bg-slate-950/70 px-3 text-sm text-white"
+            class="h-10 w-full rounded-md border border-[color:var(--main-line-soft)] bg-[rgba(19,34,63,0.72)] px-3 text-sm text-white"
             type="number"
             min="1"
             max="65535"
@@ -76,7 +76,7 @@ function save() {
         <Switch v-model="draft.syncImage" label="同步图片" hint="后续支持" disabled />
         <Switch v-model="draft.syncFiles" label="同步文件" hint="后续支持" disabled />
       </div>
-      <div class="mt-6 rounded-lg border border-slate-700/70 bg-slate-950/52 p-4">
+      <div class="mt-6 rounded-lg border border-[color:var(--main-line-soft)] bg-[rgba(19,34,63,0.58)] p-4">
         <p class="text-xs font-medium text-slate-400">已信任设备</p>
         <p class="mt-2 text-sm text-slate-300">
           {{ draft.trustedDevices.length ? `${draft.trustedDevices.length} 台` : "暂无" }}

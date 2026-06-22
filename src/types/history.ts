@@ -5,6 +5,7 @@ export interface HistoryItem {
   direction: HistoryDirection;
   sourceDevice: string;
   summary: string;
+  content?: string;
   contentType: "text";
   success: boolean;
   createdAt: string;

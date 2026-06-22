@@ -32,3 +32,4 @@ tokio-tungstenite = "0.24"
 tracing = "0.1"
 url = "2"
 uuid = { version = "1", features = ["v4", "serde"] }
+windows = { version = "0.61.3", features = ["ApplicationModel_DataTransfer", "Foundation", "Foundation_Collections"] }

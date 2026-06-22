@@ -38,7 +38,7 @@ function submit() {
       <span class="mb-2 block text-xs font-medium text-slate-400">输入对方 IP</span>
       <input
         v-model="ip"
-        class="h-10 w-full rounded-md border border-slate-700 bg-slate-950/70 px-3 text-sm text-white placeholder:text-slate-600"
+        class="h-10 w-full rounded-md border border-[color:var(--main-line-soft)] bg-[rgba(19,34,63,0.72)] px-3 text-sm text-white placeholder:text-slate-600"
         placeholder="192.168.1.20"
       />
     </label>
@@ -46,7 +46,7 @@ function submit() {
       <span class="mb-2 block text-xs font-medium text-slate-400">端口</span>
       <input
         v-model.number="port"
-        class="h-10 w-full rounded-md border border-slate-700 bg-slate-950/70 px-3 text-sm text-white"
+        class="h-10 w-full rounded-md border border-[color:var(--main-line-soft)] bg-[rgba(19,34,63,0.72)] px-3 text-sm text-white"
         type="number"
         min="1"
         max="65535"

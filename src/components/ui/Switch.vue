@@ -12,7 +12,7 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <label class="flex items-center justify-between gap-4 rounded-lg border border-slate-700/70 bg-slate-900/60 px-4 py-3">
+  <label class="flex items-center justify-between gap-4 rounded-lg border border-[color:var(--main-line-soft)] bg-[rgba(19,34,63,0.58)] px-4 py-3">
     <span class="min-w-0">
       <span class="block text-sm font-medium text-slate-100">{{ label }}</span>
       <span v-if="hint" class="mt-1 block text-xs text-slate-400">{{ hint }}</span>
@@ -25,7 +25,7 @@ const emit = defineEmits<{
       @change="emit('update:modelValue', ($event.target as HTMLInputElement).checked)"
     />
     <span
-      class="relative h-6 w-11 shrink-0 rounded-full border border-slate-600 bg-slate-700 transition peer-checked:border-emerald-400 peer-checked:bg-emerald-500 peer-disabled:opacity-50"
+      class="relative h-6 w-11 shrink-0 rounded-full border border-[color:var(--main-line-soft)] bg-[color:var(--main-bg-muted)] transition peer-checked:border-emerald-400 peer-checked:bg-emerald-500 peer-disabled:opacity-50"
       aria-hidden="true"
     >
       <span

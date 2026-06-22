@@ -45,6 +45,7 @@ pub fn run() {
             commands::get_config,
             commands::update_config,
             commands::get_history,
+            commands::get_clipboard_history,
             commands::clear_history,
             commands::show_main_window,
             commands::hide_main_window
