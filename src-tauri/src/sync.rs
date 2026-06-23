@@ -7,21 +7,35 @@ use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{mpsc, oneshot, watch};
 use tokio_tungstenite::{accept_async, connect_async, tungstenite::Message, WebSocketStream};
 use uuid::Uuid;
 
 use crate::{
     clipboard,
-    error::AppResult,
+    config as app_config,
+    error::{AppError, AppResult},
     history,
     models::{
         ClipboardContentType, ClipboardMessage, DeviceInfo, DeviceStatus, HistoryDirection,
-        WireMessage,
+        SyncState, WireMessage,
     },
     network,
+    security,
     state::AppState,
 };
+use crate::models::AppConfig;
+
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(2);
+const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(6);
+
+fn heartbeat_timed_out(
+    last_seen_at: tokio::time::Instant,
+    now: tokio::time::Instant,
+) -> bool {
+    now.duration_since(last_seen_at) >= HEARTBEAT_TIMEOUT
+}
 
 pub fn content_hash(content_type: &ClipboardContentType, content: &str) -> String {
     let mut hasher = Sha256::new();
@@ -91,6 +105,10 @@ impl SyncEngine {
         Some(message)
     }
 
+    pub fn reset_local_observation(&mut self) {
+        self.last_local_hash = None;
+    }
+
     pub fn apply_remote_message(&mut self, message: &ClipboardMessage) -> bool {
         if message.source_device_id == self.device_id {
             return false;
@@ -123,7 +141,8 @@ impl SyncEngine {
 
 pub async fn run_sync_runtime(app: AppHandle, state: AppState, mut stop_rx: watch::Receiver<bool>) {
     let config = state.config().await;
-    let local_ip = local_ip_address::local_ip().ok().map(|ip| ip.to_string());
+    let local_ip = network::preferred_local_ip(&config.trusted_devices, config.port)
+        .map(|ip| ip.to_string());
 
     let listener = match TcpListener::bind(("0.0.0.0", config.port)).await {
         Ok(listener) => listener,
@@ -184,31 +203,127 @@ pub async fn run_sync_runtime(app: AppHandle, state: AppState, mut stop_rx: watc
     emit_status(&app, &state).await;
 }
 
+pub async fn start_sync_runtime(app: AppHandle, state: AppState) -> AppResult<()> {
+    let (stop, stop_rx) = watch::channel(false);
+    let (ready, ready_rx) = oneshot::channel();
+    let runtime_id = Uuid::new_v4().to_string();
+    let state_for_runtime = state.clone();
+    let runtime_id_for_task = runtime_id.clone();
+    let join = tauri::async_runtime::spawn(async move {
+        if ready_rx.await.is_err() {
+            return;
+        }
+        run_sync_runtime(app, state_for_runtime.clone(), stop_rx).await;
+        state_for_runtime.clear_runtime(&runtime_id_for_task).await;
+    });
+    if let Err(error) = state.start_runtime(runtime_id, stop, join).await {
+        return Err(error);
+    }
+    let _ = ready.send(());
+    Ok(())
+}
+
+pub fn should_auto_start_sync(config: &crate::models::AppConfig, running: bool) -> bool {
+    config.auto_sync && !running
+}
+
+pub fn should_start_sync_for_manual_connect(running: bool) -> bool {
+    !running
+}
+
+pub async fn wait_for_sync_ready(state: &AppState, timeout: Duration) -> AppResult<()> {
+    let start = tokio::time::Instant::now();
+
+    loop {
+        let status = state.status().await;
+        match status.state {
+            SyncState::Running => return Ok(()),
+            SyncState::Error => {
+                return Err(AppError::InvalidInput(
+                    status.message.unwrap_or_else(|| "同步启动失败".to_string()),
+                ));
+            }
+            SyncState::Stopped => {}
+        }
+
+        if start.elapsed() >= timeout {
+            return Err(AppError::ConnectionTimeout(
+                "同步启动超时：请确认端口未被占用，并允许 Windows 防火墙放行".to_string(),
+            ));
+        }
+
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+}
+
 pub async fn connect_to_peer(
     app: AppHandle,
     state: AppState,
     ip: String,
     port: u16,
 ) -> AppResult<DeviceInfo> {
-    let url = network::normalize_peer_url(&format!("{ip}:{port}"), port)?;
-    let (socket, _) = connect_async(url.clone()).await?;
+    if let Some(device) = state.connected_device_for_endpoint(&ip, port).await? {
+        return Ok(device);
+    }
+
+    let url = network::normalize_peer_endpoint(&ip, port)?;
+    let connect_result = tokio::time::timeout(CONNECT_TIMEOUT, connect_async(url.clone())).await;
+    let (socket, _) = match connect_result {
+        Ok(Ok(result)) => result,
+        Ok(Err(error)) => {
+            return Err(AppError::ConnectionTimeout(peer_connection_failure_message(
+                &ip,
+                port,
+                &error.to_string(),
+            )));
+        }
+        Err(_) => {
+            return Err(AppError::ConnectionTimeout(peer_connection_failure_message(
+                &ip,
+                port,
+                "连接超时",
+            )));
+        }
+    };
     let connection_id = url.clone();
+    state.mark_manual_trust_required(&connection_id).await;
     spawn_socket(app.clone(), state.clone(), connection_id.clone(), socket).await?;
 
+    if let Some(local_ip) = network::preferred_local_ip_for_peer(network::peer_ip_hint(&ip, port)) {
+        state.set_local_ip(Some(local_ip.to_string())).await;
+    }
+
+    let display_ip = network::display_host_from_connection_id(&connection_id);
     let device = DeviceInfo {
         id: connection_id.clone(),
         name: connection_id.clone(),
-        ip,
+        ip: display_ip,
         port,
         connected: true,
         trusted: false,
         last_seen_at: Some(Utc::now()),
         status: DeviceStatus::Online,
     };
-    state.upsert_device(device.clone()).await;
+    let device = state.upsert_device(device).await;
     let _ = app.emit("device-connected", device.clone());
     emit_status(&app, &state).await;
     Ok(device)
+}
+
+pub async fn notify_peer_trusted(state: &AppState, config: &AppConfig, trusted_device_id: &str) {
+    let status = state.status().await;
+    let trusted_device_ids = state.trust_keys_for_device(trusted_device_id).await;
+    state
+        .broadcast_trusted(
+            config,
+            WireMessage::TrustGranted {
+                source_device_id: status.device_id,
+                source_device_name: status.device_name,
+                port: status.port,
+                trusted_device_ids,
+            },
+        )
+        .await;
 }
 
 async fn spawn_socket<S>(
@@ -232,8 +347,22 @@ where
             let _ = sink.send(Message::Text(text.into())).await;
         }
 
+        let mut heartbeat = tokio::time::interval(HEARTBEAT_INTERVAL);
+        heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut last_seen_at = tokio::time::Instant::now();
+
         loop {
             tokio::select! {
+                _ = heartbeat.tick() => {
+                    let now = tokio::time::Instant::now();
+                    if heartbeat_timed_out(last_seen_at, now) {
+                        let _ = app_for_task.emit("sync-error", "设备连接超时，已标记离线".to_string());
+                        break;
+                    }
+                    if sink.send(Message::Ping(Vec::new().into())).await.is_err() {
+                        break;
+                    }
+                }
                 outbound = receiver.recv() => {
                     let Some(outbound) = outbound else {
                         break;
@@ -252,11 +381,18 @@ where
                 inbound = stream.next() => {
                     match inbound {
                         Some(Ok(Message::Text(text))) => {
+                            last_seen_at = tokio::time::Instant::now();
                             handle_wire_text(&app_for_task, &state_for_task, &connection_id_for_task, &text.to_string()).await;
                         }
                         Some(Ok(Message::Close(_))) | None => break,
                         Some(Ok(Message::Ping(payload))) => {
-                            let _ = sink.send(Message::Pong(payload)).await;
+                            last_seen_at = tokio::time::Instant::now();
+                            if sink.send(Message::Pong(payload)).await.is_err() {
+                                break;
+                            }
+                        }
+                        Some(Ok(Message::Pong(_))) => {
+                            last_seen_at = tokio::time::Instant::now();
                         }
                         Some(Ok(_)) => {}
                         Some(Err(error)) => {
@@ -268,8 +404,11 @@ where
             }
         }
 
-        state_for_task.forget_peer(&connection_id_for_task).await;
-        if let Some(device) = state_for_task.mark_device_disconnected(&connection_id_for_task).await {
+        let device_id = state_for_task
+            .forget_peer(&connection_id_for_task)
+            .await
+            .unwrap_or_else(|| connection_id_for_task.clone());
+        if let Some(device) = state_for_task.mark_device_disconnected(&device_id).await {
             let _ = app_for_task.emit("device-disconnected", device);
         }
         emit_status(&app_for_task, &state_for_task).await;
@@ -295,19 +434,79 @@ async fn handle_wire_text(app: &AppHandle, state: &AppState, connection_id: &str
             port,
             ..
         } => {
+            let mut config = state.config().await;
+            let endpoint = network::endpoint_from_connection_id(connection_id, port)
+                .unwrap_or_else(|_| connection_id.to_string());
+            state
+                .attach_peer_device(connection_id, device_id.clone(), Some(endpoint.clone()))
+                .await;
+            let manual_trust_required = state
+                .manual_trust_required_for_peer(connection_id, &device_id, &endpoint)
+                .await;
+            if !manual_trust_required && security::is_device_id_trusted(&config, &device_id) {
+                for key in [connection_id, &device_id, &endpoint] {
+                    security::trust_device(&mut config, key);
+                }
+                match app_config::save_config(app, &config) {
+                    Ok(()) => {
+                        state.set_config(config.clone()).await;
+                        let _ = app.emit("config-updated", config.clone());
+                    }
+                    Err(error) => {
+                        let _ = app.emit("sync-error", error.to_string());
+                    }
+                }
+            }
+            let trusted = !manual_trust_required
+                && reset_local_observation_if_peer_is_trusted(
+                    state,
+                    &config,
+                    connection_id,
+                    &device_id,
+                    &endpoint,
+                )
+                .await;
             let device = DeviceInfo {
-                id: connection_id.to_string(),
+                id: device_id.clone(),
                 name: device_name,
-                ip: connection_id.to_string(),
+                ip: network::display_host_from_connection_id(connection_id),
                 port,
                 connected: true,
-                trusted: crate::security::is_trusted(&state.config().await, &device_id),
+                trusted,
                 last_seen_at: Some(Utc::now()),
                 status: DeviceStatus::Online,
             };
-            state.upsert_device(device.clone()).await;
+            let device = state.upsert_device(device).await;
             let _ = app.emit("device-connected", device);
             emit_status(app, state).await;
+        }
+        WireMessage::TrustGranted {
+            source_device_id,
+            source_device_name: _,
+            port: _,
+            trusted_device_ids,
+        } => {
+            let mut config = state.config().await;
+            if apply_peer_trust_grant(
+                state,
+                &mut config,
+                connection_id,
+                &source_device_id,
+                &trusted_device_ids,
+            )
+            .await
+            {
+                match app_config::save_config(app, &config) {
+                    Ok(()) => {
+                        state.set_config(config.clone()).await;
+                        let _ = app.emit("config-updated", config);
+                    }
+                    Err(error) => {
+                        let _ = app.emit("sync-error", error.to_string());
+                    }
+                }
+                emit_status(app, state).await;
+            }
         }
         WireMessage::Clipboard { .. } => {
             let clipboard = match ClipboardMessage::try_from(message) {
@@ -321,13 +520,19 @@ async fn handle_wire_text(app: &AppHandle, state: &AppState, connection_id: &str
                 let _ = app.emit("sync-error", "MVP 仅支持文本剪贴板同步");
                 return;
             }
+            let config = state.config().await;
+            if !state
+                .clipboard_sender_is_trusted(&config, connection_id, &clipboard.source_device_id)
+                .await
+            {
+                return;
+            }
             if state.apply_remote_clipboard(&clipboard).await {
                 if let Err(error) = clipboard::write_clipboard_text(app, &clipboard.content) {
                     let _ = app.emit("sync-error", error.to_string());
                     return;
                 }
                 state.touch_last_sync().await;
-                let config = state.config().await;
                 if config.save_history {
                     let item = history::make_history_item(
                         HistoryDirection::Remote,
@@ -338,7 +543,9 @@ async fn handle_wire_text(app: &AppHandle, state: &AppState, connection_id: &str
                     let _ = history::save_history(app, &state.history().await);
                     let _ = app.emit("clipboard-synced", item);
                 }
-                state.broadcast(clipboard.into()).await;
+                if should_forward_applied_remote_clipboard() {
+                    state.broadcast_trusted(&config, clipboard.into()).await;
+                }
                 emit_status(app, state).await;
             }
         }
@@ -357,17 +564,14 @@ async fn handle_wire_text(app: &AppHandle, state: &AppState, connection_id: &str
 
 async fn poll_local_clipboard(app: &AppHandle, state: &AppState) -> AppResult<()> {
     let config = state.config().await;
-    if !config.sync_text {
+    if !should_read_local_clipboard(state, &config).await {
         return Ok(());
     }
 
     let text = clipboard::read_clipboard_text(app)?;
-    let Some(message) = state.observe_local_text(text).await else {
+    let Some(message) = publish_local_text_if_needed(state, &config, text).await else {
         return Ok(());
     };
-
-    state.touch_last_sync().await;
-    state.broadcast(message.clone().into()).await;
 
     if config.save_history {
         let item = history::make_history_item(
@@ -384,6 +588,65 @@ async fn poll_local_clipboard(app: &AppHandle, state: &AppState) -> AppResult<()
     Ok(())
 }
 
+async fn should_read_local_clipboard(state: &AppState, config: &AppConfig) -> bool {
+    config.sync_text && state.has_trusted_peers(config).await
+}
+
+async fn publish_local_text_if_needed(
+    state: &AppState,
+    config: &AppConfig,
+    text: String,
+) -> Option<ClipboardMessage> {
+    if !config.sync_text || !state.has_trusted_peers(config).await {
+        return None;
+    }
+
+    let message = state.observe_local_text(text).await?;
+    state.touch_last_sync().await;
+    state.broadcast_trusted(config, message.clone().into()).await;
+    Some(message)
+}
+
+async fn reset_local_observation_if_peer_is_trusted(
+    state: &AppState,
+    config: &AppConfig,
+    connection_id: &str,
+    device_id: &str,
+    endpoint: &str,
+) -> bool {
+    let _ = (connection_id, endpoint);
+    let trusted = security::is_device_id_trusted(config, device_id);
+    if trusted {
+        state.reset_local_clipboard_observation().await;
+    }
+
+    trusted
+}
+
+async fn apply_peer_trust_grant(
+    state: &AppState,
+    config: &mut AppConfig,
+    connection_id: &str,
+    source_device_id: &str,
+    trusted_device_ids: &[String],
+) -> bool {
+    if !trusted_device_ids
+        .iter()
+        .any(|device_id| device_id == &config.device_id)
+    {
+        return false;
+    }
+
+    if !state
+        .peer_connection_matches_device(connection_id, source_device_id)
+        .await
+    {
+        return false;
+    }
+
+    false
+}
+
 async fn build_hello(state: &AppState) -> WireMessage {
     let status = state.status().await;
     WireMessage::Hello {
@@ -392,6 +655,16 @@ async fn build_hello(state: &AppState) -> WireMessage {
         app_version: env!("CARGO_PKG_VERSION").to_string(),
         port: status.port,
     }
+}
+
+fn should_forward_applied_remote_clipboard() -> bool {
+    false
+}
+
+fn peer_connection_failure_message(ip: &str, port: u16, reason: &str) -> String {
+    format!(
+        "连接失败：无法连接到 {ip}:{port}。请确认对方已开启同步，并使用对方主面板显示的本机地址和端口连接；同时允许 Windows 防火墙放行端口 {port}。原因：{reason}"
+    )
 }
 
 async fn emit_status(app: &AppHandle, state: &AppState) {
@@ -477,5 +750,599 @@ mod tests {
 
         assert!(engine.apply_remote_message(&first));
         assert!(!engine.apply_remote_message(&second));
+    }
+
+    #[test]
+    fn applied_remote_clipboard_messages_are_not_forwarded_again() {
+        assert!(!should_forward_applied_remote_clipboard());
+    }
+
+    #[test]
+    fn heartbeat_timeout_only_trips_after_deadline() {
+        let last_seen = tokio::time::Instant::now();
+
+        assert!(!heartbeat_timed_out(
+            last_seen,
+            last_seen + HEARTBEAT_TIMEOUT - Duration::from_millis(1)
+        ));
+        assert!(heartbeat_timed_out(
+            last_seen,
+            last_seen + HEARTBEAT_TIMEOUT
+        ));
+    }
+
+    #[test]
+    fn two_devices_can_take_turns_sending_clipboard_updates() {
+        let mut device_a = SyncEngine::new("device-a", "Laptop A");
+        let mut device_b = SyncEngine::new("device-b", "Laptop B");
+
+        let from_a = device_a
+            .observe_local_text("from A")
+            .expect("device A should publish its local change");
+        assert!(device_b.apply_remote_message(&from_a));
+        assert!(device_b.observe_local_text("from A").is_none());
+
+        let from_b = device_b
+            .observe_local_text("from B")
+            .expect("device B should publish its next local change");
+        assert!(device_a.apply_remote_message(&from_b));
+        assert!(device_a.observe_local_text("from B").is_none());
+    }
+
+    #[tokio::test]
+    async fn websocket_connection_carries_clipboard_updates_both_directions() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tauri::async_runtime::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = accept_async(stream).await.unwrap();
+            let mut device_b = SyncEngine::new("device-b", "Laptop B");
+
+            let client_hello = read_wire_message(&mut socket).await;
+            assert_eq!(
+                client_hello,
+                WireMessage::Hello {
+                    device_id: "device-a".to_string(),
+                    device_name: "Laptop A".to_string(),
+                    app_version: "test".to_string(),
+                    port: 8765,
+                }
+            );
+            send_wire_message(
+                &mut socket,
+                WireMessage::Hello {
+                    device_id: "device-b".to_string(),
+                    device_name: "Laptop B".to_string(),
+                    app_version: "test".to_string(),
+                    port: 8766,
+                },
+            )
+            .await;
+
+            let from_a = ClipboardMessage::try_from(read_wire_message(&mut socket).await).unwrap();
+            assert_eq!(from_a.source_device_id, "device-a");
+            assert_eq!(from_a.content, "from A over websocket");
+            assert!(device_b.apply_remote_message(&from_a));
+            assert!(device_b.observe_local_text("from A over websocket").is_none());
+
+            let from_b = device_b
+                .observe_local_text("from B over websocket")
+                .expect("device B should publish its local clipboard");
+            send_wire_message(&mut socket, from_b.into()).await;
+        });
+
+        let (mut client, _) = connect_async(format!("ws://{address}/")).await.unwrap();
+        let mut device_a = SyncEngine::new("device-a", "Laptop A");
+        send_wire_message(
+            &mut client,
+            WireMessage::Hello {
+                device_id: "device-a".to_string(),
+                device_name: "Laptop A".to_string(),
+                app_version: "test".to_string(),
+                port: 8765,
+            },
+        )
+        .await;
+
+        let server_hello = read_wire_message(&mut client).await;
+        assert_eq!(
+            server_hello,
+            WireMessage::Hello {
+                device_id: "device-b".to_string(),
+                device_name: "Laptop B".to_string(),
+                app_version: "test".to_string(),
+                port: 8766,
+            }
+        );
+
+        let from_a = device_a
+            .observe_local_text("from A over websocket")
+            .expect("device A should publish its local clipboard");
+        send_wire_message(&mut client, from_a.into()).await;
+
+        let from_b = ClipboardMessage::try_from(read_wire_message(&mut client).await).unwrap();
+        assert_eq!(from_b.source_device_id, "device-b");
+        assert_eq!(from_b.content, "from B over websocket");
+        assert!(device_a.apply_remote_message(&from_b));
+        assert!(device_a.observe_local_text("from B over websocket").is_none());
+
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn websocket_connection_carries_trust_grant_before_reverse_clipboard() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tauri::async_runtime::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = accept_async(stream).await.unwrap();
+            let mut device_b = SyncEngine::new("device-b", "Laptop B");
+
+            let client_hello = read_wire_message(&mut socket).await;
+            assert!(matches!(
+                client_hello,
+                WireMessage::Hello {
+                    device_id,
+                    port: 8766,
+                    ..
+                } if device_id == "device-a"
+            ));
+            send_wire_message(
+                &mut socket,
+                WireMessage::Hello {
+                    device_id: "device-b".to_string(),
+                    device_name: "Laptop B".to_string(),
+                    app_version: "test".to_string(),
+                    port: 8765,
+                },
+            )
+            .await;
+
+            let trust_grant = read_wire_message(&mut socket).await;
+            assert!(matches!(
+                trust_grant,
+                WireMessage::TrustGranted {
+                    source_device_id,
+                    trusted_device_ids,
+                    ..
+                } if source_device_id == "device-a"
+                    && trusted_device_ids.contains(&"device-b".to_string())
+            ));
+
+            let from_b = device_b
+                .observe_local_text("from B after trust grant")
+                .expect("device B should publish after receiving reciprocal trust grant");
+            send_wire_message(&mut socket, from_b.into()).await;
+        });
+
+        let (mut client, _) = connect_async(format!("ws://{address}/")).await.unwrap();
+        let mut device_a = SyncEngine::new("device-a", "Laptop A");
+        send_wire_message(
+            &mut client,
+            WireMessage::Hello {
+                device_id: "device-a".to_string(),
+                device_name: "Laptop A".to_string(),
+                app_version: "test".to_string(),
+                port: 8766,
+            },
+        )
+        .await;
+
+        let server_hello = read_wire_message(&mut client).await;
+        assert!(matches!(
+            server_hello,
+            WireMessage::Hello {
+                device_id,
+                port: 8765,
+                ..
+            } if device_id == "device-b"
+        ));
+
+        send_wire_message(
+            &mut client,
+            WireMessage::TrustGranted {
+                source_device_id: "device-a".to_string(),
+                source_device_name: "Laptop A".to_string(),
+                port: 8766,
+                trusted_device_ids: vec![
+                    "device-b".to_string(),
+                    "ws://127.0.0.1:8765/".to_string(),
+                ],
+            },
+        )
+        .await;
+
+        let from_b = ClipboardMessage::try_from(read_wire_message(&mut client).await).unwrap();
+        assert_eq!(from_b.source_device_id, "device-b");
+        assert_eq!(from_b.content, "from B after trust grant");
+        assert!(device_a.apply_remote_message(&from_b));
+        assert!(device_a.observe_local_text("from B after trust grant").is_none());
+
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn local_polling_publishes_clipboard_updates_both_directions_for_trusted_peers() {
+        let state_a = AppState::new();
+        let mut config_a = crate::models::AppConfig::default();
+        config_a.device_id = "device-a".to_string();
+        config_a.device_name = "Laptop A".to_string();
+        config_a.trusted_devices.push("device-b".to_string());
+        state_a.set_config(config_a.clone()).await;
+
+        let state_b = AppState::new();
+        let mut config_b = crate::models::AppConfig::default();
+        config_b.device_id = "device-b".to_string();
+        config_b.device_name = "Laptop B".to_string();
+        config_b.trusted_devices.push("device-a".to_string());
+        state_b.set_config(config_b.clone()).await;
+
+        let (sender_a_to_b, mut outbound_a_to_b) = mpsc::unbounded_channel();
+        let join_a = tauri::async_runtime::spawn(async {
+            futures_util::future::pending::<()>().await;
+        });
+        state_a
+            .register_peer("a-to-b".to_string(), sender_a_to_b, join_a)
+            .await;
+        state_a
+            .attach_peer_device("a-to-b", "device-b".to_string(), None)
+            .await;
+
+        let (sender_b_to_a, mut outbound_b_to_a) = mpsc::unbounded_channel();
+        let join_b = tauri::async_runtime::spawn(async {
+            futures_util::future::pending::<()>().await;
+        });
+        state_b
+            .register_peer("b-to-a".to_string(), sender_b_to_a, join_b)
+            .await;
+        state_b
+            .attach_peer_device("b-to-a", "device-a".to_string(), None)
+            .await;
+
+        let from_a = publish_local_text_if_needed(&state_a, &config_a, "poll from A".to_string())
+            .await
+            .expect("device A polling should publish local clipboard text");
+        let delivered_to_b =
+            ClipboardMessage::try_from(outbound_a_to_b.try_recv().unwrap()).unwrap();
+        assert_eq!(delivered_to_b, from_a);
+        assert!(state_b.apply_remote_clipboard(&delivered_to_b).await);
+        assert!(state_b.observe_local_text("poll from A".to_string()).await.is_none());
+
+        let from_b = publish_local_text_if_needed(&state_b, &config_b, "poll from B".to_string())
+            .await
+            .expect("device B polling should publish local clipboard text");
+        let delivered_to_a =
+            ClipboardMessage::try_from(outbound_b_to_a.try_recv().unwrap()).unwrap();
+        assert_eq!(delivered_to_a, from_b);
+        assert!(state_a.apply_remote_clipboard(&delivered_to_a).await);
+        assert!(state_a.observe_local_text("poll from B".to_string()).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn manual_trust_notifies_connected_peer_that_it_was_trusted() {
+        let state = AppState::new();
+        let mut config = crate::models::AppConfig::default();
+        config.device_id = "device-a".to_string();
+        config.device_name = "Laptop A".to_string();
+        config.port = 8766;
+        config.trusted_devices.push("device-b".to_string());
+        state.set_config(config.clone()).await;
+
+        let (sender, mut outbound) = mpsc::unbounded_channel();
+        let join = tauri::async_runtime::spawn(async {
+            futures_util::future::pending::<()>().await;
+        });
+        state
+            .register_peer("10.194.33.156:51051".to_string(), sender, join)
+            .await;
+        state
+            .attach_peer_device(
+                "10.194.33.156:51051",
+                "device-b".to_string(),
+                Some("ws://10.194.33.156:8765/".to_string()),
+            )
+            .await;
+
+        notify_peer_trusted(&state, &config, "device-b").await;
+
+        let WireMessage::TrustGranted {
+            source_device_id,
+            source_device_name,
+            port,
+            trusted_device_ids,
+        } = outbound.try_recv().unwrap() else {
+            panic!("manual trust should send a trust grant");
+        };
+        assert_eq!(source_device_id, "device-a");
+        assert_eq!(source_device_name, "Laptop A");
+        assert_eq!(port, 8766);
+        assert_eq!(
+            trusted_device_ids,
+            vec![
+                "device-b".to_string(),
+                "10.194.33.156:51051".to_string(),
+                "ws://10.194.33.156:8765/".to_string(),
+            ]
+        );
+        assert!(
+            trusted_device_ids.contains(&"device-b".to_string()),
+            "receiver must see its stable device id in trust aliases"
+        );
+    }
+
+    #[tokio::test]
+    async fn trust_grant_requires_local_user_confirmation_before_reverse_publish() {
+        let state = AppState::new();
+        let mut config = crate::models::AppConfig::default();
+        config.device_id = "device-b".to_string();
+        config.device_name = "Laptop B".to_string();
+        state.set_config(config.clone()).await;
+
+        let (sender, mut outbound) = mpsc::unbounded_channel();
+        let join = tauri::async_runtime::spawn(async {
+            futures_util::future::pending::<()>().await;
+        });
+        state
+            .register_peer("10.194.34.119:51234".to_string(), sender, join)
+            .await;
+        state
+            .attach_peer_device(
+                "10.194.34.119:51234",
+                "device-a".to_string(),
+                Some("ws://10.194.34.119:8766/".to_string()),
+            )
+            .await;
+
+        assert!(
+            publish_local_text_if_needed(&state, &config, "from B before grant".to_string())
+                .await
+                .is_none()
+        );
+
+        assert!(!apply_peer_trust_grant(
+            &state,
+            &mut config,
+            "10.194.34.119:51234",
+            "device-a",
+            &["device-b".to_string()],
+        )
+        .await);
+        state.set_config(config.clone()).await;
+
+        assert!(
+            publish_local_text_if_needed(&state, &config, "from B after grant".to_string())
+                .await
+                .is_none()
+        );
+        assert!(outbound.try_recv().is_err());
+        assert!(!config.trusted_devices.contains(&"device-a".to_string()));
+    }
+
+    #[tokio::test]
+    async fn local_clipboard_is_read_only_when_text_sync_has_trusted_peers() {
+        let state = AppState::new();
+        let mut config = crate::models::AppConfig::default();
+
+        assert!(!should_read_local_clipboard(&state, &config).await);
+
+        config.trusted_devices.push("device-b".to_string());
+        let (sender, _receiver) = mpsc::unbounded_channel();
+        let join = tauri::async_runtime::spawn(async {
+            futures_util::future::pending::<()>().await;
+        });
+        state
+            .register_peer("a-to-b".to_string(), sender, join)
+            .await;
+        state
+            .attach_peer_device("a-to-b", "device-b".to_string(), None)
+            .await;
+
+        assert!(should_read_local_clipboard(&state, &config).await);
+
+        config.sync_text = false;
+        assert!(!should_read_local_clipboard(&state, &config).await);
+    }
+
+    #[tokio::test]
+    async fn trusting_connected_peer_allows_current_clipboard_to_publish() {
+        let state = AppState::new();
+        let mut config = crate::models::AppConfig::default();
+        config.device_id = "device-a".to_string();
+        config.device_name = "Laptop A".to_string();
+        state.set_config(config.clone()).await;
+
+        let (sender, mut outbound) = mpsc::unbounded_channel();
+        let join = tauri::async_runtime::spawn(async {
+            futures_util::future::pending::<()>().await;
+        });
+        state
+            .register_peer("a-to-b".to_string(), sender, join)
+            .await;
+        state
+            .attach_peer_device("a-to-b", "device-b".to_string(), None)
+            .await;
+
+        assert!(
+            publish_local_text_if_needed(&state, &config, "ready after trust".to_string())
+                .await
+                .is_none()
+        );
+        assert!(outbound.try_recv().is_err());
+
+        config.trusted_devices.push("device-b".to_string());
+        state.set_config(config.clone()).await;
+        state.reset_local_clipboard_observation().await;
+
+        let message =
+            publish_local_text_if_needed(&state, &config, "ready after trust".to_string())
+                .await
+                .expect("current clipboard should publish after trusting connected peer");
+        let delivered = ClipboardMessage::try_from(outbound.try_recv().unwrap()).unwrap();
+
+        assert_eq!(delivered, message);
+        assert_eq!(delivered.content, "ready after trust");
+    }
+
+    #[tokio::test]
+    async fn trusted_hello_allows_current_clipboard_to_publish_to_new_peer() {
+        let state = AppState::new();
+        let mut config = crate::models::AppConfig::default();
+        config.device_id = "device-a".to_string();
+        config.device_name = "Laptop A".to_string();
+        config.trusted_devices.push("device-old".to_string());
+        config.trusted_devices.push("device-new".to_string());
+        state.set_config(config.clone()).await;
+
+        let (old_sender, mut old_outbound) = mpsc::unbounded_channel();
+        let old_join = tauri::async_runtime::spawn(async {
+            futures_util::future::pending::<()>().await;
+        });
+        state
+            .register_peer("old-connection".to_string(), old_sender, old_join)
+            .await;
+        state
+            .attach_peer_device("old-connection", "device-old".to_string(), None)
+            .await;
+
+        let first =
+            publish_local_text_if_needed(&state, &config, "current clipboard".to_string())
+                .await
+                .expect("existing trusted peer should receive current clipboard");
+        assert_eq!(first.content, "current clipboard");
+        assert!(old_outbound.try_recv().is_ok());
+
+        let (new_sender, mut new_outbound) = mpsc::unbounded_channel();
+        let new_join = tauri::async_runtime::spawn(async {
+            futures_util::future::pending::<()>().await;
+        });
+        state
+            .register_peer("10.194.33.156:51234".to_string(), new_sender, new_join)
+            .await;
+        state
+            .attach_peer_device(
+                "10.194.33.156:51234",
+                "device-new".to_string(),
+                Some("ws://10.194.33.156:8765/".to_string()),
+            )
+            .await;
+
+        assert!(
+            publish_local_text_if_needed(&state, &config, "current clipboard".to_string())
+                .await
+                .is_none()
+        );
+        assert!(new_outbound.try_recv().is_err());
+
+        assert!(
+            reset_local_observation_if_peer_is_trusted(
+                &state,
+                &config,
+                "10.194.33.156:51234",
+                "device-new",
+                "ws://10.194.33.156:8765/",
+            )
+            .await
+        );
+
+        let republished =
+            publish_local_text_if_needed(&state, &config, "current clipboard".to_string())
+                .await
+                .expect("trusted Hello should allow current clipboard to reach new peer");
+        let delivered_to_new = ClipboardMessage::try_from(new_outbound.try_recv().unwrap())
+            .expect("new peer should receive current clipboard after trusted Hello");
+
+        assert_eq!(republished.content, "current clipboard");
+        assert_eq!(delivered_to_new, republished);
+    }
+
+    #[test]
+    fn reset_local_observation_allows_current_clipboard_to_publish_after_trust() {
+        let mut engine = SyncEngine::new("device-a", "Laptop A");
+
+        let first = engine
+            .observe_local_text("ready before trust")
+            .expect("initial local content is observed");
+        assert_eq!(first.content, "ready before trust");
+        assert!(engine.observe_local_text("ready before trust").is_none());
+
+        engine.reset_local_observation();
+
+        let after_reset = engine
+            .observe_local_text("ready before trust")
+            .expect("same content should publish again after trust reset");
+        assert_eq!(after_reset.content, "ready before trust");
+    }
+
+    #[test]
+    fn auto_sync_starts_only_when_enabled_and_stopped() {
+        let mut config = crate::models::AppConfig::default();
+
+        assert!(should_auto_start_sync(&config, false));
+        assert!(!should_auto_start_sync(&config, true));
+
+        config.auto_sync = false;
+        assert!(!should_auto_start_sync(&config, false));
+    }
+
+    #[test]
+    fn manual_connect_starts_sync_runtime_when_stopped() {
+        assert!(should_start_sync_for_manual_connect(false));
+        assert!(!should_start_sync_for_manual_connect(true));
+    }
+
+    #[test]
+    fn connection_failure_message_points_to_remote_sync_and_firewall() {
+        let message = peer_connection_failure_message(
+            "10.194.33.156",
+            8765,
+            "connection refused",
+        );
+
+        assert!(message.contains("10.194.33.156:8765"));
+        assert!(message.contains("对方已开启同步"));
+        assert!(message.contains("对方主面板显示的本机地址"));
+        assert!(message.contains("Windows 防火墙"));
+        assert!(message.contains("connection refused"));
+    }
+
+    #[tokio::test]
+    async fn wait_for_sync_ready_returns_when_runtime_is_running() {
+        let state = AppState::new();
+        state
+            .set_running(true, Some("127.0.0.1".to_string()), "ready".to_string())
+            .await;
+
+        assert!(wait_for_sync_ready(&state, Duration::from_millis(10))
+            .await
+            .is_ok());
+    }
+
+    #[tokio::test]
+    async fn wait_for_sync_ready_returns_runtime_error() {
+        let state = AppState::new();
+        state.set_error("bind failed".to_string()).await;
+
+        let error = wait_for_sync_ready(&state, Duration::from_millis(10))
+            .await
+            .expect_err("runtime error should be returned");
+
+        assert!(error.to_string().contains("bind failed"));
+    }
+
+    async fn send_wire_message<S>(socket: &mut WebSocketStream<S>, message: WireMessage)
+    where
+        S: AsyncRead + AsyncWrite + Unpin,
+    {
+        let text = network::encode_wire_message(&message).unwrap();
+        socket.send(Message::Text(text.into())).await.unwrap();
+    }
+
+    async fn read_wire_message<S>(socket: &mut WebSocketStream<S>) -> WireMessage
+    where
+        S: AsyncRead + AsyncWrite + Unpin,
+    {
+        let message = socket.next().await.unwrap().unwrap();
+        let text = message.into_text().unwrap();
+        network::decode_wire_message(&text).unwrap()
     }
 }

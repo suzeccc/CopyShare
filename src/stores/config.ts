@@ -5,6 +5,8 @@ import type { AppConfig } from "@/types/config";
 
 const defaultConfig: AppConfig = {
   deviceName: "Copy-Sharer",
+  deviceId: "",
+  theme: "win11Dark",
   port: 8765,
   autoStart: false,
   autoSync: true,

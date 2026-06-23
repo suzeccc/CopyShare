@@ -58,7 +58,7 @@ onBeforeUnmount(() => {
 <template>
   <button
     v-if="iconOnly"
-    class="grid h-6 w-6 shrink-0 place-items-center rounded-md text-sky-50 transition hover:bg-sky-100/16 disabled:cursor-not-allowed disabled:opacity-45"
+    class="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-[color:var(--floating-control-bg)] text-[color:var(--floating-control-text)] transition hover:bg-[color:var(--floating-control-bg-hover)] disabled:cursor-not-allowed disabled:opacity-45"
     type="button"
     :disabled="!canCopy"
     :aria-label="buttonLabel"

@@ -5,62 +5,92 @@ import {
   disconnectDevice,
   getDevices,
   onAppEvent,
+  rejectDevice,
   trustDevice,
 } from "@/lib/tauri";
+import {
+  createManualConnectDraft,
+  setManualConnectDraftIp,
+  setManualConnectDraftPort,
+} from "@/lib/manualConnectDraft";
+import {
+  connectedTrustedDevices,
+  dedupeDevices,
+  markDeviceDisconnected,
+  markDeviceTrusted,
+  mergeRefreshedDevices,
+  pendingTrustDevices,
+  removeDeviceByKey,
+  shouldSkipManualConnect,
+  upsertDevice,
+} from "@/lib/deviceList";
+import { useStatusStore } from "@/stores/status";
 import type { DeviceInfo } from "@/types/device";
 
 export const useDevicesStore = defineStore("devices", {
   state: () => ({
+    connectDraft: createManualConnectDraft(),
     devices: [] as DeviceInfo[],
     loading: false,
     error: null as string | null,
   }),
   getters: {
-    connected: (state) => state.devices.filter((device) => device.connected),
+    connected: (state) => connectedTrustedDevices(state.devices),
+    pendingTrust: (state) => pendingTrustDevices(state.devices),
     trusted: (state) => state.devices.filter((device) => device.trusted),
   },
   actions: {
     async refresh() {
       this.error = null;
       try {
-        this.devices = await getDevices();
+        this.devices = mergeRefreshedDevices(this.devices, await getDevices());
       } catch (error) {
         this.error = String(error);
       }
     },
     async connect(ip: string, port: number) {
-      this.loading = true;
       this.error = null;
+      if (shouldSkipManualConnect(this.devices, ip, port, this.loading)) {
+        return;
+      }
+
+      this.loading = true;
       try {
         const device = await connectDevice(ip, port);
         this.upsert(device);
+        await useStatusStore().refresh();
       } catch (error) {
         this.error = String(error);
       } finally {
         this.loading = false;
       }
     },
+    setConnectDraftIp(ip: string) {
+      this.connectDraft = setManualConnectDraftIp(this.connectDraft, ip);
+    },
+    setConnectDraftPort(port: number) {
+      this.connectDraft = setManualConnectDraftPort(this.connectDraft, port);
+    },
     async disconnect(deviceId: string) {
       this.error = null;
       await disconnectDevice(deviceId);
-      this.devices = this.devices.map((device) =>
-        device.id === deviceId ? { ...device, connected: false, status: "offline" } : device,
-      );
+      this.devices = markDeviceDisconnected(this.devices, deviceId);
+      await useStatusStore().refresh();
     },
     async trust(deviceId: string) {
       this.error = null;
       await trustDevice(deviceId);
-      this.devices = this.devices.map((device) =>
-        device.id === deviceId ? { ...device, trusted: true } : device,
-      );
+      this.devices = markDeviceTrusted(this.devices, deviceId);
+      await useStatusStore().refresh();
+    },
+    async reject(deviceId: string) {
+      this.error = null;
+      await rejectDevice(deviceId);
+      this.devices = removeDeviceByKey(this.devices, deviceId);
+      await useStatusStore().refresh();
     },
     upsert(device: DeviceInfo) {
-      const index = this.devices.findIndex((item) => item.id === device.id);
-      if (index >= 0) {
-        this.devices[index] = device;
-      } else {
-        this.devices.unshift(device);
-      }
+      this.devices = upsertDevice(this.devices, device);
     },
     async subscribe() {
       await Promise.all([

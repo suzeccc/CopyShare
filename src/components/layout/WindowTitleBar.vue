@@ -21,23 +21,40 @@ function handleWindowDrag(event: MouseEvent) {
 
 <template>
   <header
-    class="flex h-10 shrink-0 select-none items-center justify-between border-b border-[color:var(--main-line)] bg-[color:var(--main-bg-deep)] text-slate-100"
+    class="flex h-10 shrink-0 select-none items-center border-b border-[color:var(--main-line)] bg-[color:var(--main-bg-deep)] text-slate-100"
     data-tauri-drag-region
+    data-window-drag-region
     @dblclick="toggleMaximizeWindow()"
     @mousedown.capture="handleWindowDrag"
   >
-    <div class="flex min-w-0 items-center gap-2 px-4" data-tauri-drag-region>
+    <div
+      class="flex min-w-0 items-center gap-2 px-4"
+      data-tauri-drag-region
+      data-window-drag-region
+    >
       <img
         :src="appIconUrl"
         alt=""
         class="h-5 w-5 shrink-0 rounded-sm"
         draggable="false"
         data-tauri-drag-region
+        data-window-drag-region
       >
-      <span class="truncate text-sm font-medium text-white" data-tauri-drag-region>
+      <span
+        class="truncate text-sm font-medium text-white"
+        data-tauri-drag-region
+        data-window-drag-region
+      >
         Copy-Sharer
       </span>
     </div>
+
+    <div
+      class="h-full flex-1"
+      aria-hidden="true"
+      data-tauri-drag-region
+      data-window-drag-region
+    />
 
     <div class="flex h-full items-center" data-window-control @dblclick.stop>
       <button

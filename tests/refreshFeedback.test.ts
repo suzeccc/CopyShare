@@ -11,7 +11,8 @@ const refreshing = getRefreshFeedbackView("refreshing");
 assert.equal(refreshing.label, "刷新中");
 assert.equal(refreshing.disabled, true);
 assert.equal(refreshing.iconClass.includes("animate-spin"), true);
-assert.equal(refreshing.buttonClass.includes("border-sky-300/60"), true);
+assert.equal(refreshing.buttonClass.includes("border-[color:var(--accent-line)]"), true);
+assert.equal(refreshing.buttonClass.includes("text-[color:var(--accent-text)]"), true);
 
 const done = getRefreshFeedbackView("done");
 assert.equal(done.label, "已刷新");

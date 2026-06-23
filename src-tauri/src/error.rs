@@ -18,6 +18,8 @@ pub enum AppError {
     AlreadyRunning,
     #[error("sync is not running")]
     NotRunning,
+    #[error("{0}")]
+    ConnectionTimeout(String),
     #[error("unknown device: {0}")]
     UnknownDevice(String),
     #[error("tauri error: {0}")]

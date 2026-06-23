@@ -21,7 +21,7 @@ const classes = computed(() => [
   "disabled:cursor-not-allowed disabled:opacity-50",
   props.size === "sm" ? "h-8 px-3 text-xs" : "h-10 px-4 text-sm",
   props.variant === "primary" &&
-    "border-blue-500 bg-blue-600 text-white hover:bg-blue-500",
+    "border-[color:var(--button-primary-line)] bg-[color:var(--button-primary-bg)] text-[color:var(--button-primary-text)] hover:bg-[color:var(--button-primary-bg-hover)]",
   props.variant === "secondary" &&
     "border-[color:var(--main-line-soft)] bg-[color:var(--main-bg-soft)] text-slate-100 hover:border-[color:var(--main-line)] hover:bg-[color:var(--main-bg-muted)]",
   props.variant === "ghost" &&

@@ -1,5 +1,9 @@
+export type AppTheme = "copyBlue" | "win11Dark";
+
 export interface AppConfig {
   deviceName: string;
+  deviceId: string;
+  theme: AppTheme;
   port: number;
   autoStart: boolean;
   autoSync: boolean;

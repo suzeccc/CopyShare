@@ -22,7 +22,7 @@ const items = [
         :key="item.path"
         :to="item.path"
         class="flex h-10 items-center gap-3 rounded-md px-3 text-sm font-medium text-slate-400 transition hover:bg-[color:var(--main-bg-muted)] hover:text-white"
-        active-class="bg-[color:var(--main-bg-soft)] text-blue-100 ring-1 ring-[color:var(--main-line)]"
+        active-class="bg-[color:var(--main-bg-soft)] text-[color:var(--accent-text)] ring-1 ring-[color:var(--main-line)]"
       >
         <component :is="item.icon" class="h-4 w-4" />
         {{ item.label }}

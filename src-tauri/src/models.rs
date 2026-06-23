@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -73,8 +74,25 @@ pub struct ClipboardMessage {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub enum AppTheme {
+    CopyBlue,
+    Win11Dark,
+}
+
+impl Default for AppTheme {
+    fn default() -> Self {
+        Self::Win11Dark
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct AppConfig {
     pub device_name: String,
+    #[serde(default)]
+    pub device_id: String,
+    #[serde(default)]
+    pub theme: AppTheme,
     pub port: u16,
     pub auto_start: bool,
     pub auto_sync: bool,
@@ -89,6 +107,8 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             device_name: "Copy-Sharer".to_string(),
+            device_id: new_device_id(),
+            theme: AppTheme::Win11Dark,
             port: 8765,
             auto_start: false,
             auto_sync: true,
@@ -99,6 +119,10 @@ impl Default for AppConfig {
             sync_files: false,
         }
     }
+}
+
+pub fn new_device_id() -> String {
+    format!("device-{}", Uuid::new_v4().simple())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -137,6 +161,12 @@ pub enum WireMessage {
         device_name: String,
         app_version: String,
         port: u16,
+    },
+    TrustGranted {
+        source_device_id: String,
+        source_device_name: String,
+        port: u16,
+        trusted_device_ids: Vec<String>,
     },
     Clipboard {
         message_id: String,

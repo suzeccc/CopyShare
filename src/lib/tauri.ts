@@ -51,6 +51,10 @@ export function trustDevice(deviceId: string): Promise<void> {
   return invoke<void>("trust_device", { deviceId });
 }
 
+export function rejectDevice(deviceId: string): Promise<void> {
+  return invoke<void>("reject_device", { deviceId });
+}
+
 export function getConfig(): Promise<AppConfig> {
   return invoke<AppConfig>("get_config");
 }
@@ -124,6 +128,7 @@ export async function restoreMainWindow(): Promise<void> {
   await window.setSize(
     new LogicalSize(MAIN_WINDOW_BOUNDS.width, MAIN_WINDOW_BOUNDS.height),
   );
+  await window.center();
   await window.setBackgroundColor(MAIN_WINDOW_BACKGROUND);
   await window.setFocus();
 }

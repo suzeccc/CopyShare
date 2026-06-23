@@ -16,7 +16,23 @@ export function formatTime(value: string | null): string {
 }
 
 export function deviceAddress(ip: string, port: number): string {
-  return `${ip}:${port}`;
+  const normalizedIp = normalizeDeviceHost(ip);
+  return `${normalizedIp}:${port}`;
+}
+
+function normalizeDeviceHost(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return trimmed;
+  }
+
+  try {
+    const url = new URL(trimmed);
+    return url.hostname || trimmed;
+  } catch {
+    const match = trimmed.match(/^(.+):(\d+)$/);
+    return match?.[1] || trimmed;
+  }
 }
 
 export function clampPort(value: number): number {

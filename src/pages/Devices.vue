@@ -3,11 +3,9 @@ import DeviceCard from "@/components/devices/DeviceCard.vue";
 import ManualConnectForm from "@/components/devices/ManualConnectForm.vue";
 import Card from "@/components/ui/Card.vue";
 import RefreshButton from "@/components/ui/RefreshButton.vue";
-import { useConfigStore } from "@/stores/config";
 import { useDevicesStore } from "@/stores/devices";
 
 const devicesStore = useDevicesStore();
-const configStore = useConfigStore();
 </script>
 
 <template>
@@ -15,14 +13,16 @@ const configStore = useConfigStore();
     <section class="grid gap-5 xl:grid-cols-[0.85fr_1.15fr]">
       <Card>
         <p class="text-sm font-semibold text-white">快速配对</p>
-        <p class="mt-2 text-sm leading-6 text-slate-400">
-          在另一台电脑启动 Copy-Sharer，输入它的局域网 IPv4 地址和端口。
-          首次连接会进入待信任状态，确认后才会参与同步。
+        <p class="mt-2 text-sm leading-6 text-[color:var(--muted-text)]">
+          在另一台电脑启动 Copy-Sharer 并开启同步，输入它的局域网 IPv4 地址和端口。要双向同步，两台电脑都需要在设备列表里信任对方。
         </p>
-        <div class="mt-5 rounded-lg border border-[color:var(--main-line-soft)] bg-[rgba(19,34,63,0.58)] p-4">
+        <div class="mt-5 rounded-lg border border-[color:var(--main-line-soft)] bg-[color:var(--panel-bg-soft)] p-4">
           <ManualConnectForm
+            :ip="devicesStore.connectDraft.ip"
+            :port="devicesStore.connectDraft.port"
             :loading="devicesStore.loading"
-            :default-port="configStore.config.port"
+            @update:ip="devicesStore.setConnectDraftIp"
+            @update:port="devicesStore.setConnectDraftPort"
             @connect="devicesStore.connect"
           />
         </div>
@@ -35,7 +35,7 @@ const configStore = useConfigStore();
         <div class="flex items-start justify-between gap-4">
           <div>
             <p class="text-sm font-semibold text-white">已连接设备</p>
-            <p class="mt-2 text-sm text-slate-400">当前会话里保持 WebSocket 连接的设备。</p>
+            <p class="mt-2 text-sm text-[color:var(--muted-text)]">已信任并保持连接的设备，只保留断开操作。</p>
           </div>
           <RefreshButton :refresh="() => devicesStore.refresh()" />
         </div>
@@ -44,12 +44,14 @@ const configStore = useConfigStore();
             v-for="device in devicesStore.connected"
             :key="device.id"
             :device="device"
+            mode="connected"
             @disconnect="devicesStore.disconnect"
+            @reject="devicesStore.reject"
             @trust="devicesStore.trust"
           />
         </div>
-        <div v-else class="mt-5 rounded-lg border border-dashed border-[color:var(--main-line-soft)] px-4 py-8 text-center text-sm text-slate-500">
-          还没有连接设备。输入对方 IP 后点击“连接”。
+        <div v-else class="mt-5 rounded-lg border border-dashed border-[color:var(--main-line-soft)] px-4 py-8 text-center text-sm text-[color:var(--subtle-text)]">
+          还没有已信任的连接设备。先在设备列表确认信任。
         </div>
       </Card>
     </section>
@@ -58,20 +60,22 @@ const configStore = useConfigStore();
       <div class="mb-4 flex items-center justify-between">
         <div>
           <p class="text-sm font-semibold text-white">设备列表</p>
-          <p class="mt-1 text-xs text-slate-500">包含已发现、已连接和已信任设备。</p>
+          <p class="mt-1 text-xs text-[color:var(--muted-text)]">连接后的设备会先出现在这里；本机信任后进入已连接设备，对方电脑也需要信任本机。</p>
         </div>
       </div>
-      <div v-if="devicesStore.devices.length" class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+      <div v-if="devicesStore.pendingTrust.length" class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         <DeviceCard
-          v-for="device in devicesStore.devices"
+          v-for="device in devicesStore.pendingTrust"
           :key="device.id"
           :device="device"
+          mode="pending"
           @disconnect="devicesStore.disconnect"
+          @reject="devicesStore.reject"
           @trust="devicesStore.trust"
         />
       </div>
-      <div v-else class="rounded-lg border border-dashed border-[color:var(--main-line-soft)] px-4 py-10 text-center text-sm text-slate-500">
-        输入对方 IP 后点击“连接”，设备会出现在这里。
+      <div v-else class="rounded-lg border border-dashed border-[color:var(--main-line-soft)] px-4 py-10 text-center text-sm text-[color:var(--subtle-text)]">
+        输入对方 IP 后点击“连接”，设备会在这里等待确认。双向同步时请在两台电脑上都确认信任。
       </div>
     </Card>
   </div>

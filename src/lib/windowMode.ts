@@ -13,9 +13,9 @@ export const FLOATING_WINDOW_BOUNDS = {
   opacity: 0.66,
 } as const;
 
-export const FLOATING_WINDOW_BACKGROUND = "rgba(7, 24, 49, 0.66)";
+export const FLOATING_WINDOW_BACKGROUND = "rgba(5, 18, 39, 0.68)";
 export const TRANSPARENT_WINDOW_BACKGROUND = "#00000000";
-export const MAIN_WINDOW_BACKGROUND = "#172746";
+export const MAIN_WINDOW_BACKGROUND = "#10203a";
 
 export function getClipboardPreview(summary: string | null | undefined): string {
   const preview = summary?.trim();

@@ -32,6 +32,21 @@ pub fn run() {
 
             tauri::async_runtime::block_on(state_for_setup.load_from_disk(app.handle()))?;
             tray::setup_tray(app, state_for_setup.clone())?;
+
+            let app_handle = app.handle().clone();
+            let state_for_auto_sync = state_for_setup.clone();
+            let should_auto_sync = tauri::async_runtime::block_on(async {
+                sync::should_auto_start_sync(
+                    &state_for_auto_sync.config().await,
+                    state_for_auto_sync.status().await.running,
+                )
+            });
+            if should_auto_sync {
+                tauri::async_runtime::spawn(async move {
+                    let _ = sync::start_sync_runtime(app_handle, state_for_auto_sync).await;
+                });
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -42,6 +57,7 @@ pub fn run() {
             commands::connect_device,
             commands::disconnect_device,
             commands::trust_device,
+            commands::reject_device,
             commands::get_config,
             commands::update_config,
             commands::get_history,

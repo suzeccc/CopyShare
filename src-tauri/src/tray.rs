@@ -3,8 +3,6 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     App, Manager,
 };
-use tokio::sync::watch;
-
 use crate::{state::AppState, sync};
 
 pub fn setup_tray(app: &mut App, state: AppState) -> tauri::Result<()> {
@@ -38,13 +36,7 @@ pub fn setup_tray(app: &mut App, state: AppState) -> tauri::Result<()> {
                 let state = state_for_menu.clone();
                 let app_handle = app.clone();
                 tauri::async_runtime::spawn(async move {
-                    let (stop, stop_rx) = watch::channel(false);
-                    let join = tauri::async_runtime::spawn(sync::run_sync_runtime(
-                        app_handle.clone(),
-                        state.clone(),
-                        stop_rx,
-                    ));
-                    let _ = state.start_runtime(stop, join).await;
+                    let _ = sync::start_sync_runtime(app_handle, state).await;
                 });
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.show();

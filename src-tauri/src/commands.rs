@@ -1,6 +1,6 @@
-use tauri::{AppHandle, Emitter, Manager, State};
-use tokio::sync::watch;
+use std::time::Duration;
 
+use tauri::{AppHandle, Emitter, Manager, State};
 use crate::{
     autostart, clipboard,
     config,
@@ -20,11 +20,9 @@ pub async fn get_status(state: State<'_, AppState>) -> AppResult<AppStatus> {
 
 #[tauri::command]
 pub async fn start_sync(app: AppHandle, state: State<'_, AppState>) -> AppResult<AppStatus> {
-    let state_clone = state.inner().clone();
-    let app_clone = app.clone();
-    let (stop, stop_rx) = watch::channel(false);
-    let join = tauri::async_runtime::spawn(sync::run_sync_runtime(app_clone, state_clone.clone(), stop_rx));
-    state_clone.start_runtime(stop, join).await?;
+    let app_state = state.inner().clone();
+    sync::start_sync_runtime(app, app_state.clone()).await?;
+    sync::wait_for_sync_ready(&app_state, Duration::from_secs(2)).await?;
     Ok(state.status().await)
 }
 
@@ -48,7 +46,20 @@ pub async fn connect_device(
     ip: String,
     port: u16,
 ) -> AppResult<DeviceInfo> {
-    sync::connect_to_peer(app, state.inner().clone(), ip, port).await
+    if let Some(device) = state.connected_device_for_endpoint(&ip, port).await? {
+        return Ok(device);
+    }
+
+    let app_state = state.inner().clone();
+    if sync::should_start_sync_for_manual_connect(state.status().await.running) {
+        match sync::start_sync_runtime(app.clone(), app_state.clone()).await {
+            Ok(()) | Err(AppError::AlreadyRunning) => {}
+            Err(error) => return Err(error),
+        }
+        sync::wait_for_sync_ready(&app_state, Duration::from_secs(2)).await?;
+    }
+
+    sync::connect_to_peer(app, app_state, ip, port).await
 }
 
 #[tauri::command]
@@ -71,7 +82,34 @@ pub async fn trust_device(
     device_id: String,
 ) -> AppResult<()> {
     let mut next_config = state.config().await;
-    security::trust_device(&mut next_config, device_id.clone());
+    for key in state.trust_keys_for_device(&device_id).await {
+        security::trust_device(&mut next_config, key);
+    }
+    config::save_config(&app, &next_config)?;
+    state.set_config(next_config.clone()).await;
+    state.mark_device_trusted(&device_id).await;
+    state.clear_manual_trust_required(&device_id).await;
+    state.reset_local_clipboard_observation().await;
+    sync::notify_peer_trusted(state.inner(), &next_config, &device_id).await;
+    app.emit("config-updated", next_config)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn reject_device(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    device_id: String,
+) -> AppResult<()> {
+    let trust_keys = state.trust_keys_for_device(&device_id).await;
+    state.remove_peer(&device_id).await;
+    state.remove_device(&device_id).await;
+
+    let mut next_config = state.config().await;
+    for key in trust_keys {
+        security::untrust_device(&mut next_config, &key);
+    }
+    state.clear_manual_trust_required(&device_id).await;
     config::save_config(&app, &next_config)?;
     state.set_config(next_config.clone()).await;
     app.emit("config-updated", next_config)?;
@@ -106,6 +144,11 @@ pub async fn update_config(
 
     let mut next_config = config;
     next_config.device_name = device_name;
+    next_config.device_id = if next_config.device_id.trim().is_empty() {
+        current.device_id.clone()
+    } else {
+        next_config.device_id.trim().to_string()
+    };
     next_config.sync_text = true;
     next_config.sync_image = false;
     next_config.sync_files = false;
@@ -142,6 +185,7 @@ pub async fn show_main_window(app: AppHandle) -> AppResult<()> {
     if let Some(window) = app.get_webview_window("main") {
         window.show()?;
         window.unminimize()?;
+        window.center()?;
         window.set_focus()?;
     }
     Ok(())

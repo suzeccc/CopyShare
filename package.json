@@ -1,12 +1,12 @@
 {
   "name": "copy-sharer",
-  "version": "1.0.0",
+  "version": "1.5.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 1420",
     "tauri:dev": "tauri dev",
-    "build": "vue-tsc --noEmit && vite build --configLoader native",
+    "build": "vue-tsc --noEmit && npm exec -- vite build --config vite.config.ts",
     "tauri:build": "tauri build",
     "preview": "vite preview --host 127.0.0.1"
   },

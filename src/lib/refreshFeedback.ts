@@ -16,8 +16,8 @@ const views: Record<RefreshFeedbackState, RefreshFeedbackView> = {
   },
   refreshing: {
     label: "刷新中",
-    iconClass: "animate-spin text-sky-100",
-    buttonClass: "border-sky-300/60 bg-sky-500/[0.12] text-sky-100",
+    iconClass: "animate-spin text-[color:var(--accent-text)]",
+    buttonClass: "border-[color:var(--accent-line)] bg-[color:var(--accent-soft)] text-[color:var(--accent-text)]",
     disabled: true,
   },
   done: {

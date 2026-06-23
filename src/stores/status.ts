@@ -64,6 +64,8 @@ export const useStatusStore = defineStore("status", {
       this.error = null;
       try {
         this.status = await stopSync();
+        const { useDevicesStore } = await import("@/stores/devices");
+        await useDevicesStore().refresh();
       } catch (error) {
         this.error = String(error);
       } finally {

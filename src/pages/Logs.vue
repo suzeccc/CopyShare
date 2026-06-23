@@ -36,6 +36,7 @@ const historyStore = useHistoryStore();
             v-for="device in devicesStore.devices"
             :key="device.id"
             :device="device"
+            @connect="devicesStore.connect"
             @disconnect="devicesStore.disconnect"
             @trust="devicesStore.trust"
           />

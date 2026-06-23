@@ -1,55 +1,55 @@
 <script setup lang="ts">
-import { ref } from "vue";
 import { Link } from "lucide-vue-next";
 
 import Button from "@/components/ui/Button.vue";
 import { clampPort } from "@/lib/format";
 
-const props = withDefaults(
-  defineProps<{
-    loading?: boolean;
-    defaultPort?: number;
-  }>(),
-  {
-    loading: false,
-    defaultPort: 8765,
-  },
-);
-
 const emit = defineEmits<{
+  "update:ip": [value: string];
+  "update:port": [value: number];
   connect: [ip: string, port: number];
 }>();
 
-const ip = ref("");
-const port = ref(props.defaultPort);
+withDefaults(
+  defineProps<{
+    loading?: boolean;
+    ip: string;
+    port: number;
+  }>(),
+  {
+    loading: false,
+  },
+);
 
-function submit() {
-  const nextIp = ip.value.trim();
+function submit(ip: string, port: number) {
+  const nextIp = ip.trim();
   if (!nextIp) {
     return;
   }
-  emit("connect", nextIp, clampPort(port.value));
+  emit("connect", nextIp, clampPort(port));
 }
 </script>
 
 <template>
-  <form class="grid gap-3 md:grid-cols-[1fr_120px_auto]" @submit.prevent="submit">
+  <form class="grid gap-3 md:grid-cols-[1fr_120px_auto]" @submit.prevent="submit(ip, port)">
     <label class="min-w-0">
       <span class="mb-2 block text-xs font-medium text-slate-400">输入对方 IP</span>
       <input
-        v-model="ip"
-        class="h-10 w-full rounded-md border border-[color:var(--main-line-soft)] bg-[rgba(19,34,63,0.72)] px-3 text-sm text-white placeholder:text-slate-600"
+        :value="ip"
+        class="h-10 w-full rounded-md border border-[color:var(--main-line-soft)] bg-[color:var(--field-bg)] px-3 text-sm text-white placeholder:text-slate-600"
         placeholder="192.168.1.20"
+        @input="emit('update:ip', ($event.target as HTMLInputElement).value)"
       />
     </label>
     <label>
       <span class="mb-2 block text-xs font-medium text-slate-400">端口</span>
       <input
-        v-model.number="port"
-        class="h-10 w-full rounded-md border border-[color:var(--main-line-soft)] bg-[rgba(19,34,63,0.72)] px-3 text-sm text-white"
+        :value="port"
+        class="h-10 w-full rounded-md border border-[color:var(--main-line-soft)] bg-[color:var(--field-bg)] px-3 text-sm text-white"
         type="number"
         min="1"
         max="65535"
+        @input="emit('update:port', Number(($event.target as HTMLInputElement).value))"
       />
     </label>
     <div class="flex items-end">
