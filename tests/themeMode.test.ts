@@ -16,6 +16,7 @@ assert.match(settings, /dataset\.appTheme\s*=\s*theme/);
 assert.match(settings, /onBeforeUnmount/);
 assert.match(settings, /configStore\.config\.theme/);
 assert.match(settings, /Win11 深色/);
+assert.match(settings, /themeOptions[\s\S]*value:\s*"win11Dark"[\s\S]*value:\s*"copyBlue"/);
 assert.match(configStore, /theme:\s*"win11Dark"/);
 assert.match(style, /html\[data-app-theme="win11Dark"\]/);
 assert.match(style, /--main-bg:\s*#202020;/);

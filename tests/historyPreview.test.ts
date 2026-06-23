@@ -16,6 +16,10 @@ function historyItem(partial: Partial<HistoryItem>): HistoryItem {
   };
 }
 
+function systemItem(index: number) {
+  return { id: `system-${index}`, text: `System ${index}` };
+}
+
 const items = getRecentClipboardItems([
   historyItem({ id: "1", summary: "摘要一", content: "  完整内容一  " }),
   historyItem({ id: "2", summary: "摘要二" }),
@@ -36,6 +40,8 @@ assert.deepEqual(items, [
 assert.deepEqual(getRecentClipboardItems([], 3), []);
 assert.deepEqual(getRecentClipboardItems([historyItem({ id: "empty", summary: " " })], 3), []);
 
+assert.equal(getFloatingClipboardItems(Array.from({ length: 11 }, (_, index) => systemItem(index + 1)), []).length, 10);
+
 assert.deepEqual(
   getFloatingClipboardItems(
     [
@@ -54,6 +60,8 @@ assert.deepEqual(
     { id: "system-3", text: "Win+V 第三条" },
     { id: "system-4", text: "Win+V 第四条" },
     { id: "system-5", text: "Win+V 第五条" },
+    { id: "system-6", text: "Win+V 第六条" },
+    { id: "app-1", text: "程序历史" },
   ],
 );
 

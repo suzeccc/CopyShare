@@ -8,28 +8,22 @@ import {
   startWindowDrag,
   toggleMaximizeWindow,
 } from "@/lib/tauri";
-import { shouldStartWindowDrag } from "@/lib/windowDrag";
+import { startWindowDragFromMouseEvent } from "@/lib/windowDrag";
 
 function handleWindowDrag(event: MouseEvent) {
-  if (!shouldStartWindowDrag(event)) {
-    return;
-  }
-
-  void startWindowDrag();
+  startWindowDragFromMouseEvent(event, startWindowDrag);
 }
 </script>
 
 <template>
   <header
     class="flex h-10 shrink-0 select-none items-center border-b border-[color:var(--main-line)] bg-[color:var(--main-bg-deep)] text-slate-100"
-    data-tauri-drag-region
     data-window-drag-region
     @dblclick="toggleMaximizeWindow()"
     @mousedown.capture="handleWindowDrag"
   >
     <div
       class="flex min-w-0 items-center gap-2 px-4"
-      data-tauri-drag-region
       data-window-drag-region
     >
       <img
@@ -37,12 +31,10 @@ function handleWindowDrag(event: MouseEvent) {
         alt=""
         class="h-5 w-5 shrink-0 rounded-sm"
         draggable="false"
-        data-tauri-drag-region
         data-window-drag-region
       >
       <span
         class="truncate text-sm font-medium text-white"
-        data-tauri-drag-region
         data-window-drag-region
       >
         Copy-Sharer
@@ -52,7 +44,6 @@ function handleWindowDrag(event: MouseEvent) {
     <div
       class="h-full flex-1"
       aria-hidden="true"
-      data-tauri-drag-region
       data-window-drag-region
     />
 

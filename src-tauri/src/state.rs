@@ -109,7 +109,9 @@ impl AppState {
         let config = self.config().await;
         let peers = self.inner.peers.lock().await;
         status.connected_count = peers.len();
-        if status.running && !peers.is_empty() {
+        if status.running && peers.is_empty() {
+            status.message = Some("正在监听，等待设备连接".to_string());
+        } else if status.running {
             let manual_trust_required = self.inner.manual_trust_required.lock().await;
             status.message = Some(if peers
                 .iter()
@@ -308,6 +310,17 @@ impl AppState {
 
     pub async fn observe_local_text(&self, text: String) -> Option<crate::models::ClipboardMessage> {
         self.inner.sync_engine.lock().await.observe_local_text(text)
+    }
+
+    pub async fn observe_local_image(
+        &self,
+        image_base64: String,
+    ) -> Option<crate::models::ClipboardMessage> {
+        self.inner
+            .sync_engine
+            .lock()
+            .await
+            .observe_local_image(image_base64)
     }
 
     pub async fn reset_local_clipboard_observation(&self) {
@@ -941,6 +954,23 @@ mod runtime_tests {
         assert_eq!(devices.len(), 1);
         assert!(!devices[0].connected);
         assert_eq!(devices[0].status, DeviceStatus::Offline);
+    }
+
+    #[tokio::test]
+    async fn running_status_without_peers_reports_waiting_for_connection() {
+        let state = AppState::new();
+        state
+            .set_running(
+                true,
+                Some("10.194.34.119".to_string()),
+                "正在监听端口 8765".to_string(),
+            )
+            .await;
+
+        let status = state.status().await;
+
+        assert_eq!(status.connected_count, 0);
+        assert_eq!(status.message.as_deref(), Some("正在监听，等待设备连接"));
     }
 
     #[tokio::test]

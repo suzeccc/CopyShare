@@ -1,5 +1,6 @@
 import { createRouter, createWebHashHistory } from "vue-router";
 
+import About from "@/pages/About.vue";
 import Devices from "@/pages/Devices.vue";
 import Home from "@/pages/Home.vue";
 import Logs from "@/pages/Logs.vue";
@@ -13,6 +14,7 @@ const router = createRouter({
     { path: "/logs", name: "logs", component: Logs },
     { path: "/history", redirect: "/logs" },
     { path: "/settings", name: "settings", component: Settings },
+    { path: "/about", name: "about", component: About },
   ],
 });
 

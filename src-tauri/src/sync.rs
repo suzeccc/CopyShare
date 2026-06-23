@@ -78,8 +78,22 @@ impl SyncEngine {
     }
 
     pub fn observe_local_text(&mut self, text: impl Into<String>) -> Option<ClipboardMessage> {
-        let content = text.into();
-        let content_type = ClipboardContentType::Text;
+        self.observe_local_content(ClipboardContentType::Text, text)
+    }
+
+    pub fn observe_local_image(
+        &mut self,
+        image_base64: impl Into<String>,
+    ) -> Option<ClipboardMessage> {
+        self.observe_local_content(ClipboardContentType::Image, image_base64)
+    }
+
+    fn observe_local_content(
+        &mut self,
+        content_type: ClipboardContentType,
+        content: impl Into<String>,
+    ) -> Option<ClipboardMessage> {
+        let content = content.into();
         let local_hash = content_hash(&content_type, &content);
 
         if self.pending_remote_echo_hashes.remove(&local_hash) {
@@ -516,11 +530,10 @@ async fn handle_wire_text(app: &AppHandle, state: &AppState, connection_id: &str
                     return;
                 }
             };
-            if clipboard.content_type != ClipboardContentType::Text {
-                let _ = app.emit("sync-error", "MVP 仅支持文本剪贴板同步");
+            let config = state.config().await;
+            if !should_accept_clipboard_type(&config, &clipboard.content_type) {
                 return;
             }
-            let config = state.config().await;
             if !state
                 .clipboard_sender_is_trusted(&config, connection_id, &clipboard.source_device_id)
                 .await
@@ -528,7 +541,7 @@ async fn handle_wire_text(app: &AppHandle, state: &AppState, connection_id: &str
                 return;
             }
             if state.apply_remote_clipboard(&clipboard).await {
-                if let Err(error) = clipboard::write_clipboard_text(app, &clipboard.content) {
+                if let Err(error) = write_remote_clipboard(app, &clipboard) {
                     let _ = app.emit("sync-error", error.to_string());
                     return;
                 }
@@ -568,28 +581,36 @@ async fn poll_local_clipboard(app: &AppHandle, state: &AppState) -> AppResult<()
         return Ok(());
     }
 
-    let text = clipboard::read_clipboard_text(app)?;
-    let Some(message) = publish_local_text_if_needed(state, &config, text).await else {
-        return Ok(());
-    };
+    let mut changed = false;
 
-    if config.save_history {
-        let item = history::make_history_item(
-            HistoryDirection::Local,
-            message.source_device_name.clone(),
-            &message,
-        );
-        state.push_history(item.clone()).await;
-        history::save_history(app, &state.history().await)?;
-        let _ = app.emit("clipboard-synced", item);
+    if config.sync_text {
+        if let Ok(text) = clipboard::read_clipboard_text(app) {
+            if let Some(message) = publish_local_text_if_needed(state, &config, text).await {
+                record_local_history(app, state, &config, &message).await?;
+                changed = true;
+            }
+        }
     }
 
-    emit_status(app, state).await;
+    if config.sync_image {
+        if let Some(image_base64) = clipboard::read_clipboard_image_base64(app)? {
+            if let Some(message) =
+                publish_local_image_if_needed(state, &config, image_base64).await
+            {
+                record_local_history(app, state, &config, &message).await?;
+                changed = true;
+            }
+        }
+    }
+
+    if changed {
+        emit_status(app, state).await;
+    }
     Ok(())
 }
 
 async fn should_read_local_clipboard(state: &AppState, config: &AppConfig) -> bool {
-    config.sync_text && state.has_trusted_peers(config).await
+    (config.sync_text || config.sync_image) && state.has_trusted_peers(config).await
 }
 
 async fn publish_local_text_if_needed(
@@ -605,6 +626,62 @@ async fn publish_local_text_if_needed(
     state.touch_last_sync().await;
     state.broadcast_trusted(config, message.clone().into()).await;
     Some(message)
+}
+
+async fn publish_local_image_if_needed(
+    state: &AppState,
+    config: &AppConfig,
+    image_base64: String,
+) -> Option<ClipboardMessage> {
+    if !config.sync_image || !state.has_trusted_peers(config).await {
+        return None;
+    }
+
+    let message = state.observe_local_image(image_base64).await?;
+    state.touch_last_sync().await;
+    state.broadcast_trusted(config, message.clone().into()).await;
+    Some(message)
+}
+
+async fn record_local_history(
+    app: &AppHandle,
+    state: &AppState,
+    config: &AppConfig,
+    message: &ClipboardMessage,
+) -> AppResult<()> {
+    if !config.save_history {
+        return Ok(());
+    }
+
+    let item = history::make_history_item(
+        HistoryDirection::Local,
+        message.source_device_name.clone(),
+        message,
+    );
+    state.push_history(item.clone()).await;
+    history::save_history(app, &state.history().await)?;
+    let _ = app.emit("clipboard-synced", item);
+    Ok(())
+}
+
+fn should_accept_clipboard_type(config: &AppConfig, content_type: &ClipboardContentType) -> bool {
+    match content_type {
+        ClipboardContentType::Text => config.sync_text,
+        ClipboardContentType::Image => config.sync_image,
+        ClipboardContentType::FileList => false,
+    }
+}
+
+fn write_remote_clipboard(app: &AppHandle, message: &ClipboardMessage) -> AppResult<()> {
+    match message.content_type {
+        ClipboardContentType::Text => clipboard::write_clipboard_text(app, &message.content),
+        ClipboardContentType::Image => {
+            clipboard::write_clipboard_image_base64(app, &message.content)
+        }
+        ClipboardContentType::FileList => Err(AppError::InvalidInput(
+            "暂不支持文件剪贴板同步".to_string(),
+        )),
+    }
 }
 
 async fn reset_local_observation_if_peer_is_trusted(
@@ -688,6 +765,19 @@ mod tests {
         }
     }
 
+    fn remote_image_message(id: &str, content: &str) -> ClipboardMessage {
+        let content_type = ClipboardContentType::Image;
+        ClipboardMessage {
+            message_id: id.to_string(),
+            source_device_id: "device-b".to_string(),
+            source_device_name: "Laptop B".to_string(),
+            content_hash: content_hash(&content_type, content),
+            content_type,
+            content: content.to_string(),
+            timestamp: 1_712_000_000,
+        }
+    }
+
     #[test]
     fn content_hash_is_stable_and_includes_type() {
         let first = content_hash(&ClipboardContentType::Text, "hello");
@@ -715,6 +805,21 @@ mod tests {
     }
 
     #[test]
+    fn local_image_change_creates_image_message() {
+        let mut engine = SyncEngine::new("device-a", "Laptop A");
+
+        let first = engine.observe_local_image("png-base64");
+        let duplicate = engine.observe_local_image("png-base64");
+
+        let first = first.expect("first local image should create a message");
+        assert_eq!(first.source_device_id, "device-a");
+        assert_eq!(first.source_device_name, "Laptop A");
+        assert_eq!(first.content, "png-base64");
+        assert_eq!(first.content_type, ClipboardContentType::Image);
+        assert!(duplicate.is_none());
+    }
+
+    #[test]
     fn remote_message_writes_once_and_suppresses_echo() {
         let mut engine = SyncEngine::new("device-a", "Laptop A");
         let remote = remote_message("remote-1", "remote text");
@@ -722,6 +827,16 @@ mod tests {
         assert!(engine.apply_remote_message(&remote));
         assert!(engine.should_suppress_watcher_echo("remote text"));
         assert!(engine.observe_local_text("remote text").is_none());
+        assert!(!engine.apply_remote_message(&remote));
+    }
+
+    #[test]
+    fn remote_image_message_writes_once_and_suppresses_echo() {
+        let mut engine = SyncEngine::new("device-a", "Laptop A");
+        let remote = remote_image_message("remote-image-1", "remote-image-base64");
+
+        assert!(engine.apply_remote_message(&remote));
+        assert!(engine.observe_local_image("remote-image-base64").is_none());
         assert!(!engine.apply_remote_message(&remote));
     }
 
@@ -1141,6 +1256,9 @@ mod tests {
 
         config.sync_text = false;
         assert!(!should_read_local_clipboard(&state, &config).await);
+
+        config.sync_image = true;
+        assert!(should_read_local_clipboard(&state, &config).await);
     }
 
     #[tokio::test]

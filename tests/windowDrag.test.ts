@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 
-import { shouldStartWindowDrag } from "../src/lib/windowDrag.ts";
+import {
+  shouldStartWindowDrag,
+  startWindowDragFromMouseEvent,
+} from "../src/lib/windowDrag.ts";
 
 type MockTarget = {
   closest: (selector: string) => Element | null;
@@ -48,3 +51,58 @@ assert.equal(
   false,
 );
 assert.equal(shouldStartWindowDrag({ button: 1, target: target({ dragRegion: true }) }), false);
+
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((nextResolve) => {
+    resolve = nextResolve;
+  });
+
+  return { promise, resolve };
+}
+
+const pendingDrag = deferred();
+let startCount = 0;
+const dragEvent = {
+  button: 0,
+  target: target({ dragRegion: true }),
+  preventDefaultCalls: 0,
+  stopPropagationCalls: 0,
+  preventDefault() {
+    this.preventDefaultCalls += 1;
+  },
+  stopPropagation() {
+    this.stopPropagationCalls += 1;
+  },
+};
+
+assert.equal(
+  startWindowDragFromMouseEvent(dragEvent, () => {
+    startCount += 1;
+    return pendingDrag.promise;
+  }),
+  true,
+);
+assert.equal(
+  startWindowDragFromMouseEvent(dragEvent, () => {
+    startCount += 1;
+    return Promise.resolve();
+  }),
+  false,
+);
+assert.equal(startCount, 1);
+assert.equal(dragEvent.preventDefaultCalls, 2);
+assert.equal(dragEvent.stopPropagationCalls, 2);
+
+pendingDrag.resolve();
+await pendingDrag.promise;
+await new Promise((resolve) => setTimeout(resolve, 0));
+
+assert.equal(
+  startWindowDragFromMouseEvent(dragEvent, () => {
+    startCount += 1;
+    return Promise.resolve();
+  }),
+  true,
+);
+assert.equal(startCount, 2);

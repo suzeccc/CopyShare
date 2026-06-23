@@ -12,8 +12,8 @@ const configStore = useConfigStore();
 
 const draft = reactive({ ...configStore.config });
 const themeOptions: Array<{ value: AppTheme; label: string; hint: string }> = [
-  { value: "copyBlue", label: "经典蓝", hint: "当前深蓝控制台风格" },
   { value: "win11Dark", label: "Win11 深色", hint: "深灰卡片与系统设置风格" },
+  { value: "copyBlue", label: "经典蓝", hint: "当前深蓝控制台风格" },
 ];
 
 function applyThemePreview(theme: AppTheme) {
@@ -49,7 +49,6 @@ function save() {
     deviceName: draft.deviceName.trim(),
     port: clampPort(draft.port),
     syncText: true,
-    syncImage: false,
     syncFiles: false,
   });
 }
@@ -113,7 +112,7 @@ function save() {
       <p class="text-sm font-semibold text-white">同步内容</p>
       <div class="mt-5 grid gap-3">
         <Switch v-model="draft.syncText" label="同步文本" hint="MVP 默认开启，只同步文本剪贴板。" disabled />
-        <Switch v-model="draft.syncImage" label="同步图片" hint="后续支持" disabled />
+        <Switch v-model="draft.syncImage" label="同步图片" hint="支持截图和图片复制。" />
         <Switch v-model="draft.syncFiles" label="同步文件" hint="后续支持" disabled />
       </div>
       <div class="mt-6 rounded-lg border border-[color:var(--main-line-soft)] bg-[color:var(--panel-bg-soft)] p-4">

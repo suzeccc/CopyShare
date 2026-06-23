@@ -3,6 +3,11 @@ type ClosestTarget = {
 };
 
 type DragMouseEvent = Pick<MouseEvent, "button" | "target">;
+type StartWindowDragMouseEvent = DragMouseEvent &
+  Pick<MouseEvent, "preventDefault" | "stopPropagation">;
+type StartDragging = () => Promise<void>;
+
+let activeWindowDrag: Promise<void> | null = null;
 
 const WINDOW_DRAG_IGNORE_SELECTOR = [
   "button",
@@ -58,4 +63,38 @@ export function shouldStartWindowDrag(event: DragMouseEvent): boolean {
   }
 
   return Boolean(closestTarget.closest(WINDOW_DRAG_REGION_SELECTOR));
+}
+
+export function startWindowDragFromMouseEvent(
+  event: StartWindowDragMouseEvent,
+  startDragging: StartDragging,
+): boolean {
+  if (!shouldStartWindowDrag(event)) {
+    return false;
+  }
+
+  event.preventDefault();
+  event.stopPropagation();
+
+  if (activeWindowDrag) {
+    return false;
+  }
+
+  let nextDrag: Promise<void>;
+  try {
+    nextDrag = startDragging();
+  } catch (error) {
+    nextDrag = Promise.reject(error);
+  }
+  activeWindowDrag = nextDrag;
+
+  void nextDrag
+    .catch(() => undefined)
+    .finally(() => {
+      if (activeWindowDrag === nextDrag) {
+        activeWindowDrag = null;
+      }
+    });
+
+  return true;
 }

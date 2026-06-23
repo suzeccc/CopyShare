@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { FileText, FolderOpen, Image as ImageIcon, Monitor, Network, Settings } from "lucide-vue-next";
-import { computed } from "vue";
+import { FileText, FolderOpen, Image as ImageIcon, Monitor, Network, Settings, X } from "lucide-vue-next";
+import { computed, ref } from "vue";
 import { RouterLink } from "vue-router";
 
 import SyncSwitch from "@/components/status/SyncSwitch.vue";
@@ -16,6 +16,7 @@ import { useStatusStore } from "@/stores/status";
 const statusStore = useStatusStore();
 const configStore = useConfigStore();
 const historyStore = useHistoryStore();
+const showClipboardHistoryModal = ref(false);
 
 const address = computed(() => {
   const ip = statusStore.status.localIp;
@@ -47,6 +48,9 @@ const syncContentItems = computed(() => [
 ]);
 
 const recentSyncItems = computed(() => getRecentClipboardItems(historyStore.items));
+const allClipboardItems = computed(() =>
+  getRecentClipboardItems(historyStore.items, historyStore.items.length),
+);
 </script>
 
 <template>
@@ -208,7 +212,17 @@ const recentSyncItems = computed(() => getRecentClipboardItems(historyStore.item
         <div class="mt-4 rounded-lg border border-[color:var(--main-line-soft)] bg-[color:var(--stat-bg)] p-4">
           <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
             <p class="text-sm font-semibold text-white">最近同步内容</p>
-            <p class="text-xs text-slate-500">最近 {{ CLIPBOARD_PREVIEW_LIMIT }} 条历史记录</p>
+            <div class="flex items-center gap-2">
+              <p class="text-xs text-slate-500">最近 {{ CLIPBOARD_PREVIEW_LIMIT }} 条历史记录</p>
+              <Button
+                data-more-clipboard-button
+                size="sm"
+                variant="ghost"
+                @click="showClipboardHistoryModal = true"
+              >
+                更多
+              </Button>
+            </div>
           </div>
 
           <div v-if="recentSyncItems.length" class="grid gap-2">
@@ -229,5 +243,58 @@ const recentSyncItems = computed(() => getRecentClipboardItems(historyStore.item
         </div>
       </Card>
     </section>
+
+    <Transition name="trust-prompt">
+      <div
+        v-if="showClipboardHistoryModal"
+        data-clipboard-history-modal
+        class="fixed inset-0 z-50 flex items-center justify-center bg-[color:var(--dialog-overlay-bg)] px-6 py-8 backdrop-blur-sm"
+        @click.self="showClipboardHistoryModal = false"
+      >
+        <section
+          class="flex max-h-full w-full max-w-3xl flex-col rounded-lg border border-[color:var(--main-line)] bg-[color:var(--dialog-bg)] shadow-[0_24px_80px_rgba(0,0,0,0.5)]"
+          role="dialog"
+          aria-modal="true"
+          aria-label="全部剪贴内容"
+        >
+          <div class="flex items-start justify-between gap-4 border-b border-[color:var(--main-line-soft)] px-5 py-4">
+            <div>
+              <p class="text-base font-semibold text-white">全部剪贴内容</p>
+              <p class="mt-1 text-xs text-[color:var(--muted-text)]">共 {{ allClipboardItems.length }} 条历史记录</p>
+            </div>
+            <button
+              class="grid h-8 w-8 shrink-0 place-items-center rounded-md text-slate-300 transition hover:bg-[color:var(--main-bg-muted)] hover:text-white"
+              type="button"
+              aria-label="关闭"
+              title="关闭"
+              @click="showClipboardHistoryModal = false"
+            >
+              <X class="h-4 w-4" />
+            </button>
+          </div>
+
+          <div v-if="allClipboardItems.length" class="min-h-0 overflow-x-hidden overflow-y-auto p-5">
+            <div class="grid gap-2">
+              <div
+                v-for="item in allClipboardItems"
+                :key="item.id"
+                data-clipboard-history-row
+                class="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 rounded-md border border-[color:var(--main-line-soft)] bg-[color:var(--field-bg)] px-3 py-2.5"
+              >
+                <p data-clipboard-history-text class="min-w-0 whitespace-pre-wrap break-all text-sm leading-6 text-slate-200">
+                  {{ item.text }}
+                </p>
+                <div data-clipboard-history-copy class="flex shrink-0 justify-end">
+                  <CopyTextButton :text="item.text" icon-only label="复制内容" />
+                </div>
+              </div>
+            </div>
+          </div>
+          <p v-else class="m-5 rounded-md border border-dashed border-[color:var(--main-line-soft)] px-3 py-8 text-center text-sm text-[color:var(--subtle-text)]">
+            暂无剪贴内容。
+          </p>
+        </section>
+      </div>
+    </Transition>
   </div>
 </template>

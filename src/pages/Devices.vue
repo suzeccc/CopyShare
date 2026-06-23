@@ -59,7 +59,7 @@ const devicesStore = useDevicesStore();
     <Card>
       <div class="mb-4 flex items-center justify-between">
         <div>
-          <p class="text-sm font-semibold text-white">设备列表</p>
+          <p class="text-sm font-semibold text-white">历史连接设备列表</p>
           <p class="mt-1 text-xs text-[color:var(--muted-text)]">连接后的设备会先出现在这里；本机信任后进入已连接设备，对方电脑也需要信任本机。</p>
         </div>
       </div>

@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::{
     error::AppResult,
-    models::{ClipboardMessage, HistoryDirection, HistoryItem},
+    models::{ClipboardContentType, ClipboardMessage, HistoryDirection, HistoryItem},
 };
 
 const HISTORY_FILE: &str = "history.json";
@@ -43,8 +43,8 @@ pub fn make_history_item(
         id: Uuid::new_v4().to_string(),
         direction,
         source_device: source_device.into(),
-        summary: summarize(&message.content),
-        content: message.content.clone(),
+        summary: summarize_message(message),
+        content: history_content(message),
         content_type: message.content_type.clone(),
         success: true,
         created_at: Utc::now(),
@@ -68,6 +68,36 @@ pub fn summarize(content: &str) -> String {
     summary
 }
 
+fn summarize_message(message: &ClipboardMessage) -> String {
+    match message.content_type {
+        ClipboardContentType::Text => summarize(&message.content),
+        ClipboardContentType::Image => {
+            format!("图片 {}", format_size(base64_payload_size(&message.content)))
+        }
+        ClipboardContentType::FileList => "文件列表".to_string(),
+    }
+}
+
+fn history_content(message: &ClipboardMessage) -> String {
+    match message.content_type {
+        ClipboardContentType::Text => message.content.clone(),
+        ClipboardContentType::Image | ClipboardContentType::FileList => String::new(),
+    }
+}
+
+fn base64_payload_size(content: &str) -> usize {
+    let trimmed = content.trim_end_matches('=');
+    (trimmed.len() * 3) / 4
+}
+
+fn format_size(bytes: usize) -> String {
+    if bytes < 1024 {
+        format!("{bytes} B")
+    } else {
+        format!("{} KB", (bytes + 1023) / 1024)
+    }
+}
+
 fn history_path(app: &AppHandle) -> AppResult<PathBuf> {
     let dir = app.path().app_data_dir()?;
     fs::create_dir_all(&dir)?;
@@ -77,6 +107,7 @@ fn history_path(app: &AppHandle) -> AppResult<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::{engine::general_purpose::STANDARD, Engine};
 
     #[test]
     fn summary_is_limited_to_eighty_characters() {
@@ -126,5 +157,24 @@ mod tests {
 
         assert_eq!(item.summary.len(), 83);
         assert_eq!(item.content.len(), 120);
+    }
+
+    #[test]
+    fn image_history_uses_size_summary_without_persisting_base64() {
+        let content = STANDARD.encode(vec![0; 4096]);
+        let message = ClipboardMessage {
+            message_id: "m".to_string(),
+            source_device_id: "d".to_string(),
+            source_device_name: "Device".to_string(),
+            content_type: crate::models::ClipboardContentType::Image,
+            content,
+            content_hash: "hash".to_string(),
+            timestamp: 1,
+        };
+
+        let item = make_history_item(HistoryDirection::Local, "Device", &message);
+
+        assert_eq!(item.summary, "图片 4 KB");
+        assert!(item.content.is_empty());
     }
 }

@@ -6,6 +6,7 @@ export type ClipboardPreviewItem = {
 };
 
 export const CLIPBOARD_PREVIEW_LIMIT = 5;
+export const FLOATING_CLIPBOARD_PREVIEW_LIMIT = 10;
 
 export function getRecentClipboardItems(
   items: HistoryItem[],
@@ -23,7 +24,7 @@ export function getRecentClipboardItems(
 export function getFloatingClipboardItems(
   systemItems: ClipboardPreviewItem[],
   appItems: HistoryItem[],
-  limit = CLIPBOARD_PREVIEW_LIMIT,
+  limit = FLOATING_CLIPBOARD_PREVIEW_LIMIT,
 ): ClipboardPreviewItem[] {
   const seen = new Set<string>();
   const recentSystemItems = systemItems

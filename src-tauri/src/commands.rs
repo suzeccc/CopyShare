@@ -150,7 +150,6 @@ pub async fn update_config(
         next_config.device_id.trim().to_string()
     };
     next_config.sync_text = true;
-    next_config.sync_image = false;
     next_config.sync_files = false;
     let current_auto_start =
         autostart::is_autostart_enabled(&app).unwrap_or(current.auto_start);

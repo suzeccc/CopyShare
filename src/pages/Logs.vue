@@ -36,9 +36,8 @@ const historyStore = useHistoryStore();
             v-for="device in devicesStore.devices"
             :key="device.id"
             :device="device"
-            @connect="devicesStore.connect"
-            @disconnect="devicesStore.disconnect"
-            @trust="devicesStore.trust"
+            mode="status"
+            :show-actions="false"
           />
         </div>
         <div v-else class="mt-5 rounded-lg border border-dashed border-[color:var(--main-line-soft)] px-4 py-10 text-center text-sm text-slate-500">

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from "vue";
-import { ShieldCheck, ShieldQuestion, ShieldX } from "lucide-vue-next";
+import { ShieldCheck, ShieldQuestion, ShieldX, WifiOff, X } from "lucide-vue-next";
 
 import Button from "@/components/ui/Button.vue";
 import FloatingPanel from "@/components/layout/FloatingPanel.vue";
@@ -208,6 +208,31 @@ async function rejectPromptDevice() {
             </div>
           </main>
         </div>
+      </div>
+    </Transition>
+
+    <Transition name="trust-prompt">
+      <div
+        v-if="devicesStore.disconnectNotice"
+        data-device-disconnect-notice
+        class="absolute z-[55] flex items-start gap-3 rounded-lg border border-sky-300/35 bg-[rgba(13,35,58,0.92)] px-3 py-3 text-slate-100 shadow-[0_16px_50px_rgba(0,0,0,0.42)] backdrop-blur"
+        :class="isFloating ? 'inset-x-3 bottom-3 text-xs' : 'right-5 top-16 w-[min(380px,calc(100%-2.5rem))] text-sm'"
+      >
+        <div class="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-sky-300/30 bg-sky-300/10 text-sky-100">
+          <WifiOff class="h-4 w-4" />
+        </div>
+        <p class="min-w-0 flex-1 leading-6">
+          {{ devicesStore.disconnectNotice }}
+        </p>
+        <button
+          class="grid h-7 w-7 shrink-0 place-items-center rounded-md text-slate-300 transition hover:bg-white/10 hover:text-white"
+          type="button"
+          aria-label="关闭断开提示"
+          title="关闭"
+          @click="devicesStore.clearDisconnectNotice()"
+        >
+          <X class="h-4 w-4" />
+        </button>
       </div>
     </Transition>
 

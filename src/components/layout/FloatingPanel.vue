@@ -5,7 +5,7 @@ import { computed } from "vue";
 import CopyTextButton from "@/components/ui/CopyTextButton.vue";
 import type { ClipboardPreviewItem } from "@/lib/historyPreview";
 import { startWindowDrag } from "@/lib/tauri";
-import { shouldStartWindowDrag } from "@/lib/windowDrag";
+import { startWindowDragFromMouseEvent } from "@/lib/windowDrag";
 
 const props = defineProps<{
   statusLabel: string;
@@ -28,18 +28,14 @@ const statusClass = computed(() =>
 );
 
 function handleWindowDrag(event: MouseEvent) {
-  if (!shouldStartWindowDrag(event)) {
-    return;
-  }
-
-  void startWindowDrag();
+  startWindowDragFromMouseEvent(event, startWindowDrag);
 }
 </script>
 
 <template>
   <section class="floating-window-surface flex h-full w-full flex-col overflow-hidden rounded-lg p-3 text-slate-100">
     <header
-      class="flex items-center justify-between gap-2"
+      class="-mx-3 -mt-3 flex items-center justify-between gap-2 px-3 pb-1.5 pt-3"
       data-window-drag-region
       @mousedown.capture="handleWindowDrag"
     >
@@ -51,7 +47,7 @@ function handleWindowDrag(event: MouseEvent) {
         </div>
       </div>
 
-      <div class="flex shrink-0 items-center gap-1" data-window-control>
+      <div class="flex shrink-0 items-center gap-1">
         <button
           class="grid h-7 w-7 place-items-center rounded-md border border-[color:var(--floating-control-line)] bg-[color:var(--floating-control-bg)] text-[color:var(--floating-control-text)] transition hover:bg-[color:var(--floating-control-bg-hover)]"
           type="button"

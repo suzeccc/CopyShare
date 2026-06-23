@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { History, Home, MonitorSmartphone, Settings } from "lucide-vue-next";
+import { History, Home, Info, MonitorSmartphone, Settings } from "lucide-vue-next";
 
 const items = [
   { label: "总览", path: "/", icon: Home },
   { label: "设备连接", path: "/devices", icon: MonitorSmartphone },
   { label: "连接与剪贴日志", path: "/logs", icon: History },
   { label: "设置", path: "/settings", icon: Settings },
+  { label: "关于", path: "/about", icon: Info },
 ];
 </script>
 

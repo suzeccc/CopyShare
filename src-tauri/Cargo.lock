@@ -392,10 +392,12 @@ dependencies = [
 
 [[package]]
 name = "copy-sharer"
-version = "1.5.0"
+version = "2.0.0"
 dependencies = [
+ "base64 0.22.1",
  "chrono",
  "futures-util",
+ "image",
  "local-ip-address",
  "serde",
  "serde_json",

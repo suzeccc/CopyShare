@@ -58,6 +58,42 @@ export function markDeviceDisconnected(
   );
 }
 
+export function applyDeviceDisconnected(
+  devices: DeviceInfo[],
+  disconnectedDevice: DeviceInfo,
+): DeviceInfo[] {
+  const existing = devices.find(
+    (device) =>
+      device.id === disconnectedDevice.id ||
+      sameDeviceEndpoint(device, disconnectedDevice),
+  );
+  const deviceKey = existing?.id ?? disconnectedDevice.id;
+  const trusted = existing?.trusted || disconnectedDevice.trusted;
+  const next = upsertDevice(devices, {
+    ...disconnectedDevice,
+    connected: false,
+    trusted,
+    status: "offline",
+  });
+
+  return next.map((device) =>
+    deviceMatchesKey(device, deviceKey)
+      ? {
+          ...device,
+          connected: false,
+          trusted: device.trusted || trusted,
+          status: "offline",
+          lastSeenAt: disconnectedDevice.lastSeenAt ?? device.lastSeenAt,
+        }
+      : device,
+  );
+}
+
+export function getDeviceDisconnectNotice(device: DeviceInfo): string {
+  const deviceName = device.name.trim() || device.ip;
+  return `${deviceName} 已断开连接，状态已更新为离线`;
+}
+
 export function removeDeviceByKey(
   devices: DeviceInfo[],
   deviceKey: string,

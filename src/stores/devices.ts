@@ -14,8 +14,10 @@ import {
   setManualConnectDraftPort,
 } from "@/lib/manualConnectDraft";
 import {
+  applyDeviceDisconnected,
   connectedTrustedDevices,
   dedupeDevices,
+  getDeviceDisconnectNotice,
   markDeviceDisconnected,
   markDeviceTrusted,
   mergeRefreshedDevices,
@@ -33,6 +35,7 @@ export const useDevicesStore = defineStore("devices", {
     devices: [] as DeviceInfo[],
     loading: false,
     error: null as string | null,
+    disconnectNotice: null as string | null,
   }),
   getters: {
     connected: (state) => connectedTrustedDevices(state.devices),
@@ -92,11 +95,21 @@ export const useDevicesStore = defineStore("devices", {
     upsert(device: DeviceInfo) {
       this.devices = upsertDevice(this.devices, device);
     },
+    clearDisconnectNotice() {
+      this.disconnectNotice = null;
+    },
     async subscribe() {
       await Promise.all([
         onAppEvent<DeviceInfo>("device-discovered", (device) => this.upsert(device)),
-        onAppEvent<DeviceInfo>("device-connected", (device) => this.upsert(device)),
-        onAppEvent<DeviceInfo>("device-disconnected", (device) => this.upsert(device)),
+        onAppEvent<DeviceInfo>("device-connected", (device) => {
+          this.disconnectNotice = null;
+          this.upsert(device);
+        }),
+        onAppEvent<DeviceInfo>("device-disconnected", (device) => {
+          this.devices = applyDeviceDisconnected(this.devices, device);
+          this.disconnectNotice = getDeviceDisconnectNotice(device);
+          void useStatusStore().refresh();
+        }),
       ]);
     },
   },
