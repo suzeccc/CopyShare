@@ -11,6 +11,7 @@ use tauri::async_runtime::JoinHandle;
 
 use crate::{
     config,
+    device_store,
     error::{AppError, AppResult},
     history,
     models::{
@@ -91,9 +92,11 @@ impl AppState {
         let config = config::load_config(app)?;
         let device_id = config.device_id.clone();
         let history = history::load_history(app)?;
+        let devices = device_store::load_devices(app)?;
 
         *self.inner.config.write().await = config.clone();
         *self.inner.history.write().await = history;
+        self.replace_devices(devices).await;
         *self.inner.sync_engine.lock().await =
             SyncEngine::new(device_id.clone(), config.device_name.clone());
 
@@ -157,6 +160,14 @@ impl AppState {
     pub async fn push_history(&self, item: HistoryItem) {
         let mut items = self.inner.history.write().await;
         history::push_history(&mut items, item);
+    }
+
+    pub async fn replace_devices(&self, devices: Vec<DeviceInfo>) {
+        let mut device_map = self.inner.devices.write().await;
+        device_map.clear();
+        for device in devices {
+            device_map.insert(device.id.clone(), device);
+        }
     }
 
     pub async fn devices(&self) -> Vec<DeviceInfo> {

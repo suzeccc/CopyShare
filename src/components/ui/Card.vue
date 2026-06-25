@@ -11,7 +11,7 @@ withDefaults(
 
 <template>
   <section
-    class="glass-panel rounded-lg"
+    class="glass-panel min-w-0 max-w-full rounded-lg"
     :class="compact ? 'p-4' : 'p-5'"
   >
     <slot />

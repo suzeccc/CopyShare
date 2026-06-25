@@ -87,12 +87,28 @@ impl Default for AppTheme {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub enum CloseAction {
+    Ask,
+    Minimize,
+    Exit,
+}
+
+impl Default for CloseAction {
+    fn default() -> Self {
+        Self::Ask
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct AppConfig {
     pub device_name: String,
     #[serde(default)]
     pub device_id: String,
     #[serde(default)]
     pub theme: AppTheme,
+    #[serde(default)]
+    pub close_action: CloseAction,
     pub port: u16,
     pub auto_start: bool,
     pub auto_sync: bool,
@@ -109,6 +125,7 @@ impl Default for AppConfig {
             device_name: "Copy-Sharer".to_string(),
             device_id: new_device_id(),
             theme: AppTheme::Win11Dark,
+            close_action: CloseAction::Ask,
             port: 8765,
             auto_start: false,
             auto_sync: true,

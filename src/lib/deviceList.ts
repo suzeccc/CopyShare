@@ -38,6 +38,32 @@ export function pendingTrustDevices(devices: DeviceInfo[]): DeviceInfo[] {
   return dedupeDevices(devices).filter((device) => device.connected && !device.trusted);
 }
 
+export function historicalDevices(devices: DeviceInfo[]): DeviceInfo[] {
+  return dedupeDevices(devices).reduce<DeviceInfo[]>((history, device) => {
+    const existingIndex = history.findIndex((item) =>
+      item.id === device.id ||
+      sameDeviceEndpoint(item, device) ||
+      hasIntersection(hostKeys(item), hostKeys(device)),
+    );
+
+    if (existingIndex < 0) {
+      return [...history, device];
+    }
+
+    const existing = history[existingIndex];
+    const preferred = preferHistoryDevice(existing, device);
+    const merged = {
+      ...preferred,
+      trusted: existing.trusted || device.trusted,
+      connected: existing.connected || device.connected,
+      status: existing.connected || device.connected ? "online" : preferred.status,
+      lastSeenAt: existing.lastSeenAt ?? device.lastSeenAt,
+    };
+
+    return history.map((item, index) => (index === existingIndex ? merged : item));
+  }, []);
+}
+
 export function markDeviceTrusted(
   devices: DeviceInfo[],
   deviceKey: string,
@@ -191,6 +217,18 @@ function mergeDevice(existing: DeviceInfo, incoming: DeviceInfo): DeviceInfo {
     connected: incoming.connected || existing.connected,
     status: incoming.connected || existing.connected ? "online" : incoming.status,
   };
+}
+
+function preferHistoryDevice(existing: DeviceInfo, incoming: DeviceInfo): DeviceInfo {
+  if (isEndpointAlias(existing.id) && !isEndpointAlias(incoming.id)) {
+    return incoming;
+  }
+
+  if (!existing.trusted && incoming.trusted) {
+    return incoming;
+  }
+
+  return existing;
 }
 
 function endpointKeyFromAddress(value: string, fallbackPort: number): string {

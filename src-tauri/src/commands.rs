@@ -1,10 +1,12 @@
-use std::time::Duration;
+use std::{process::Command, time::Duration};
 
 use tauri::{AppHandle, Emitter, Manager, State};
+use url::Url;
 use crate::{
     autostart, clipboard,
     config,
     discovery,
+    device_store,
     error::{AppError, AppResult},
     history,
     models::{AppConfig, AppStatus, ClipboardTextItem, DeviceInfo, HistoryItem},
@@ -27,8 +29,9 @@ pub async fn start_sync(app: AppHandle, state: State<'_, AppState>) -> AppResult
 }
 
 #[tauri::command]
-pub async fn stop_sync(state: State<'_, AppState>) -> AppResult<AppStatus> {
+pub async fn stop_sync(app: AppHandle, state: State<'_, AppState>) -> AppResult<AppStatus> {
     state.stop_runtime().await?;
+    device_store::save_devices(&app, &state.devices().await)?;
     Ok(state.status().await)
 }
 
@@ -64,6 +67,7 @@ pub async fn connect_device(
 
 #[tauri::command]
 pub async fn disconnect_device(
+    app: AppHandle,
     state: State<'_, AppState>,
     device_id: String,
 ) -> AppResult<()> {
@@ -72,6 +76,7 @@ pub async fn disconnect_device(
         .mark_device_disconnected(&device_id)
         .await
         .ok_or(AppError::UnknownDevice(device_id))?;
+    device_store::save_devices(&app, &state.devices().await)?;
     Ok(())
 }
 
@@ -90,6 +95,7 @@ pub async fn trust_device(
     state.mark_device_trusted(&device_id).await;
     state.clear_manual_trust_required(&device_id).await;
     state.reset_local_clipboard_observation().await;
+    device_store::save_devices(&app, &state.devices().await)?;
     sync::notify_peer_trusted(state.inner(), &next_config, &device_id).await;
     app.emit("config-updated", next_config)?;
     Ok(())
@@ -112,6 +118,7 @@ pub async fn reject_device(
     state.clear_manual_trust_required(&device_id).await;
     config::save_config(&app, &next_config)?;
     state.set_config(next_config.clone()).await;
+    device_store::save_devices(&app, &state.devices().await)?;
     app.emit("config-updated", next_config)?;
     Ok(())
 }
@@ -176,6 +183,44 @@ pub async fn get_clipboard_history() -> AppResult<Vec<ClipboardTextItem>> {
 pub async fn clear_history(app: AppHandle, state: State<'_, AppState>) -> AppResult<()> {
     history::clear_history(&app)?;
     state.replace_history(Vec::new()).await;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn open_external_url(url: String) -> AppResult<()> {
+    let parsed = Url::parse(&url).map_err(|_| {
+        AppError::InvalidInput("只能打开有效的 http 或 https 链接".to_string())
+    })?;
+    match parsed.scheme() {
+        "http" | "https" => {}
+        _ => {
+            return Err(AppError::InvalidInput(
+                "只能打开 http 或 https 链接".to_string(),
+            ));
+        }
+    }
+
+    open_url_with_system_browser(parsed.as_str())?;
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn open_url_with_system_browser(url: &str) -> AppResult<()> {
+    Command::new("rundll32")
+        .args(["url.dll,FileProtocolHandler", url])
+        .spawn()?;
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn open_url_with_system_browser(url: &str) -> AppResult<()> {
+    Command::new("open").arg(url).spawn()?;
+    Ok(())
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn open_url_with_system_browser(url: &str) -> AppResult<()> {
+    Command::new("xdg-open").arg(url).spawn()?;
     Ok(())
 }
 

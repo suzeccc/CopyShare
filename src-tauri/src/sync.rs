@@ -14,6 +14,7 @@ use uuid::Uuid;
 use crate::{
     clipboard,
     config as app_config,
+    device_store,
     error::{AppError, AppResult},
     history,
     models::{
@@ -319,6 +320,7 @@ pub async fn connect_to_peer(
         status: DeviceStatus::Online,
     };
     let device = state.upsert_device(device).await;
+    persist_devices(&app, &state).await;
     let _ = app.emit("device-connected", device.clone());
     emit_status(&app, &state).await;
     Ok(device)
@@ -423,6 +425,7 @@ where
             .await
             .unwrap_or_else(|| connection_id_for_task.clone());
         if let Some(device) = state_for_task.mark_device_disconnected(&device_id).await {
+            persist_devices(&app_for_task, &state_for_task).await;
             let _ = app_for_task.emit("device-disconnected", device);
         }
         emit_status(&app_for_task, &state_for_task).await;
@@ -491,6 +494,7 @@ async fn handle_wire_text(app: &AppHandle, state: &AppState, connection_id: &str
                 status: DeviceStatus::Online,
             };
             let device = state.upsert_device(device).await;
+            persist_devices(app, state).await;
             let _ = app.emit("device-connected", device);
             emit_status(app, state).await;
         }
@@ -746,6 +750,12 @@ fn peer_connection_failure_message(ip: &str, port: u16, reason: &str) -> String 
 
 async fn emit_status(app: &AppHandle, state: &AppState) {
     let _ = app.emit("sync-status-changed", state.status().await);
+}
+
+async fn persist_devices(app: &AppHandle, state: &AppState) {
+    if let Err(error) = device_store::save_devices(app, &state.devices().await) {
+        let _ = app.emit("sync-error", error.to_string());
+    }
 }
 
 #[cfg(test)]

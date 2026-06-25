@@ -21,20 +21,20 @@ function systemItem(index: number) {
 }
 
 const items = getRecentClipboardItems([
-  historyItem({ id: "1", summary: "摘要一", content: "  完整内容一  " }),
-  historyItem({ id: "2", summary: "摘要二" }),
-  historyItem({ id: "3", summary: "   ", content: "完整内容三" }),
-  historyItem({ id: "4", summary: "摘要四", content: "完整内容四" }),
-  historyItem({ id: "5", summary: "摘要五", content: "完整内容五" }),
-  historyItem({ id: "6", summary: "摘要六", content: "完整内容六" }),
+  historyItem({ id: "1", summary: "Summary one", content: "  Full one  ", sourceDevice: "Office-PC" }),
+  historyItem({ id: "2", summary: "Summary two", sourceDevice: "Laptop" }),
+  historyItem({ id: "3", summary: "   ", content: "Full three", sourceDevice: "Desktop" }),
+  historyItem({ id: "4", summary: "Summary four", content: "Full four", sourceDevice: "Phone" }),
+  historyItem({ id: "5", summary: "Summary five", content: "Full five", sourceDevice: "Tablet" }),
+  historyItem({ id: "6", summary: "Summary six", content: "Full six", sourceDevice: "NAS" }),
 ]);
 
 assert.deepEqual(items, [
-  { id: "1", text: "完整内容一" },
-  { id: "2", text: "摘要二" },
-  { id: "3", text: "完整内容三" },
-  { id: "4", text: "完整内容四" },
-  { id: "5", text: "完整内容五" },
+  { id: "1", text: "Full one", sourceDevice: "Office-PC" },
+  { id: "2", text: "Summary two", sourceDevice: "Laptop" },
+  { id: "3", text: "Full three", sourceDevice: "Desktop" },
+  { id: "4", text: "Full four", sourceDevice: "Phone" },
+  { id: "5", text: "Full five", sourceDevice: "Tablet" },
 ]);
 
 assert.deepEqual(getRecentClipboardItems([], 3), []);
@@ -45,45 +45,45 @@ assert.equal(getFloatingClipboardItems(Array.from({ length: 11 }, (_, index) => 
 assert.deepEqual(
   getFloatingClipboardItems(
     [
-      { id: "system-1", text: "Win+V 第一条" },
-      { id: "system-2", text: "Win+V 第二条" },
-      { id: "system-3", text: "Win+V 第三条" },
-      { id: "system-4", text: "Win+V 第四条" },
-      { id: "system-5", text: "Win+V 第五条" },
-      { id: "system-6", text: "Win+V 第六条" },
+      { id: "system-1", text: "WinV one" },
+      { id: "system-2", text: "WinV two" },
+      { id: "system-3", text: "WinV three" },
+      { id: "system-4", text: "WinV four" },
+      { id: "system-5", text: "WinV five" },
+      { id: "system-6", text: "WinV six" },
     ],
-    [historyItem({ id: "app-1", summary: "程序历史" })],
+    [historyItem({ id: "app-1", summary: "App history", sourceDevice: "Office-PC" })],
   ),
   [
-    { id: "system-1", text: "Win+V 第一条" },
-    { id: "system-2", text: "Win+V 第二条" },
-    { id: "system-3", text: "Win+V 第三条" },
-    { id: "system-4", text: "Win+V 第四条" },
-    { id: "system-5", text: "Win+V 第五条" },
-    { id: "system-6", text: "Win+V 第六条" },
-    { id: "app-1", text: "程序历史" },
+    { id: "system-1", text: "WinV one" },
+    { id: "system-2", text: "WinV two" },
+    { id: "system-3", text: "WinV three" },
+    { id: "system-4", text: "WinV four" },
+    { id: "system-5", text: "WinV five" },
+    { id: "system-6", text: "WinV six" },
+    { id: "app-1", text: "App history", sourceDevice: "Office-PC" },
   ],
 );
 
 assert.deepEqual(
-  getFloatingClipboardItems([], [historyItem({ id: "app-1", summary: "程序历史" })]),
-  [{ id: "app-1", text: "程序历史" }],
+  getFloatingClipboardItems([], [historyItem({ id: "app-1", summary: "App history", sourceDevice: "Office-PC" })]),
+  [{ id: "app-1", text: "App history", sourceDevice: "Office-PC" }],
 );
 
 assert.deepEqual(
   getFloatingClipboardItems(
     [
-      { id: "system-1", text: "系统一" },
-      { id: "system-2", text: "系统二" },
+      { id: "system-1", text: "System one" },
+      { id: "system-2", text: "System two" },
     ],
     [
-      historyItem({ id: "app-1", summary: "程序一" }),
-      historyItem({ id: "app-2", summary: "系统二" }),
+      historyItem({ id: "app-1", summary: "App one", sourceDevice: "Office-PC" }),
+      historyItem({ id: "app-2", summary: "System two", sourceDevice: "Office-PC" }),
     ],
   ),
   [
-    { id: "system-1", text: "系统一" },
-    { id: "system-2", text: "系统二" },
-    { id: "app-1", text: "程序一" },
+    { id: "system-1", text: "System one" },
+    { id: "system-2", text: "System two" },
+    { id: "app-1", text: "App one", sourceDevice: "Office-PC" },
   ],
 );

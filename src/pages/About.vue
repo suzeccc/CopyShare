@@ -12,16 +12,42 @@ import {
   getUpdateState,
   UPDATE_URL,
 } from "@/lib/about";
+import { openExternalUrl } from "@/lib/tauri";
 
 const repositoryName = "suzeccc/Copy-share";
 const checkingUpdate = ref(false);
 const updateMessage = ref<string | null>(null);
 const updateTone = ref<"info" | "success" | "error">("info");
+const updateReleaseUrl = ref<string | null>(null);
+
+async function openExternalLink(url: string) {
+  try {
+    await openExternalUrl(url);
+  } catch (error) {
+    updateTone.value = "error";
+    updateMessage.value = error instanceof Error ? error.message : "打开链接失败";
+  }
+}
+
+async function openRepository() {
+  await openExternalLink(GITHUB_REPOSITORY_URL);
+}
+
+async function openLatestRelease() {
+  await openExternalLink(UPDATE_URL);
+}
+
+async function openUpdateRelease() {
+  if (updateReleaseUrl.value) {
+    await openExternalLink(updateReleaseUrl.value);
+  }
+}
 
 async function checkForUpdate() {
   checkingUpdate.value = true;
   updateTone.value = "info";
   updateMessage.value = "正在检查最新版本...";
+  updateReleaseUrl.value = null;
 
   try {
     const latestRelease = await getLatestRelease();
@@ -34,11 +60,12 @@ async function checkForUpdate() {
     }
 
     updateTone.value = "info";
-    updateMessage.value = `发现新版本 v${update.latestVersion}，正在打开发布页。`;
-    window.open(update.updateUrl, "_blank", "noopener,noreferrer");
+    updateMessage.value = `发现新版本 v${update.latestVersion}，请点击下方按钮打开发布页。`;
+    updateReleaseUrl.value = update.updateUrl;
   } catch (error) {
     updateTone.value = "error";
     updateMessage.value = error instanceof Error ? error.message : "检查更新失败";
+    updateReleaseUrl.value = null;
   } finally {
     checkingUpdate.value = false;
   }
@@ -86,6 +113,17 @@ async function checkForUpdate() {
       >
         {{ updateMessage }}
       </p>
+
+      <Button
+        v-if="updateReleaseUrl"
+        data-update-release-link
+        class="mt-3"
+        variant="secondary"
+        @click="openUpdateRelease"
+      >
+        <ExternalLink class="h-4 w-4" />
+        打开发布页
+      </Button>
     </Card>
 
     <Card>
@@ -103,18 +141,14 @@ async function checkForUpdate() {
           </div>
         </div>
         <div class="mt-4 flex flex-wrap gap-2">
-          <a :href="GITHUB_REPOSITORY_URL" target="_blank" rel="noreferrer">
-            <Button variant="secondary">
-              <ExternalLink class="h-4 w-4" />
-              打开仓库
-            </Button>
-          </a>
-          <a :href="UPDATE_URL" target="_blank" rel="noreferrer">
-            <Button variant="ghost">
-              <RefreshCw class="h-4 w-4" />
-              查看最新版本
-            </Button>
-          </a>
+          <Button variant="secondary" @click="openRepository">
+            <ExternalLink class="h-4 w-4" />
+            打开仓库
+          </Button>
+          <Button variant="ghost" @click="openLatestRelease">
+            <RefreshCw class="h-4 w-4" />
+            查看最新版本
+          </Button>
         </div>
       </div>
     </Card>

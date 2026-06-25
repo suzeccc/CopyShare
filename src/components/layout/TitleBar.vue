@@ -15,8 +15,15 @@ withDefaults(
 );
 
 const emit = defineEmits<{
-  (event: "switch-floating"): void;
+  (event: "switch-floating", pointer: { clientX: number; clientY: number }): void;
 }>();
+
+function switchFloating(event: MouseEvent) {
+  emit("switch-floating", {
+    clientX: event.clientX,
+    clientY: event.clientY,
+  });
+}
 </script>
 
 <template>
@@ -29,12 +36,12 @@ const emit = defineEmits<{
     </div>
     <div class="flex items-center gap-3">
       <ConnectionBadge :state="statusStore.status.state" :label="statusStore.statusLabel" />
-      <RefreshButton :refresh="() => statusStore.refresh()" />
+      <RefreshButton :refresh="() => statusStore.refresh()" :failed="() => Boolean(statusStore.error)" />
       <Button
         variant="ghost"
         size="sm"
         :disabled="switchingWindowMode"
-        @click="emit('switch-floating')"
+        @click="switchFloating"
       >
         {{ switchingWindowMode ? "切换中" : "切换浮窗" }}
       </Button>

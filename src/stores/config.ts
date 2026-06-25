@@ -7,6 +7,7 @@ const defaultConfig: AppConfig = {
   deviceName: "Copy-Sharer",
   deviceId: "",
   theme: "win11Dark",
+  closeAction: "ask",
   port: 8765,
   autoStart: false,
   autoSync: true,

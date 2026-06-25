@@ -3,6 +3,7 @@ import type { HistoryItem } from "@/types/history";
 export type ClipboardPreviewItem = {
   id: string;
   text: string;
+  sourceDevice?: string;
 };
 
 export const CLIPBOARD_PREVIEW_LIMIT = 5;
@@ -16,6 +17,7 @@ export function getRecentClipboardItems(
     .map((item) => ({
       id: item.id,
       text: (item.content || item.summary).trim(),
+      sourceDevice: item.sourceDevice,
     }))
     .filter((item) => item.text.length > 0)
     .slice(0, limit);

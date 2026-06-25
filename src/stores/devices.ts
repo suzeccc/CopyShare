@@ -16,8 +16,8 @@ import {
 import {
   applyDeviceDisconnected,
   connectedTrustedDevices,
-  dedupeDevices,
   getDeviceDisconnectNotice,
+  historicalDevices,
   markDeviceDisconnected,
   markDeviceTrusted,
   mergeRefreshedDevices,
@@ -27,6 +27,7 @@ import {
   upsertDevice,
 } from "@/lib/deviceList";
 import { useStatusStore } from "@/stores/status";
+import { useToastStore } from "@/stores/toasts";
 import type { DeviceInfo } from "@/types/device";
 
 export const useDevicesStore = defineStore("devices", {
@@ -39,6 +40,7 @@ export const useDevicesStore = defineStore("devices", {
   }),
   getters: {
     connected: (state) => connectedTrustedDevices(state.devices),
+    history: (state) => historicalDevices(state.devices),
     pendingTrust: (state) => pendingTrustDevices(state.devices),
     trusted: (state) => state.devices.filter((device) => device.trusted),
   },
@@ -61,9 +63,11 @@ export const useDevicesStore = defineStore("devices", {
       try {
         const device = await connectDevice(ip, port);
         this.upsert(device);
+        useToastStore().success(`${device.name} 连接成功`);
         await useStatusStore().refresh();
       } catch (error) {
         this.error = String(error);
+        useToastStore().error("连接失败");
       } finally {
         this.loading = false;
       }

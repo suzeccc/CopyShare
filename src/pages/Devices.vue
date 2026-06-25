@@ -37,7 +37,7 @@ const devicesStore = useDevicesStore();
             <p class="text-sm font-semibold text-white">已连接设备</p>
             <p class="mt-2 text-sm text-[color:var(--muted-text)]">已信任并保持连接的设备，只保留断开操作。</p>
           </div>
-          <RefreshButton :refresh="() => devicesStore.refresh()" />
+          <RefreshButton :refresh="() => devicesStore.refresh()" :failed="() => Boolean(devicesStore.error)" />
         </div>
         <div v-if="devicesStore.connected.length" class="mt-5 grid gap-3 md:grid-cols-2">
           <DeviceCard
@@ -60,22 +60,23 @@ const devicesStore = useDevicesStore();
       <div class="mb-4 flex items-center justify-between">
         <div>
           <p class="text-sm font-semibold text-white">历史连接设备列表</p>
-          <p class="mt-1 text-xs text-[color:var(--muted-text)]">连接后的设备会先出现在这里；本机信任后进入已连接设备，对方电脑也需要信任本机。</p>
+          <p class="mt-1 text-xs text-[color:var(--muted-text)]">连接成功、等待确认和已断开的设备都会保留在这里；同一设备只显示一张卡片。</p>
         </div>
       </div>
-      <div v-if="devicesStore.pendingTrust.length" class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+      <div v-if="devicesStore.history.length" class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         <DeviceCard
-          v-for="device in devicesStore.pendingTrust"
+          v-for="device in devicesStore.history"
           :key="device.id"
           :device="device"
-          mode="pending"
+          mode="status"
+          :show-actions="device.connected"
           @disconnect="devicesStore.disconnect"
           @reject="devicesStore.reject"
           @trust="devicesStore.trust"
         />
       </div>
       <div v-else class="rounded-lg border border-dashed border-[color:var(--main-line-soft)] px-4 py-10 text-center text-sm text-[color:var(--subtle-text)]">
-        输入对方 IP 后点击“连接”，设备会在这里等待确认。双向同步时请在两台电脑上都确认信任。
+        输入对方 IP 后点击“连接”，设备会作为历史记录显示在这里。
       </div>
     </Card>
   </div>

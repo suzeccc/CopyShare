@@ -9,8 +9,8 @@ import TitleBar from "@/components/layout/TitleBar.vue";
 import WindowTitleBar from "@/components/layout/WindowTitleBar.vue";
 import { deviceAddress } from "@/lib/format";
 import { getFloatingClipboardItems, type ClipboardPreviewItem } from "@/lib/historyPreview";
+import { namedTrustDevices } from "@/lib/trustPrompt";
 import {
-  closeWindow,
   enterFloatingWindow,
   getClipboardHistory,
   hideMainWindow,
@@ -18,9 +18,11 @@ import {
 } from "@/lib/tauri";
 import { getLatencyLabel, type AppWindowMode } from "@/lib/windowMode";
 import {
+  getWindowTransitionOrigin,
   getWindowModeTransition,
   WINDOW_MODE_ENTER_MS,
   WINDOW_MODE_EXIT_MS,
+  type WindowTransitionPointer,
   type WindowTransitionPhase,
 } from "@/lib/windowTransition";
 import { useHistoryStore } from "@/stores/history";
@@ -36,10 +38,19 @@ const windowMode = ref<AppWindowMode>("main");
 const transitionPhase = ref<WindowTransitionPhase>("idle");
 const isSwitchingWindowMode = ref(false);
 const systemClipboardItems = ref<ClipboardPreviewItem[]>([]);
+const shellRef = ref<HTMLElement | null>(null);
+const windowTransitionOrigin = ref("center");
 let clipboardHistoryTimer: number | undefined;
 
 const clipboardItems = computed(() =>
   getFloatingClipboardItems(systemClipboardItems.value, historyStore.items),
+);
+const clipboardHistoryItems = computed(() =>
+  getFloatingClipboardItems(
+    systemClipboardItems.value,
+    historyStore.items,
+    Math.max(systemClipboardItems.value.length + historyStore.items.length, 1),
+  ),
 );
 const latencyLabel = computed(() =>
   getLatencyLabel({
@@ -48,9 +59,10 @@ const latencyLabel = computed(() =>
   }),
 );
 const isFloating = computed(() => windowMode.value === "floating");
-const trustPromptDevice = computed(() => devicesStore.pendingTrust[0] ?? null);
+const trustPromptDevices = computed(() => namedTrustDevices(devicesStore.pendingTrust));
+const trustPromptDevice = computed(() => trustPromptDevices.value[0] ?? null);
 const trustPromptExtraCount = computed(() =>
-  Math.max(devicesStore.pendingTrust.length - 1, 0),
+  Math.max(trustPromptDevices.value.length - 1, 0),
 );
 
 watch(
@@ -117,7 +129,18 @@ watch(
   { immediate: true },
 );
 
-async function switchWindowMode(nextMode: AppWindowMode, resizeWindow: () => Promise<void>) {
+function setWindowTransitionOrigin(pointer?: WindowTransitionPointer) {
+  const rect = shellRef.value?.getBoundingClientRect();
+  windowTransitionOrigin.value = pointer && rect
+    ? getWindowTransitionOrigin(pointer, rect)
+    : "center";
+}
+
+async function switchWindowMode(
+  nextMode: AppWindowMode,
+  resizeWindow: () => Promise<void>,
+  pointer?: WindowTransitionPointer,
+) {
   if (isSwitchingWindowMode.value) {
     return;
   }
@@ -128,6 +151,7 @@ async function switchWindowMode(nextMode: AppWindowMode, resizeWindow: () => Pro
   }
 
   isSwitchingWindowMode.value = true;
+  setWindowTransitionOrigin(pointer);
   transitionPhase.value = transition.exitPhase;
 
   try {
@@ -142,11 +166,12 @@ async function switchWindowMode(nextMode: AppWindowMode, resizeWindow: () => Pro
   } finally {
     transitionPhase.value = "idle";
     isSwitchingWindowMode.value = false;
+    windowTransitionOrigin.value = "center";
   }
 }
 
-async function switchToFloatingMode() {
-  await switchWindowMode("floating", enterFloatingWindow);
+async function switchToFloatingMode(pointer: WindowTransitionPointer) {
+  await switchWindowMode("floating", enterFloatingWindow, pointer);
 }
 
 async function switchToMainMode() {
@@ -174,7 +199,9 @@ async function rejectPromptDevice() {
 
 <template>
   <div
+    ref="shellRef"
     class="app-window-shell relative flex h-screen flex-col overflow-hidden rounded-[18px] text-slate-100 transition-[background-color,border-color,padding] duration-200 ease-out"
+    :style="{ '--window-transition-origin': windowTransitionOrigin }"
     :class="[
       isFloating ? 'bg-transparent p-2' : 'border border-[color:var(--main-line)] bg-[color:var(--main-bg)]',
       `window-phase-${transitionPhase}`,
@@ -189,9 +216,10 @@ async function rejectPromptDevice() {
         :connected-count="statusStore.status.connectedCount"
         :latency-label="latencyLabel"
         :clipboard-items="clipboardItems"
+        :clipboard-history-items="clipboardHistoryItems"
         @restore="switchToMainMode"
         @hide="hideMainWindow"
-        @close="closeWindow"
+        @close="hideMainWindow"
       />
 
       <div v-else class="main-window-content flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -215,17 +243,17 @@ async function rejectPromptDevice() {
       <div
         v-if="devicesStore.disconnectNotice"
         data-device-disconnect-notice
-        class="absolute z-[55] flex items-start gap-3 rounded-lg border border-sky-300/35 bg-[rgba(13,35,58,0.92)] px-3 py-3 text-slate-100 shadow-[0_16px_50px_rgba(0,0,0,0.42)] backdrop-blur"
-        :class="isFloating ? 'inset-x-3 bottom-3 text-xs' : 'right-5 top-16 w-[min(380px,calc(100%-2.5rem))] text-sm'"
+        class="absolute z-[55] flex items-start gap-3 rounded-lg border border-[color:var(--disconnect-notice-line)] bg-[color:var(--disconnect-notice-bg)] px-3 py-3 text-[color:var(--disconnect-notice-text)] shadow-[var(--disconnect-notice-shadow)] ring-1 ring-[color:var(--disconnect-notice-ring)] backdrop-blur-xl"
+        :class="isFloating ? 'inset-x-2 bottom-2 text-xs' : 'right-12 top-14 w-[min(410px,calc(100%-1.5rem))] text-sm'"
       >
-        <div class="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-sky-300/30 bg-sky-300/10 text-sky-100">
+        <div class="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-[color:var(--disconnect-notice-icon-line)] bg-[color:var(--disconnect-notice-icon-bg)] text-[color:var(--disconnect-notice-icon-text)]">
           <WifiOff class="h-4 w-4" />
         </div>
-        <p class="min-w-0 flex-1 leading-6">
+        <p class="min-w-0 flex-1 font-medium leading-6">
           {{ devicesStore.disconnectNotice }}
         </p>
         <button
-          class="grid h-7 w-7 shrink-0 place-items-center rounded-md text-slate-300 transition hover:bg-white/10 hover:text-white"
+          class="grid h-7 w-7 shrink-0 place-items-center rounded-md text-[color:var(--disconnect-notice-muted-text)] transition hover:bg-[color:var(--disconnect-notice-close-hover)] hover:text-[color:var(--disconnect-notice-text)]"
           type="button"
           aria-label="关闭断开提示"
           title="关闭"

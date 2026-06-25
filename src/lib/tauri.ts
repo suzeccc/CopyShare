@@ -1,12 +1,18 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
+import {
+  currentMonitor,
+  getCurrentWindow,
+  LogicalSize,
+  PhysicalPosition,
+} from "@tauri-apps/api/window";
 
 import {
   FLOATING_WINDOW_BOUNDS,
   MAIN_WINDOW_BACKGROUND,
   MAIN_WINDOW_BOUNDS,
   TRANSPARENT_WINDOW_BACKGROUND,
+  getFloatingWindowTopRightPosition,
 } from "@/lib/windowMode";
 import type { AppConfig } from "@/types/config";
 import type { DeviceInfo } from "@/types/device";
@@ -75,6 +81,10 @@ export function clearHistory(): Promise<void> {
   return invoke<void>("clear_history");
 }
 
+export function openExternalUrl(url: string): Promise<void> {
+  return invoke<void>("open_external_url", { url });
+}
+
 export function showMainWindow(): Promise<void> {
   return invoke<void>("show_main_window");
 }
@@ -99,6 +109,27 @@ export function closeWindow(): Promise<void> {
   return getCurrentWindow().close();
 }
 
+async function moveFloatingWindowToTopRight(
+  window: ReturnType<typeof getCurrentWindow>,
+): Promise<void> {
+  try {
+    const monitor = await currentMonitor();
+    if (!monitor) {
+      return;
+    }
+
+    const position = getFloatingWindowTopRightPosition({
+      position: monitor.workArea.position,
+      size: monitor.workArea.size,
+      scaleFactor: monitor.scaleFactor,
+    });
+
+    await window.setPosition(new PhysicalPosition(position.x, position.y));
+  } catch (error) {
+    console.warn("Unable to move floating window to top right", error);
+  }
+}
+
 export async function enterFloatingWindow(): Promise<void> {
   const window = getCurrentWindow();
   const size = new LogicalSize(
@@ -112,6 +143,7 @@ export async function enterFloatingWindow(): Promise<void> {
   await window.setMinSize(size);
   await window.setMaxSize(size);
   await window.setSize(size);
+  await moveFloatingWindowToTopRight(window);
   await window.setShadow(false);
   await window.setFocus();
 }

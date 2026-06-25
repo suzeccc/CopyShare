@@ -1,7 +1,8 @@
-  <script setup lang="ts">
+<script setup lang="ts">
 import { onMounted } from "vue";
 
 import AppShell from "@/components/layout/AppShell.vue";
+import ToastStack from "@/components/ui/ToastStack.vue";
 import { useConfigStore } from "@/stores/config";
 import { useDevicesStore } from "@/stores/devices";
 import { useHistoryStore } from "@/stores/history";
@@ -30,4 +31,5 @@ onMounted(async () => {
 
 <template>
   <AppShell />
+  <ToastStack />
 </template>

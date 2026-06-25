@@ -58,6 +58,7 @@ mod tests {
 
         assert_eq!(config.port, 8765);
         assert_eq!(config.theme, crate::models::AppTheme::Win11Dark);
+        assert_eq!(config.close_action, crate::models::CloseAction::Ask);
         assert!(config.auto_sync);
         assert!(config.save_history);
         assert!(config.sync_text);

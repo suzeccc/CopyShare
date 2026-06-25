@@ -2,6 +2,7 @@ mod autostart;
 mod clipboard;
 mod commands;
 mod config;
+mod device_store;
 mod discovery;
 mod error;
 mod history;
@@ -63,6 +64,7 @@ pub fn run() {
             commands::get_history,
             commands::get_clipboard_history,
             commands::clear_history,
+            commands::open_external_url,
             commands::show_main_window,
             commands::hide_main_window
         ])

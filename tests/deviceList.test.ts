@@ -4,6 +4,7 @@ import {
   connectedTrustedDevices,
   dedupeDevices,
   hasConnectedDeviceEndpoint,
+  historicalDevices,
   markDeviceDisconnected,
   markDeviceTrusted,
   mergeRefreshedDevices,
@@ -165,7 +166,7 @@ assert.deepEqual(
 
 const awaitingTrust = { ...device("awaiting-trust", true), ip: "10.194.33.158" };
 const trustedConnected = trustedDevice("trusted-connected", true);
-const trustedOffline = trustedDevice("trusted-offline", false);
+const trustedOffline = { ...trustedDevice("trusted-offline", false), ip: "10.194.33.160" };
 
 assert.deepEqual(
   pendingTrustDevices([awaitingTrust, trustedConnected, trustedOffline]).map(
@@ -179,6 +180,16 @@ assert.deepEqual(
     (item) => item.id,
   ),
   ["trusted-connected"],
+);
+
+assert.deepEqual(
+  historicalDevices([
+    awaitingTrust,
+    trustedConnected,
+    trustedOffline,
+    { ...device("ws://10.194.33.156:51234/", true), port: 51234 },
+  ]).map((item) => item.id),
+  ["trusted-connected", "trusted-offline", "awaiting-trust"],
 );
 
 const aliasTrusted = markDeviceTrusted(

@@ -20,7 +20,7 @@ pub fn load_history(app: &AppHandle) -> AppResult<Vec<HistoryItem>> {
     }
 
     let text = fs::read_to_string(path)?;
-    Ok(serde_json::from_str(&text)?)
+    load_history_items_from_text(&text)
 }
 
 pub fn save_history(app: &AppHandle, items: &[HistoryItem]) -> AppResult<()> {
@@ -104,6 +104,13 @@ fn history_path(app: &AppHandle) -> AppResult<PathBuf> {
     Ok(dir.join(HISTORY_FILE))
 }
 
+fn load_history_items_from_text(text: &str) -> AppResult<Vec<HistoryItem>> {
+    match serde_json::from_str(text) {
+        Ok(items) => Ok(items),
+        Err(_) => Ok(Vec::new()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -176,5 +183,13 @@ mod tests {
 
         assert_eq!(item.summary, "图片 4 KB");
         assert!(item.content.is_empty());
+    }
+
+    #[test]
+    fn corrupted_history_json_does_not_block_startup() {
+        let items = load_history_items_from_text(r#"[{"id": "broken", "summary": "unterminated}"#)
+            .expect("corrupted history should fall back to empty history");
+
+        assert!(items.is_empty());
     }
 }

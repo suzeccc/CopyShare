@@ -33,9 +33,9 @@ const syncContentItems = computed(() => [
   },
   {
     label: "图片",
-    hint: "后续版本支持图片剪贴板",
-    state: "暂未开放",
-    enabled: false,
+    hint: "支持截图和图片复制",
+    state: configStore.config.syncImage ? "已启用" : "已关闭",
+    enabled: configStore.config.syncImage,
     icon: ImageIcon,
   },
   {
@@ -54,7 +54,7 @@ const allClipboardItems = computed(() =>
 </script>
 
 <template>
-  <div class="grid gap-4">
+  <div data-home-overview class="grid min-w-0 max-w-full gap-4 overflow-x-hidden">
     <section class="grid gap-4">
       <Card>
         <div class="flex h-full flex-col justify-between gap-5">
@@ -74,7 +74,7 @@ const allClipboardItems = computed(() =>
             />
           </div>
 
-          <div class="grid gap-3 lg:grid-cols-3">
+          <div data-home-stats-grid class="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-3">
             <div class="rounded-lg border border-[color:var(--main-line-soft)] bg-[color:var(--stat-bg)] px-4 py-3">
               <p class="text-xs text-slate-500">同步状态</p>
               <p class="mt-1.5 text-xl font-semibold text-white">{{ statusStore.statusLabel }}</p>
@@ -103,17 +103,17 @@ const allClipboardItems = computed(() =>
       </Card>
     </section>
 
-    <section class="grid gap-3 md:grid-cols-[1fr_1fr]">
+    <section data-home-quick-device-row class="grid min-w-0 grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
       <Card compact>
         <div class="flex h-full flex-col justify-between gap-4">
           <div class="flex items-center justify-between gap-3">
             <p class="text-base font-semibold text-white">快速操作</p>
             <p class="truncate text-xs text-slate-500">常用入口</p>
           </div>
-          <div class="grid gap-3 sm:grid-cols-3">
+          <div data-home-quick-actions class="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-3">
             <RouterLink
               to="/devices"
-              class="group flex min-h-16 items-center justify-center gap-3 rounded-lg border border-[color:var(--main-line)] bg-[color:var(--main-bg-muted)] px-3 py-3 text-sm font-semibold text-white transition hover:border-[color:var(--accent-line)] hover:bg-[color:var(--stat-bg)]"
+              class="group flex min-h-16 min-w-0 items-center justify-center gap-3 rounded-lg border border-[color:var(--main-line)] bg-[color:var(--main-bg-muted)] px-3 py-3 text-sm font-semibold text-white transition hover:border-[color:var(--accent-line)] hover:bg-[color:var(--stat-bg)]"
             >
               <span class="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-[color:var(--accent-soft)] text-[color:var(--accent-text)] ring-1 ring-[color:var(--accent-line)] transition group-hover:bg-[color:var(--accent-soft)]">
                 <Network class="h-5 w-5" />
@@ -122,7 +122,7 @@ const allClipboardItems = computed(() =>
             </RouterLink>
             <RouterLink
               to="/logs"
-              class="group flex min-h-16 items-center justify-center gap-3 rounded-lg border border-[color:var(--main-line-soft)] bg-[color:var(--stat-bg)] px-3 py-3 text-sm font-semibold text-slate-200 transition hover:border-[color:var(--accent-line)] hover:bg-[color:var(--main-bg-muted)] hover:text-white"
+              class="group flex min-h-16 min-w-0 items-center justify-center gap-3 rounded-lg border border-[color:var(--main-line-soft)] bg-[color:var(--stat-bg)] px-3 py-3 text-sm font-semibold text-slate-200 transition hover:border-[color:var(--accent-line)] hover:bg-[color:var(--main-bg-muted)] hover:text-white"
             >
               <span class="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-white/[0.06] text-slate-100 ring-1 ring-white/10 transition group-hover:bg-[color:var(--accent-soft)] group-hover:text-[color:var(--accent-text)]">
                 <Monitor class="h-5 w-5" />
@@ -131,7 +131,7 @@ const allClipboardItems = computed(() =>
             </RouterLink>
             <RouterLink
               to="/settings"
-              class="group flex min-h-16 items-center justify-center gap-3 rounded-lg border border-[color:var(--main-line-soft)] bg-[color:var(--stat-bg)] px-3 py-3 text-sm font-semibold text-slate-200 transition hover:border-[color:var(--accent-line)] hover:bg-[color:var(--main-bg-muted)] hover:text-white"
+              class="group flex min-h-16 min-w-0 items-center justify-center gap-3 rounded-lg border border-[color:var(--main-line-soft)] bg-[color:var(--stat-bg)] px-3 py-3 text-sm font-semibold text-slate-200 transition hover:border-[color:var(--accent-line)] hover:bg-[color:var(--main-bg-muted)] hover:text-white"
             >
               <span class="grid h-9 w-9 shrink-0 place-items-center rounded-md bg-white/[0.06] text-slate-100 ring-1 ring-white/10 transition group-hover:bg-[color:var(--accent-soft)] group-hover:text-[color:var(--accent-text)]">
                 <Settings class="h-5 w-5" />
@@ -143,7 +143,7 @@ const allClipboardItems = computed(() =>
       </Card>
 
       <Card compact>
-        <div class="grid h-full gap-3">
+        <div class="grid h-full min-w-0 gap-3">
           <div class="flex items-start gap-3">
             <Monitor class="mt-0.5 h-5 w-5 text-[color:var(--accent-text)]" />
             <div class="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-3">
@@ -156,7 +156,7 @@ const allClipboardItems = computed(() =>
               </span>
             </div>
           </div>
-          <div data-home-device-fields class="grid gap-2 text-sm text-slate-300 sm:grid-cols-[0.62fr_1.38fr]">
+          <div data-home-device-fields class="grid min-w-0 grid-cols-1 gap-2 text-sm text-slate-300 sm:grid-cols-[0.62fr_1.38fr]">
             <p data-home-port-block class="flex min-w-0 items-center justify-between gap-3 rounded-md bg-[color:var(--field-bg)] px-3 py-2">
               <span class="shrink-0 whitespace-nowrap text-slate-500">监听端口</span>
               <span class="font-mono">{{ statusStore.status.port }}</span>
@@ -187,11 +187,11 @@ const allClipboardItems = computed(() =>
           </RouterLink>
         </div>
 
-        <div class="grid gap-3 md:grid-cols-3">
+        <div data-home-sync-content-grid class="grid min-w-0 grid-cols-1 gap-3 md:grid-cols-3">
           <article
             v-for="item in syncContentItems"
             :key="item.label"
-            class="rounded-lg border border-[color:var(--main-line-soft)] bg-[color:var(--stat-bg)] p-4"
+            class="min-w-0 rounded-lg border border-[color:var(--main-line-soft)] bg-[color:var(--stat-bg)] p-4"
           >
             <div class="mb-4 flex items-center justify-between gap-3">
               <div class="grid h-9 w-9 place-items-center rounded-md border border-[color:var(--accent-line)] bg-[color:var(--accent-soft)]">
@@ -225,13 +225,13 @@ const allClipboardItems = computed(() =>
             </div>
           </div>
 
-          <div v-if="recentSyncItems.length" class="grid gap-2">
+          <div v-if="recentSyncItems.length" class="grid min-w-0 gap-2">
             <div
               v-for="item in recentSyncItems"
               :key="item.id"
-              class="flex items-start gap-3 rounded-md border border-[color:var(--main-line-soft)] bg-[color:var(--field-bg)] px-3 py-2"
+              data-home-recent-row class="flex min-w-0 items-start gap-3 overflow-hidden rounded-md border border-[color:var(--main-line-soft)] bg-[color:var(--field-bg)] px-3 py-2"
             >
-              <p class="line-clamp-2 min-w-0 flex-1 break-words text-sm leading-5 text-slate-300">
+              <p data-home-recent-text class="line-clamp-2 min-w-0 flex-1 break-all text-sm leading-5 text-slate-300">
                 {{ item.text }}
               </p>
               <CopyTextButton :text="item.text" icon-only label="复制内容" />
@@ -284,8 +284,16 @@ const allClipboardItems = computed(() =>
                 <p data-clipboard-history-text class="min-w-0 whitespace-pre-wrap break-all text-sm leading-6 text-slate-200">
                   {{ item.text }}
                 </p>
-                <div data-clipboard-history-copy class="flex shrink-0 justify-end">
+                <div data-clipboard-history-copy class="flex shrink-0 flex-col items-end gap-2">
                   <CopyTextButton :text="item.text" icon-only label="复制内容" />
+                  <span
+                    v-if="item.sourceDevice"
+                    data-clipboard-history-device
+                    class="max-w-28 truncate rounded-full border border-[color:var(--main-line-soft)] bg-[color:var(--stat-bg)] px-2 py-0.5 text-[11px] font-medium leading-5 text-[color:var(--muted-text)]"
+                    :title="item.sourceDevice"
+                  >
+                    {{ item.sourceDevice }}
+                  </span>
                 </div>
               </div>
             </div>

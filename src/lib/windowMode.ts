@@ -13,9 +13,36 @@ export const FLOATING_WINDOW_BOUNDS = {
   opacity: 0.66,
 } as const;
 
+export const FLOATING_WINDOW_MARGIN = 16;
+
 export const FLOATING_WINDOW_BACKGROUND = "rgba(5, 18, 39, 0.68)";
 export const TRANSPARENT_WINDOW_BACKGROUND = "#00000000";
 export const MAIN_WINDOW_BACKGROUND = "#10203a";
+
+export type WindowPositionArea = {
+  position: {
+    x: number;
+    y: number;
+  };
+  size: {
+    width: number;
+    height: number;
+  };
+  scaleFactor: number;
+};
+
+export function getFloatingWindowTopRightPosition(area: WindowPositionArea): {
+  x: number;
+  y: number;
+} {
+  const margin = FLOATING_WINDOW_MARGIN * area.scaleFactor;
+  const width = FLOATING_WINDOW_BOUNDS.width * area.scaleFactor;
+
+  return {
+    x: Math.round(area.position.x + area.size.width - width - margin),
+    y: Math.round(area.position.y + margin),
+  };
+}
 
 export function getClipboardPreview(summary: string | null | undefined): string {
   const preview = summary?.trim();

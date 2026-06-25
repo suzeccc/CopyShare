@@ -3,6 +3,7 @@ import { Check, Copy, TriangleAlert } from "lucide-vue-next";
 import { computed, onBeforeUnmount, ref } from "vue";
 
 import { copyTextToClipboard, getCopyableText, type CopyTextResult } from "@/lib/clipboard";
+import { useToastStore } from "@/stores/toasts";
 
 import Button from "./Button.vue";
 
@@ -25,6 +26,7 @@ const props = withDefaults(
 );
 
 const result = ref<CopyTextResult | null>(null);
+const toastStore = useToastStore();
 let resetTimer: number | undefined;
 
 const canCopy = computed(() => Boolean(getCopyableText(props.text)));
@@ -43,6 +45,12 @@ const buttonLabel = computed(() => {
 
 async function copyText() {
   result.value = await copyTextToClipboard(props.text);
+
+  if (result.value === "copied") {
+    toastStore.success("复制成功");
+  } else if (result.value) {
+    toastStore.error("复制失败");
+  }
 
   window.clearTimeout(resetTimer);
   resetTimer = window.setTimeout(() => {
