@@ -11,8 +11,8 @@ import type { AppStatus } from "@/types/status";
 
 const stoppedStatus: AppStatus = {
   running: false,
-  deviceName: "Copy-Sharer",
-  deviceId: "copy-sharer",
+  deviceName: "CopyShare",
+  deviceId: "copyshare",
   localIp: null,
   port: 8765,
   connectedCount: 0,

@@ -53,5 +53,5 @@ assert.match(settings, /useToastStore/);
 assert.match(settings, /保存成功/);
 assert.match(settings, /保存失败/);
 assert.match(devicesStore, /useToastStore/);
-assert.match(devicesStore, /连接成功/);
+assert.match(devicesStore, /connectionSuccessMessage\(device\)/);
 assert.match(devicesStore, /连接失败/);

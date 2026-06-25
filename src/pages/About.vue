@@ -77,7 +77,7 @@ async function checkForUpdate() {
     <Card>
       <div class="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <p class="text-sm font-semibold text-white">关于 Copy-Sharer</p>
+          <p class="text-sm font-semibold text-white">关于 CopyShare</p>
           <p class="mt-2 max-w-2xl text-sm leading-6 text-[color:var(--muted-text)]">
             局域网剪贴板同步工具，用于在已信任设备之间同步文本剪贴板内容。
           </p>
@@ -140,15 +140,20 @@ async function checkForUpdate() {
             </p>
           </div>
         </div>
-        <div class="mt-4 flex flex-wrap gap-2">
-          <Button variant="secondary" @click="openRepository">
-            <ExternalLink class="h-4 w-4" />
-            打开仓库
-          </Button>
-          <Button variant="ghost" @click="openLatestRelease">
-            <RefreshCw class="h-4 w-4" />
-            查看最新版本
-          </Button>
+        <div class="mt-4 flex flex-wrap items-center justify-between gap-3">
+          <div class="flex flex-wrap gap-2">
+            <Button variant="secondary" @click="openRepository">
+              <ExternalLink class="h-4 w-4" />
+              打开仓库
+            </Button>
+            <Button variant="ghost" @click="openLatestRelease">
+              <RefreshCw class="h-4 w-4" />
+              查看最新版本
+            </Button>
+          </div>
+          <p data-github-star-hint class="max-w-sm text-right text-xs leading-5 text-[color:var(--muted-text)]">
+            如果这个项目帮到了你，欢迎在 GitHub 仓库点一颗 Star。
+          </p>
         </div>
       </div>
     </Card>

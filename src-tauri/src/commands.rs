@@ -9,7 +9,7 @@ use crate::{
     device_store,
     error::{AppError, AppResult},
     history,
-    models::{AppConfig, AppStatus, ClipboardTextItem, DeviceInfo, HistoryItem},
+    models::{AppConfig, AppStatus, ClipboardContentType, ClipboardTextItem, DeviceInfo, HistoryItem},
     security,
     state::AppState,
     sync,
@@ -184,6 +184,42 @@ pub async fn clear_history(app: AppHandle, state: State<'_, AppState>) -> AppRes
     history::clear_history(&app)?;
     state.replace_history(Vec::new()).await;
     Ok(())
+}
+
+#[tauri::command]
+pub async fn copy_history_item(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    history_id: String,
+) -> AppResult<()> {
+    let item = state
+        .history()
+        .await
+        .into_iter()
+        .find(|item| item.id == history_id)
+        .ok_or(AppError::InvalidInput("历史记录不存在".to_string()))?;
+
+    match item.content_type {
+        ClipboardContentType::Text => {
+            let text = if item.content.trim().is_empty() {
+                item.summary
+            } else {
+                item.content
+            };
+            clipboard::write_clipboard_text(&app, &text)
+        }
+        ClipboardContentType::Image => {
+            if item.content.trim().is_empty() {
+                return Err(AppError::InvalidInput(
+                    "这条图片历史没有可复制的图片内容，请重新复制或同步一次图片".to_string(),
+                ));
+            }
+            clipboard::write_clipboard_image_base64(&app, &item.content)
+        }
+        ClipboardContentType::FileList => Err(AppError::InvalidInput(
+            "暂不支持复制文件列表历史".to_string(),
+        )),
+    }
 }
 
 #[tauri::command]

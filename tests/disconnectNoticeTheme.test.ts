@@ -11,8 +11,10 @@ assert.match(style, /--disconnect-notice-icon-bg:/);
 assert.match(style, /--disconnect-notice-icon-text:/);
 assert.match(style, /html\[data-app-theme="win11Dark"\][\s\S]*--disconnect-notice-bg:/);
 assert.match(style, /html\[data-app-theme="win11Dark"\][\s\S]*--disconnect-notice-ring:/);
-assert.match(style, /html\[data-app-theme="win11Dark"\][\s\S]*--disconnect-notice-line: rgba\(251, 146, 60,/);
-assert.match(style, /html\[data-app-theme="win11Dark"\][\s\S]*--disconnect-notice-icon-text: #fdba74;/);
+assert.match(style, /html\[data-app-theme="win11Dark"\][\s\S]*--disconnect-notice-bg: rgba\(43, 43, 43, 0\.98\);/);
+assert.match(style, /html\[data-app-theme="win11Dark"\][\s\S]*--disconnect-notice-line: rgba\(96, 205, 255,/);
+assert.match(style, /html\[data-app-theme="win11Dark"\][\s\S]*--disconnect-notice-icon-text: #dff6ff;/);
+assert.doesNotMatch(style, /html\[data-app-theme="win11Dark"\][\s\S]*--disconnect-notice-line: rgba\(251, 146, 60,/);
 
 assert.match(appShell, /var\(--disconnect-notice-bg\)/);
 assert.match(appShell, /var\(--disconnect-notice-line\)/);

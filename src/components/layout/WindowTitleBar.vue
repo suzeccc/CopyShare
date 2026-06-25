@@ -95,7 +95,7 @@ async function handleCloseWindow() {
         class="truncate text-sm font-medium text-white"
         data-window-drag-region
       >
-        Copy-Sharer
+        CopyShare
       </span>
     </div>
 
@@ -149,7 +149,7 @@ async function handleCloseWindow() {
         <section class="w-full max-w-[430px] rounded-lg border border-[color:var(--main-line)] bg-[color:var(--dialog-bg)] p-5 text-slate-100 shadow-[0_20px_70px_rgba(0,0,0,0.52)]">
           <div class="flex items-start justify-between gap-4">
             <div>
-              <p class="text-base font-semibold text-white">关闭 Copy-Sharer？</p>
+              <p class="text-base font-semibold text-white">关闭 CopyShare？</p>
               <p class="mt-2 text-sm leading-6 text-slate-300">
                 可以最小化到托盘继续同步，也可以直接退出应用。
               </p>

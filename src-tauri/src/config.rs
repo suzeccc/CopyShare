@@ -8,6 +8,7 @@ use crate::{
 };
 
 const CONFIG_FILE: &str = "config.json";
+const CURRENT_CONFIG_VERSION: u16 = 1;
 
 pub fn load_config(app: &AppHandle) -> AppResult<AppConfig> {
     let path = config_path(app)?;
@@ -19,7 +20,9 @@ pub fn load_config(app: &AppHandle) -> AppResult<AppConfig> {
 
     let text = fs::read_to_string(path)?;
     let mut config: AppConfig = serde_json::from_str(&text)?;
-    if ensure_config_device_id(&mut config) {
+    let mut changed = ensure_config_device_id(&mut config);
+    changed |= migrate_config(&mut config);
+    if changed {
         save_config(app, &config)?;
     }
     Ok(config)
@@ -47,6 +50,16 @@ pub fn ensure_config_device_id(config: &mut AppConfig) -> bool {
     true
 }
 
+fn migrate_config(config: &mut AppConfig) -> bool {
+    if config.config_version >= CURRENT_CONFIG_VERSION {
+        return false;
+    }
+
+    config.sync_image = true;
+    config.config_version = CURRENT_CONFIG_VERSION;
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::ensure_config_device_id;
@@ -62,7 +75,7 @@ mod tests {
         assert!(config.auto_sync);
         assert!(config.save_history);
         assert!(config.sync_text);
-        assert!(!config.sync_image);
+        assert!(config.sync_image);
         assert!(!config.sync_files);
         assert!(config.trusted_devices.is_empty());
     }
@@ -70,7 +83,7 @@ mod tests {
     #[test]
     fn legacy_config_without_theme_uses_win11_dark() {
         let json = serde_json::json!({
-            "deviceName": "Copy-Sharer",
+            "deviceName": "CopyShare",
             "deviceId": "device-test",
             "port": 8765,
             "autoStart": false,
@@ -85,6 +98,32 @@ mod tests {
         let config: AppConfig = serde_json::from_value(json).unwrap();
 
         assert_eq!(config.theme, crate::models::AppTheme::Win11Dark);
+    }
+
+    #[test]
+    fn legacy_config_enables_image_sync_once() {
+        let json = serde_json::json!({
+            "deviceName": "CopyShare",
+            "deviceId": "device-test",
+            "port": 8765,
+            "autoStart": false,
+            "autoSync": true,
+            "saveHistory": true,
+            "trustedDevices": [],
+            "syncText": true,
+            "syncImage": false,
+            "syncFiles": false
+        });
+        let mut config: AppConfig = serde_json::from_value(json).unwrap();
+
+        assert!(super::migrate_config(&mut config));
+        assert_eq!(config.config_version, 1);
+        assert!(config.sync_image);
+
+        config.sync_image = false;
+        assert!(!super::migrate_config(&mut config));
+        assert_eq!(config.config_version, 1);
+        assert!(!config.sync_image);
     }
 
     #[test]

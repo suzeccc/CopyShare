@@ -3,7 +3,9 @@ import { Check, Copy, TriangleAlert } from "lucide-vue-next";
 import { computed, onBeforeUnmount, ref } from "vue";
 
 import { copyTextToClipboard, getCopyableText, type CopyTextResult } from "@/lib/clipboard";
+import { copyHistoryItem } from "@/lib/tauri";
 import { useToastStore } from "@/stores/toasts";
+import type { ClipboardContentType } from "@/types/history";
 
 import Button from "./Button.vue";
 
@@ -15,6 +17,8 @@ const props = withDefaults(
     size?: "sm" | "md";
     variant?: "secondary" | "ghost";
     iconOnly?: boolean;
+    contentType?: ClipboardContentType;
+    historyItemId?: string;
   }>(),
   {
     label: "复制",
@@ -22,6 +26,7 @@ const props = withDefaults(
     size: "sm",
     variant: "ghost",
     iconOnly: false,
+    contentType: "text",
   },
 );
 
@@ -29,7 +34,11 @@ const result = ref<CopyTextResult | null>(null);
 const toastStore = useToastStore();
 let resetTimer: number | undefined;
 
-const canCopy = computed(() => Boolean(getCopyableText(props.text)));
+const canCopy = computed(() =>
+  props.contentType === "image"
+    ? Boolean(props.historyItemId)
+    : Boolean(getCopyableText(props.text)),
+);
 const hasError = computed(() => result.value === "failed" || result.value === "unsupported");
 const buttonLabel = computed(() => {
   if (result.value === "copied") {
@@ -44,10 +53,23 @@ const buttonLabel = computed(() => {
 });
 
 async function copyText() {
-  result.value = await copyTextToClipboard(props.text);
+  if (props.contentType === "image") {
+    if (!props.historyItemId) {
+      result.value = "empty";
+    } else {
+      try {
+        await copyHistoryItem(props.historyItemId);
+        result.value = "copied";
+      } catch {
+        result.value = "failed";
+      }
+    }
+  } else {
+    result.value = await copyTextToClipboard(props.text);
+  }
 
   if (result.value === "copied") {
-    toastStore.success("复制成功");
+    toastStore.success(props.contentType === "image" ? "图片已复制" : "复制成功");
   } else if (result.value) {
     toastStore.error("复制失败");
   }

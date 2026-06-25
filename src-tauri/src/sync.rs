@@ -1244,7 +1244,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn local_clipboard_is_read_only_when_text_sync_has_trusted_peers() {
+    async fn local_clipboard_is_read_when_any_enabled_type_has_trusted_peers() {
         let state = AppState::new();
         let mut config = crate::models::AppConfig::default();
 
@@ -1265,6 +1265,9 @@ mod tests {
         assert!(should_read_local_clipboard(&state, &config).await);
 
         config.sync_text = false;
+        assert!(should_read_local_clipboard(&state, &config).await);
+
+        config.sync_image = false;
         assert!(!should_read_local_clipboard(&state, &config).await);
 
         config.sync_image = true;

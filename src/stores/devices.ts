@@ -26,6 +26,7 @@ import {
   shouldSkipManualConnect,
   upsertDevice,
 } from "@/lib/deviceList";
+import { connectionSuccessMessage, hasRealDeviceName } from "@/lib/deviceToast";
 import { useStatusStore } from "@/stores/status";
 import { useToastStore } from "@/stores/toasts";
 import type { DeviceInfo } from "@/types/device";
@@ -63,7 +64,6 @@ export const useDevicesStore = defineStore("devices", {
       try {
         const device = await connectDevice(ip, port);
         this.upsert(device);
-        useToastStore().success(`${device.name} 连接成功`);
         await useStatusStore().refresh();
       } catch (error) {
         this.error = String(error);
@@ -108,6 +108,9 @@ export const useDevicesStore = defineStore("devices", {
         onAppEvent<DeviceInfo>("device-connected", (device) => {
           this.disconnectNotice = null;
           this.upsert(device);
+          if (hasRealDeviceName(device)) {
+            useToastStore().success(connectionSuccessMessage(device));
+          }
         }),
         onAppEvent<DeviceInfo>("device-disconnected", (device) => {
           this.devices = applyDeviceDisconnected(this.devices, device);

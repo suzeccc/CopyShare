@@ -22,7 +22,7 @@ assert.match(aboutMeta, /RELEASE_API_URL/);
 assert.match(aboutMeta, /getLatestRelease/);
 assert.match(aboutMeta, /getUpdateState/);
 
-assert.match(about, /关于 Copy-Sharer/);
+assert.match(about, /关于 CopyShare/);
 assert.match(about, /版本信息/);
 assert.match(about, /GitHub 仓库/);
 assert.match(about, /作者/);
@@ -36,6 +36,8 @@ assert.match(about, /openLatestRelease/);
 assert.match(about, /openUpdateRelease/);
 assert.match(about, /updateReleaseUrl/);
 assert.match(about, /data-update-release-link/);
+assert.match(about, /data-github-star-hint/);
+assert.match(about, /一颗 Star/);
 assert.match(about, /@click="openUpdateRelease"/);
 assert.doesNotMatch(about, /:href="updateReleaseUrl"/);
 assert.doesNotMatch(about, /window\.open/);

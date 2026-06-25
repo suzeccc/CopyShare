@@ -61,7 +61,7 @@ const allClipboardItems = computed(() =>
           <div class="flex flex-wrap items-start justify-between gap-4">
             <div>
               <p class="text-xs font-medium text-[color:var(--accent-text)]">局域网剪贴板同步</p>
-              <h2 class="mt-2 text-2xl font-semibold text-white">Copy-Sharer</h2>
+              <h2 class="mt-2 text-2xl font-semibold text-white">CopyShare</h2>
               <p class="mt-3 max-w-2xl text-sm leading-6 text-slate-400">
                 监听本机文本剪贴板，通过 WebSocket 同步给已信任的局域网设备。
               </p>
@@ -234,7 +234,13 @@ const allClipboardItems = computed(() =>
               <p data-home-recent-text class="line-clamp-2 min-w-0 flex-1 break-all text-sm leading-5 text-slate-300">
                 {{ item.text }}
               </p>
-              <CopyTextButton :text="item.text" icon-only label="复制内容" />
+              <CopyTextButton
+                :text="item.text"
+                :content-type="item.contentType"
+                :history-item-id="item.id"
+                icon-only
+                label="复制内容"
+              />
             </div>
           </div>
           <p v-else class="rounded-md border border-dashed border-[color:var(--main-line-soft)] px-3 py-4 text-sm text-slate-500">
@@ -285,7 +291,13 @@ const allClipboardItems = computed(() =>
                   {{ item.text }}
                 </p>
                 <div data-clipboard-history-copy class="flex shrink-0 flex-col items-end gap-2">
-                  <CopyTextButton :text="item.text" icon-only label="复制内容" />
+                  <CopyTextButton
+                    :text="item.text"
+                    :content-type="item.contentType"
+                    :history-item-id="item.id"
+                    icon-only
+                    label="复制内容"
+                  />
                   <span
                     v-if="item.sourceDevice"
                     data-clipboard-history-device

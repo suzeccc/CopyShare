@@ -45,7 +45,7 @@ function handleWindowDrag(event: MouseEvent) {
       <div class="flex min-w-0 items-center gap-2" data-window-drag-region>
         <span class="h-2.5 w-2.5 shrink-0 rounded-full" :class="statusClass" data-window-drag-region />
         <div class="min-w-0">
-          <p class="truncate text-sm font-semibold leading-4" data-window-drag-region>Copy-Sharer</p>
+          <p class="truncate text-sm font-semibold leading-4" data-window-drag-region>CopyShare</p>
           <p class="truncate text-[11px] font-medium text-[color:var(--floating-muted-text)]" data-window-drag-region>{{ statusLabel }}</p>
         </div>
       </div>
@@ -110,14 +110,14 @@ function handleWindowDrag(event: MouseEvent) {
         </div>
         <button
           data-floating-more-clipboard-button
-          class="inline-flex h-6 shrink-0 items-center gap-1 rounded-md border border-[color:var(--floating-control-line)] bg-[color:var(--floating-control-bg)] px-2 text-[11px] font-semibold text-[color:var(--floating-control-text)] transition hover:bg-[color:var(--floating-control-bg-hover)] disabled:opacity-45"
+          class="inline-grid h-6 w-8 shrink-0 place-items-center rounded-md border border-[color:var(--floating-control-line)] bg-[color:var(--floating-control-bg)] text-[color:var(--floating-control-text)] transition hover:bg-[color:var(--floating-control-bg-hover)] disabled:opacity-45"
           type="button"
+          aria-label="查看更多剪贴板内容"
           title="查看更多剪贴板内容"
           :disabled="!clipboardHistoryItems.length"
           @click="showClipboardHistoryModal = true"
         >
           <MoreHorizontal class="h-3.5 w-3.5" />
-          更多
         </button>
       </div>
       <div v-if="clipboardItems.length" class="min-h-0 flex-1 overflow-y-auto pr-1">
@@ -129,7 +129,14 @@ function handleWindowDrag(event: MouseEvent) {
           <p data-floating-clipboard-text class="line-clamp-1 min-w-0 flex-1 break-words text-xs font-semibold leading-4 text-[color:var(--floating-strong-text)]">
             {{ item.text }}
           </p>
-          <CopyTextButton :text="item.text" icon-only label="复制内容" copied-label="已复制" />
+          <CopyTextButton
+            :text="item.text"
+            :content-type="item.contentType"
+            :history-item-id="item.id"
+            icon-only
+            label="复制内容"
+            copied-label="已复制"
+          />
         </div>
       </div>
       <p v-else class="break-words text-xs font-semibold leading-5 text-[color:var(--floating-strong-text)]">
@@ -171,7 +178,14 @@ function handleWindowDrag(event: MouseEvent) {
               {{ item.text }}
             </p>
             <div class="flex shrink-0 flex-col items-end gap-1.5">
-              <CopyTextButton :text="item.text" icon-only label="复制内容" copied-label="已复制" />
+              <CopyTextButton
+                :text="item.text"
+                :content-type="item.contentType"
+                :history-item-id="item.id"
+                icon-only
+                label="复制内容"
+                copied-label="已复制"
+              />
               <span
                 v-if="item.sourceDevice"
                 class="max-w-20 truncate rounded-full border border-[color:var(--floating-control-line)] bg-[color:var(--floating-control-bg)] px-2 py-0.5 text-[10px] font-semibold text-[color:var(--floating-muted-text)]"

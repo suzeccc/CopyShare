@@ -10,6 +10,8 @@ use crate::{
 };
 
 const HISTORY_FILE: &str = "history.json";
+const HISTORY_IMAGE_DIR: &str = "history-images";
+const HISTORY_IMAGE_EXTENSION: &str = "b64";
 const SUMMARY_LIMIT: usize = 80;
 const HISTORY_LIMIT: usize = 100;
 
@@ -20,12 +22,17 @@ pub fn load_history(app: &AppHandle) -> AppResult<Vec<HistoryItem>> {
     }
 
     let text = fs::read_to_string(path)?;
-    load_history_items_from_text(&text)
+    let mut items = load_history_items_from_text(&text)?;
+    restore_history_images(&mut items, &history_images_dir(app)?);
+    Ok(items)
 }
 
 pub fn save_history(app: &AppHandle, items: &[HistoryItem]) -> AppResult<()> {
     let path = history_path(app)?;
-    let text = serde_json::to_string_pretty(items)?;
+    let image_dir = history_images_dir(app)?;
+    save_history_images(&image_dir, items)?;
+    prune_history_images(&image_dir, items)?;
+    let text = serde_json::to_string_pretty(&history_items_for_disk(items))?;
     fs::write(path, text)?;
     Ok(())
 }
@@ -80,9 +87,82 @@ fn summarize_message(message: &ClipboardMessage) -> String {
 
 fn history_content(message: &ClipboardMessage) -> String {
     match message.content_type {
-        ClipboardContentType::Text => message.content.clone(),
-        ClipboardContentType::Image | ClipboardContentType::FileList => String::new(),
+        ClipboardContentType::Text | ClipboardContentType::Image => message.content.clone(),
+        ClipboardContentType::FileList => String::new(),
     }
+}
+
+fn history_items_for_disk(items: &[HistoryItem]) -> Vec<HistoryItem> {
+    items
+        .iter()
+        .map(|item| {
+            let mut item = item.clone();
+            if item.content_type != ClipboardContentType::Text {
+                item.content.clear();
+            }
+            item
+        })
+        .collect()
+}
+
+fn save_history_images(image_dir: &PathBuf, items: &[HistoryItem]) -> AppResult<()> {
+    fs::create_dir_all(image_dir)?;
+    for item in items {
+        if item.content_type == ClipboardContentType::Image && !item.content.trim().is_empty() {
+            fs::write(history_image_path(image_dir, &item.id), &item.content)?;
+        }
+    }
+    Ok(())
+}
+
+fn restore_history_images(items: &mut [HistoryItem], image_dir: &PathBuf) {
+    for item in items {
+        if item.content_type == ClipboardContentType::Image && item.content.trim().is_empty() {
+            if let Ok(content) = fs::read_to_string(history_image_path(image_dir, &item.id)) {
+                item.content = content;
+            }
+        }
+    }
+}
+
+fn prune_history_images(image_dir: &PathBuf, items: &[HistoryItem]) -> AppResult<()> {
+    if !image_dir.exists() {
+        return Ok(());
+    }
+
+    let keep_files: std::collections::HashSet<String> = items
+        .iter()
+        .filter(|item| item.content_type == ClipboardContentType::Image)
+        .map(|item| history_image_file_name(&item.id))
+        .collect();
+
+    for entry in fs::read_dir(image_dir)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+        let file_name = entry.file_name().to_string_lossy().to_string();
+        if !keep_files.contains(&file_name) {
+            fs::remove_file(entry.path())?;
+        }
+    }
+
+    Ok(())
+}
+
+fn history_image_path(image_dir: &PathBuf, id: &str) -> PathBuf {
+    image_dir.join(history_image_file_name(id))
+}
+
+fn history_image_file_name(id: &str) -> String {
+    let safe_id: String = id
+        .chars()
+        .map(|ch| match ch {
+            'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' => ch,
+            _ => '_',
+        })
+        .collect();
+    format!("{safe_id}.{HISTORY_IMAGE_EXTENSION}")
 }
 
 fn base64_payload_size(content: &str) -> usize {
@@ -102,6 +182,12 @@ fn history_path(app: &AppHandle) -> AppResult<PathBuf> {
     let dir = app.path().app_data_dir()?;
     fs::create_dir_all(&dir)?;
     Ok(dir.join(HISTORY_FILE))
+}
+
+fn history_images_dir(app: &AppHandle) -> AppResult<PathBuf> {
+    let dir = app.path().app_data_dir()?.join(HISTORY_IMAGE_DIR);
+    fs::create_dir_all(&dir)?;
+    Ok(dir)
 }
 
 fn load_history_items_from_text(text: &str) -> AppResult<Vec<HistoryItem>> {
@@ -167,7 +253,26 @@ mod tests {
     }
 
     #[test]
-    fn image_history_uses_size_summary_without_persisting_base64() {
+    fn image_history_keeps_content_in_memory_for_copying() {
+        let content = STANDARD.encode(vec![0; 4096]);
+        let message = ClipboardMessage {
+            message_id: "m".to_string(),
+            source_device_id: "d".to_string(),
+            source_device_name: "Device".to_string(),
+            content_type: crate::models::ClipboardContentType::Image,
+            content: content.clone(),
+            content_hash: "hash".to_string(),
+            timestamp: 1,
+        };
+
+        let item = make_history_item(HistoryDirection::Local, "Device", &message);
+
+        assert_eq!(item.summary, "图片 4 KB");
+        assert_eq!(item.content, content);
+    }
+
+    #[test]
+    fn image_history_content_is_stripped_before_persisting_to_disk() {
         let content = STANDARD.encode(vec![0; 4096]);
         let message = ClipboardMessage {
             message_id: "m".to_string(),
@@ -180,9 +285,65 @@ mod tests {
         };
 
         let item = make_history_item(HistoryDirection::Local, "Device", &message);
+        let disk_items = history_items_for_disk(&[item]);
 
-        assert_eq!(item.summary, "图片 4 KB");
-        assert!(item.content.is_empty());
+        assert!(disk_items[0].summary.ends_with("4 KB"));
+        assert!(disk_items[0].content.is_empty());
+    }
+
+    #[test]
+    fn image_history_content_round_trips_through_cache_files() -> AppResult<()> {
+        let image_dir = std::env::temp_dir().join(format!(
+            "copyshare-history-images-{}",
+            Uuid::new_v4()
+        ));
+        let content = STANDARD.encode(vec![7; 2048]);
+        let mut item = HistoryItem {
+            id: "image:one".to_string(),
+            direction: HistoryDirection::Local,
+            source_device: "Device".to_string(),
+            summary: "image".to_string(),
+            content: content.clone(),
+            content_type: ClipboardContentType::Image,
+            success: true,
+            created_at: Utc::now(),
+        };
+
+        save_history_images(&image_dir, &[item.clone()])?;
+        item.content.clear();
+        restore_history_images(std::slice::from_mut(&mut item), &image_dir);
+
+        assert_eq!(item.content, content);
+        fs::remove_dir_all(image_dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn stale_history_image_cache_files_are_pruned() -> AppResult<()> {
+        let image_dir = std::env::temp_dir().join(format!(
+            "copyshare-history-images-{}",
+            Uuid::new_v4()
+        ));
+        fs::create_dir_all(&image_dir)?;
+        fs::write(image_dir.join("stale.b64"), "old")?;
+        let item = HistoryItem {
+            id: "keep".to_string(),
+            direction: HistoryDirection::Local,
+            source_device: "Device".to_string(),
+            summary: "image".to_string(),
+            content: STANDARD.encode(vec![1; 16]),
+            content_type: ClipboardContentType::Image,
+            success: true,
+            created_at: Utc::now(),
+        };
+
+        save_history_images(&image_dir, &[item.clone()])?;
+        prune_history_images(&image_dir, &[item])?;
+
+        assert!(!image_dir.join("stale.b64").exists());
+        assert!(image_dir.join("keep.b64").exists());
+        fs::remove_dir_all(image_dir)?;
+        Ok(())
     }
 
     #[test]

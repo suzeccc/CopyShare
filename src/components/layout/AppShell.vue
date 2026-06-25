@@ -105,7 +105,10 @@ function waitForPaint() {
 
 async function refreshSystemClipboardHistory() {
   try {
-    systemClipboardItems.value = await getClipboardHistory();
+    systemClipboardItems.value = (await getClipboardHistory()).map((item) => ({
+      ...item,
+      contentType: "text",
+    }));
   } catch {
     systemClipboardItems.value = [];
   }

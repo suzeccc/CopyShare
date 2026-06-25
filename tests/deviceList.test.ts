@@ -18,7 +18,7 @@ import type { DeviceInfo } from "../src/types/device.ts";
 function device(id: string, connected: boolean): DeviceInfo {
   return {
     id,
-    name: "Copy-Sharer",
+    name: "CopyShare",
     ip: "10.194.33.156",
     port: 8765,
     connected,
@@ -95,7 +95,7 @@ assert.equal(
 
 const repeatedPendingEndpointAlias = {
   ...device("ws://10.194.33.156:8765/", true),
-  ip: "Copy-Sharer",
+  ip: "CopyShare",
 };
 
 assert.deepEqual(

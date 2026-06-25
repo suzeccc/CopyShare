@@ -872,7 +872,7 @@ pub fn device_id_from_name(name: &str) -> String {
         .collect::<Vec<_>>()
         .join("-");
     if compact.is_empty() {
-        "copy-sharer".to_string()
+        "copyshare".to_string()
     } else {
         compact
     }
@@ -891,7 +891,7 @@ mod tests {
     #[test]
     fn device_id_is_stable_and_url_safe() {
         assert_eq!(device_id_from_name(" Office PC "), "office-pc");
-        assert_eq!(device_id_from_name("中文设备"), "copy-sharer");
+        assert_eq!(device_id_from_name("中文设备"), "copyshare");
     }
 }
 
@@ -948,7 +948,7 @@ mod runtime_tests {
         state
             .upsert_device(DeviceInfo {
                 id: "device-remote".to_string(),
-                name: "Copy-Sharer".to_string(),
+                name: "CopyShare".to_string(),
                 ip: "10.194.33.156".to_string(),
                 port: 8765,
                 connected: true,
@@ -990,7 +990,7 @@ mod runtime_tests {
         state
             .upsert_device(DeviceInfo {
                 id: "device-remote".to_string(),
-                name: "Copy-Sharer".to_string(),
+                name: "CopyShare".to_string(),
                 ip: "10.194.33.156".to_string(),
                 port: 8765,
                 connected: true,
@@ -1152,7 +1152,7 @@ mod device_dedup_tests {
     fn device(id: &str, connected: bool) -> DeviceInfo {
         DeviceInfo {
             id: id.to_string(),
-            name: "Copy-Sharer".to_string(),
+            name: "CopyShare".to_string(),
             ip: "10.194.33.156".to_string(),
             port: 8765,
             connected,
@@ -1588,7 +1588,7 @@ mod trusted_broadcast_tests {
         state
             .upsert_device(DeviceInfo {
                 id: "device-remote".to_string(),
-                name: "Copy-Sharer".to_string(),
+                name: "CopyShare".to_string(),
                 ip: "10.194.33.156".to_string(),
                 port: 8765,
                 connected: false,

@@ -4,7 +4,8 @@ import { getConfig, onAppEvent, updateConfig } from "@/lib/tauri";
 import type { AppConfig } from "@/types/config";
 
 const defaultConfig: AppConfig = {
-  deviceName: "Copy-Sharer",
+  configVersion: 1,
+  deviceName: "CopyShare",
   deviceId: "",
   theme: "win11Dark",
   closeAction: "ask",
@@ -14,7 +15,7 @@ const defaultConfig: AppConfig = {
   saveHistory: true,
   trustedDevices: [],
   syncText: true,
-  syncImage: false,
+  syncImage: true,
   syncFiles: false,
 };
 

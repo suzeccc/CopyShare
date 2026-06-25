@@ -64,10 +64,11 @@ pub fn run() {
             commands::get_history,
             commands::get_clipboard_history,
             commands::clear_history,
+            commands::copy_history_item,
             commands::open_external_url,
             commands::show_main_window,
             commands::hide_main_window
         ])
         .run(tauri::generate_context!())
-        .expect("error while running Copy-Sharer");
+        .expect("error while running CopyShare");
 }

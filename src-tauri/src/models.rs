@@ -102,6 +102,8 @@ impl Default for CloseAction {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AppConfig {
+    #[serde(default)]
+    pub config_version: u16,
     pub device_name: String,
     #[serde(default)]
     pub device_id: String,
@@ -122,7 +124,8 @@ pub struct AppConfig {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            device_name: "Copy-Sharer".to_string(),
+            config_version: 1,
+            device_name: "CopyShare".to_string(),
             device_id: new_device_id(),
             theme: AppTheme::Win11Dark,
             close_action: CloseAction::Ask,
@@ -132,7 +135,7 @@ impl Default for AppConfig {
             save_history: true,
             trusted_devices: Vec::new(),
             sync_text: true,
-            sync_image: false,
+            sync_image: true,
             sync_files: false,
         }
     }

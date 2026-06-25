@@ -19,4 +19,7 @@ assert.match(home, /data-clipboard-history-row/);
 assert.match(home, /grid-cols-\[minmax\(0,1fr\)_auto\]/);
 assert.match(home, /data-clipboard-history-text/);
 assert.match(home, /\bbreak-all\b/);
-assert.match(home, /<CopyTextButton :text="item\.text"/);
+assert.match(home, /<CopyTextButton/);
+assert.match(home, /:text="item\.text"/);
+assert.match(home, /:content-type="item\.contentType"/);
+assert.match(home, /:history-item-id="item\.id"/);

@@ -1,13 +1,19 @@
 import type { HistoryItem } from "@/types/history";
+import type { ClipboardContentType } from "@/types/history";
 
 export type ClipboardPreviewItem = {
   id: string;
   text: string;
+  contentType: ClipboardContentType;
   sourceDevice?: string;
 };
 
 export const CLIPBOARD_PREVIEW_LIMIT = 5;
 export const FLOATING_CLIPBOARD_PREVIEW_LIMIT = 10;
+
+function previewText(item: HistoryItem): string {
+  return item.contentType === "text" ? item.content || item.summary : item.summary;
+}
 
 export function getRecentClipboardItems(
   items: HistoryItem[],
@@ -16,7 +22,8 @@ export function getRecentClipboardItems(
   return items
     .map((item) => ({
       id: item.id,
-      text: (item.content || item.summary).trim(),
+      text: previewText(item).trim(),
+      contentType: item.contentType,
       sourceDevice: item.sourceDevice,
     }))
     .filter((item) => item.text.length > 0)
@@ -30,7 +37,7 @@ export function getFloatingClipboardItems(
 ): ClipboardPreviewItem[] {
   const seen = new Set<string>();
   const recentSystemItems = systemItems
-    .map((item) => ({ id: item.id, text: item.text.trim() }))
+    .map((item) => ({ id: item.id, text: item.text.trim(), contentType: item.contentType }))
     .filter((item) => item.text.length > 0)
     .slice(0, limit);
   const mergedItems = [...recentSystemItems];

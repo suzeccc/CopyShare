@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { ShieldQuestion, ShieldX, Unplug } from "lucide-vue-next";
+import { RefreshCw, ShieldQuestion, ShieldX, Unplug } from "lucide-vue-next";
 
 import Button from "@/components/ui/Button.vue";
 import { deviceAddress, formatTime } from "@/lib/format";
@@ -21,6 +21,7 @@ const props = withDefaults(
 defineEmits<{
   disconnect: [deviceId: string];
   reject: [deviceId: string];
+  reconnect: [ip: string, port: number];
   trust: [deviceId: string];
 }>();
 
@@ -42,7 +43,7 @@ const status = computed(() => {
         detail: "连接正常，剪贴板状态会实时更新。",
         badgeClass: "border-emerald-400/45 bg-emerald-400/10 text-emerald-100",
         dotClass: "bg-emerald-300 shadow-[0_0_14px_rgba(110,231,183,0.65)]",
-        cardClass: "border-emerald-400/30 bg-[rgba(20,54,72,0.58)]",
+        cardClass: "border-[color:var(--main-line-soft)] bg-[color:var(--panel-bg-soft)]",
       };
     }
 
@@ -112,6 +113,10 @@ const status = computed(() => {
           不信任设备
         </Button>
       </template>
+      <Button v-else-if="mode === 'status' && !device.connected" size="sm" variant="secondary" @click="$emit('reconnect', device.ip, device.port)">
+        <RefreshCw class="h-4 w-4" />
+        重新连接
+      </Button>
       <Button v-else size="sm" variant="ghost" @click="$emit('disconnect', device.id)">
         <Unplug class="h-4 w-4" />
         断开

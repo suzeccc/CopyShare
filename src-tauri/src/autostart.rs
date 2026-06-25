@@ -59,7 +59,7 @@ mod tests {
 
     #[test]
     fn missing_autostart_entry_means_disabled_when_turning_off() {
-        assert!(is_missing_autostart_entry("系统找不到指定的文件。 (os error 2)"));
+        assert!(is_missing_autostart_entry("系统找不到指定的文件。(os error 2)"));
         assert!(is_missing_autostart_entry("No such file or directory (os error 2)"));
         assert!(!is_missing_autostart_entry("permission denied"));
     }

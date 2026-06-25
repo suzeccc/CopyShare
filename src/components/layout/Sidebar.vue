@@ -13,7 +13,7 @@ const items = [
 <template>
   <aside class="flex h-full w-64 shrink-0 flex-col border-r border-[color:var(--main-line)] bg-[color:var(--main-bg)] px-4 py-5">
     <div class="mb-7">
-      <p class="text-xs font-medium uppercase text-slate-500">Copy-Sharer</p>
+      <p class="text-xs font-medium uppercase text-slate-500">CopyShare</p>
       <h1 class="mt-2 text-xl font-semibold text-white">剪贴板共享</h1>
     </div>
 

@@ -86,16 +86,16 @@ html[data-app-theme="win11Dark"] {
   --button-primary-text: #ffffff;
   --dialog-bg: rgba(43, 43, 43, 0.96);
   --dialog-overlay-bg: rgba(0, 0, 0, 0.46);
-  --disconnect-notice-bg: rgba(54, 47, 38, 0.96);
-  --disconnect-notice-line: rgba(251, 146, 60, 0.72);
-  --disconnect-notice-ring: rgba(251, 146, 60, 0.22);
-  --disconnect-notice-text: #fff7ed;
-  --disconnect-notice-muted-text: #fed7aa;
-  --disconnect-notice-icon-bg: rgba(251, 146, 60, 0.18);
-  --disconnect-notice-icon-line: rgba(251, 146, 60, 0.72);
-  --disconnect-notice-icon-text: #fdba74;
-  --disconnect-notice-close-hover: rgba(251, 146, 60, 0.16);
-  --disconnect-notice-shadow: 0 18px 52px rgba(0, 0, 0, 0.54), 0 0 28px rgba(251, 146, 60, 0.13);
+  --disconnect-notice-bg: rgba(43, 43, 43, 0.98);
+  --disconnect-notice-line: rgba(96, 205, 255, 0.62);
+  --disconnect-notice-ring: rgba(96, 205, 255, 0.2);
+  --disconnect-notice-text: #f8fafc;
+  --disconnect-notice-muted-text: #dff6ff;
+  --disconnect-notice-icon-bg: rgba(96, 205, 255, 0.13);
+  --disconnect-notice-icon-line: rgba(96, 205, 255, 0.58);
+  --disconnect-notice-icon-text: #dff6ff;
+  --disconnect-notice-close-hover: rgba(96, 205, 255, 0.14);
+  --disconnect-notice-shadow: 0 18px 52px rgba(0, 0, 0, 0.54), 0 0 28px rgba(96, 205, 255, 0.1);
   --floating-surface-line: rgba(255, 255, 255, 0.16);
   --floating-surface-bg: linear-gradient(135deg, rgba(96, 205, 255, 0.08), transparent 48%),
     rgba(32, 32, 32, 0.72);

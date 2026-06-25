@@ -16,7 +16,6 @@ import {
 } from "@/lib/windowMode";
 import type { AppConfig } from "@/types/config";
 import type { DeviceInfo } from "@/types/device";
-import type { ClipboardPreviewItem } from "@/lib/historyPreview";
 import type { HistoryItem } from "@/types/history";
 import type { AppStatus } from "@/types/status";
 
@@ -73,12 +72,16 @@ export function getHistory(): Promise<HistoryItem[]> {
   return invoke<HistoryItem[]>("get_history");
 }
 
-export function getClipboardHistory(): Promise<ClipboardPreviewItem[]> {
-  return invoke<ClipboardPreviewItem[]>("get_clipboard_history");
+export function getClipboardHistory(): Promise<Array<{ id: string; text: string }>> {
+  return invoke<Array<{ id: string; text: string }>>("get_clipboard_history");
 }
 
 export function clearHistory(): Promise<void> {
   return invoke<void>("clear_history");
+}
+
+export function copyHistoryItem(historyId: string): Promise<void> {
+  return invoke<void>("copy_history_item", { historyId });
 }
 
 export function openExternalUrl(url: string): Promise<void> {
