@@ -51,6 +51,18 @@ const recentSyncItems = computed(() => getRecentClipboardItems(historyStore.item
 const allClipboardItems = computed(() =>
   getRecentClipboardItems(historyStore.items, historyStore.items.length),
 );
+
+type SyncStatusPreviewItem = { syncStatus: "synced" | "unsynced" };
+
+function syncStatusLabel(item: SyncStatusPreviewItem) {
+  return item.syncStatus === 'synced' ? "已同步" : "未同步";
+}
+
+function syncStatusClass(item: SyncStatusPreviewItem) {
+  return item.syncStatus === 'synced'
+    ? "border-emerald-300/25 bg-emerald-400/[0.10] text-emerald-100"
+    : "border-amber-300/25 bg-amber-400/[0.10] text-amber-100";
+}
 </script>
 
 <template>
@@ -229,18 +241,37 @@ const allClipboardItems = computed(() =>
             <div
               v-for="item in recentSyncItems"
               :key="item.id"
-              data-home-recent-row class="flex min-w-0 items-start gap-3 overflow-hidden rounded-md border border-[color:var(--main-line-soft)] bg-[color:var(--field-bg)] px-3 py-2"
+              data-home-recent-row class="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-3 overflow-hidden rounded-md border border-[color:var(--main-line-soft)] bg-[color:var(--field-bg)] px-3 py-2"
             >
-              <p data-home-recent-text class="line-clamp-2 min-w-0 flex-1 break-all text-sm leading-5 text-slate-300">
+              <p data-home-recent-text class="line-clamp-2 min-w-0 break-all text-sm leading-5 text-slate-300">
                 {{ item.text }}
               </p>
-              <CopyTextButton
-                :text="item.text"
-                :content-type="item.contentType"
-                :history-item-id="item.id"
-                icon-only
-                label="复制内容"
-              />
+              <div data-home-recent-actions class="flex shrink-0 flex-col items-end gap-2">
+                <div class="flex items-center justify-end gap-2">
+                  <span
+                    data-home-recent-sync-status
+                    class="shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-semibold leading-5"
+                    :class="syncStatusClass(item)"
+                  >
+                    {{ syncStatusLabel(item) }}
+                  </span>
+                  <CopyTextButton
+                    :text="item.text"
+                    :content-type="item.contentType"
+                    :history-item-id="item.id"
+                    icon-only
+                    label="复制内容"
+                  />
+                </div>
+                <span
+                  v-if="item.sourceDevice"
+                  data-home-recent-device
+                  class="max-w-28 truncate rounded-full border border-[color:var(--main-line-soft)] bg-[color:var(--stat-bg)] px-2 py-0.5 text-[11px] font-medium leading-5 text-[color:var(--muted-text)]"
+                  :title="item.sourceDevice"
+                >
+                  {{ item.sourceDevice }}
+                </span>
+              </div>
             </div>
           </div>
           <p v-else class="rounded-md border border-dashed border-[color:var(--main-line-soft)] px-3 py-4 text-sm text-slate-500">
@@ -290,14 +321,23 @@ const allClipboardItems = computed(() =>
                 <p data-clipboard-history-text class="min-w-0 whitespace-pre-wrap break-all text-sm leading-6 text-slate-200">
                   {{ item.text }}
                 </p>
-                <div data-clipboard-history-copy class="flex shrink-0 flex-col items-end gap-2">
-                  <CopyTextButton
-                    :text="item.text"
-                    :content-type="item.contentType"
-                    :history-item-id="item.id"
-                    icon-only
-                    label="复制内容"
-                  />
+                <div data-clipboard-history-actions class="flex shrink-0 flex-col items-end gap-2">
+                  <div class="flex items-center justify-end gap-2">
+                    <span
+                      data-clipboard-history-sync-status
+                      class="shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-semibold leading-5"
+                      :class="syncStatusClass(item)"
+                    >
+                      {{ syncStatusLabel(item) }}
+                    </span>
+                    <CopyTextButton
+                      :text="item.text"
+                      :content-type="item.contentType"
+                      :history-item-id="item.id"
+                      icon-only
+                      label="复制内容"
+                    />
+                  </div>
                   <span
                     v-if="item.sourceDevice"
                     data-clipboard-history-device

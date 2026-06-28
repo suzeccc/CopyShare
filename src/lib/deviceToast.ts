@@ -5,6 +5,10 @@ export function connectionSuccessMessage(device: DeviceInfo): string {
   return `${displayDeviceName(device)} · ${deviceAddress(device.ip, device.port)} · 连接成功`;
 }
 
+export function shouldShowConnectionSuccess(device: DeviceInfo): boolean {
+  return hasRealDeviceName(device) && device.trusted && device.remoteTrusted;
+}
+
 export function displayDeviceName(device: DeviceInfo): string {
   const name = device.name.trim();
 

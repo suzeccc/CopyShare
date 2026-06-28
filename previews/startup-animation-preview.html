@@ -1,0 +1,497 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CopyShare 启动动画预览</title>
+  <style>
+    :root {
+      --bg: #111111;
+      --shell: #1b1b1b;
+      --panel: #242424;
+      --panel-soft: #2b2b2b;
+      --field: #202020;
+      --line: #3d3d3d;
+      --line-soft: #303030;
+      --text: #f4f4f4;
+      --muted: #b8b8b8;
+      --subtle: #8d8d8d;
+      --accent: #60cdff;
+      --accent-soft: rgba(96, 205, 255, 0.14);
+      --accent-line: rgba(96, 205, 255, 0.5);
+      --ok: #84d2a6;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      width: 100%;
+      min-height: 100%;
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", sans-serif;
+      text-rendering: geometricPrecision;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body {
+      display: grid;
+      place-items: center;
+    }
+
+    .stage {
+      width: 1280px;
+      height: 820px;
+      padding: 42px 48px;
+      background: #151515;
+    }
+
+    .workspace {
+      height: 100%;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 320px;
+      gap: 24px;
+    }
+
+    .hero {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 28px;
+      background: rgba(31, 31, 31, 0.82);
+      box-shadow:
+        0 34px 90px rgba(0, 0, 0, 0.46),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06);
+      backdrop-filter: blur(28px);
+    }
+
+    .titlebar {
+      height: 54px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 22px;
+      border-bottom: 1px solid var(--line-soft);
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .traffic {
+      display: flex;
+      gap: 8px;
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: #3a3a3a;
+      border: 1px solid #4b4b4b;
+    }
+
+    .dot.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      box-shadow: 0 0 18px rgba(96, 205, 255, 0.46);
+    }
+
+    .splash {
+      height: calc(100% - 54px);
+      display: grid;
+      place-items: center;
+      padding: 54px 70px 48px;
+    }
+
+    .splash-card {
+      width: 560px;
+      min-height: 462px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--line);
+      border-radius: 30px;
+      background: rgba(36, 36, 36, 0.92);
+      box-shadow:
+        0 28px 80px rgba(0, 0, 0, 0.4),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06);
+      animation: cardEnter 1300ms cubic-bezier(0.22, 1, 0.36, 1) infinite alternate;
+    }
+
+    .brand-mark {
+      position: relative;
+      width: 112px;
+      height: 82px;
+      margin-bottom: 28px;
+    }
+
+    .brand-mark::before,
+    .brand-mark::after {
+      content: "";
+      position: absolute;
+      width: 66px;
+      height: 52px;
+      border-radius: 18px;
+      border: 1px solid var(--accent-line);
+      background: #2c2c2c;
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        0 0 28px rgba(96, 205, 255, 0.12);
+    }
+
+    .brand-mark::before {
+      left: 0;
+      top: 20px;
+    }
+
+    .brand-mark::after {
+      right: 0;
+      top: 0;
+      background: #303030;
+      animation: markPulse 1300ms ease-in-out infinite alternate;
+    }
+
+    .link-line {
+      position: absolute;
+      left: 38px;
+      top: 38px;
+      width: 38px;
+      height: 2px;
+      border-radius: 999px;
+      background: var(--accent);
+      box-shadow: 0 0 18px rgba(96, 205, 255, 0.62);
+      transform-origin: center;
+      animation: linkSweep 1300ms cubic-bezier(0.22, 1, 0.36, 1) infinite alternate;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 38px;
+      line-height: 1.1;
+      letter-spacing: -0.03em;
+      font-weight: 650;
+    }
+
+    .subtitle {
+      margin: 12px 0 0;
+      color: var(--muted);
+      font-size: 16px;
+      letter-spacing: 0.02em;
+    }
+
+    .boot-list {
+      width: 360px;
+      margin: 34px 0 0;
+      display: grid;
+      gap: 12px;
+    }
+
+    .boot-item {
+      height: 46px;
+      display: grid;
+      grid-template-columns: 28px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 12px;
+      padding: 0 16px 0 12px;
+      border-radius: 999px;
+      border: 1px solid var(--line-soft);
+      background: var(--field);
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .boot-item:nth-child(1) .check,
+    .boot-item:nth-child(2) .check {
+      background: rgba(132, 210, 166, 0.12);
+      border-color: rgba(132, 210, 166, 0.48);
+      color: var(--ok);
+    }
+
+    .boot-item:nth-child(3) {
+      border-color: var(--accent-line);
+      color: var(--text);
+      box-shadow: 0 0 0 1px var(--accent-soft) inset;
+    }
+
+    .check {
+      width: 24px;
+      height: 24px;
+      display: grid;
+      place-items: center;
+      border-radius: 999px;
+      border: 1px solid #454545;
+      color: var(--subtle);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .boot-item strong {
+      font-weight: 600;
+    }
+
+    .boot-item span:last-child {
+      color: var(--subtle);
+      font-size: 12px;
+    }
+
+    .progress {
+      width: 360px;
+      height: 6px;
+      margin-top: 22px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #333333;
+    }
+
+    .progress::before {
+      content: "";
+      display: block;
+      width: 74%;
+      height: 100%;
+      border-radius: inherit;
+      background: var(--accent);
+      box-shadow: 0 0 18px rgba(96, 205, 255, 0.42);
+      animation: progressMove 1300ms cubic-bezier(0.22, 1, 0.36, 1) infinite alternate;
+    }
+
+    .hint {
+      margin-top: 18px;
+      color: var(--subtle);
+      font-size: 13px;
+    }
+
+    .timeline {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      gap: 18px;
+    }
+
+    .side-head {
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: var(--panel);
+      padding: 22px;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    }
+
+    .side-kicker {
+      margin: 0 0 9px;
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+
+    .side-head h2 {
+      margin: 0;
+      font-size: 22px;
+      line-height: 1.25;
+      letter-spacing: -0.02em;
+    }
+
+    .side-head p {
+      margin: 12px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.7;
+    }
+
+    .frames {
+      display: grid;
+      gap: 14px;
+    }
+
+    .frame-card {
+      position: relative;
+      min-height: 142px;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: var(--panel);
+      padding: 18px;
+      overflow: hidden;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    }
+
+    .frame-card.is-active {
+      border-color: var(--accent-line);
+      background: #282828;
+      box-shadow:
+        0 0 0 1px var(--accent-soft) inset,
+        0 18px 42px rgba(0, 0, 0, 0.22);
+    }
+
+    .time {
+      display: inline-flex;
+      height: 28px;
+      align-items: center;
+      padding: 0 11px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: #1d1d1d;
+      color: var(--muted);
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .frame-card h3 {
+      margin: 14px 0 7px;
+      font-size: 17px;
+      line-height: 1.2;
+    }
+
+    .frame-card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .mini {
+      position: absolute;
+      right: 18px;
+      top: 18px;
+      display: flex;
+      gap: 5px;
+    }
+
+    .mini span {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: #424242;
+    }
+
+    .mini span.on {
+      background: var(--accent);
+      box-shadow: 0 0 12px rgba(96, 205, 255, 0.42);
+    }
+
+    @keyframes cardEnter {
+      from {
+        opacity: 0.92;
+        transform: translateY(10px) scale(0.985);
+        filter: blur(0.8px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+        filter: blur(0);
+      }
+    }
+
+    @keyframes markPulse {
+      from {
+        transform: translateX(-4px) translateY(4px);
+        border-color: rgba(96, 205, 255, 0.32);
+      }
+      to {
+        transform: translateX(0) translateY(0);
+        border-color: rgba(96, 205, 255, 0.72);
+      }
+    }
+
+    @keyframes linkSweep {
+      from {
+        transform: translateX(-7px) scaleX(0.65);
+        opacity: 0.46;
+      }
+      to {
+        transform: translateX(5px) scaleX(1);
+        opacity: 1;
+      }
+    }
+
+    @keyframes progressMove {
+      from {
+        width: 42%;
+      }
+      to {
+        width: 88%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="stage">
+    <section class="workspace" aria-label="CopyShare 启动动画预览">
+      <article class="hero">
+        <header class="titlebar">
+          <span>CopyShare</span>
+          <div class="traffic" aria-hidden="true">
+            <span class="dot"></span>
+            <span class="dot"></span>
+            <span class="dot active"></span>
+          </div>
+        </header>
+
+        <div class="splash">
+          <section class="splash-card">
+            <div class="brand-mark" aria-hidden="true">
+              <span class="link-line"></span>
+            </div>
+            <h1>CopyShare</h1>
+            <p class="subtitle">正在准备局域网剪贴板同步</p>
+
+            <div class="boot-list">
+              <div class="boot-item">
+                <span class="check">✓</span>
+                <strong>读取本机设置</strong>
+                <span>完成</span>
+              </div>
+              <div class="boot-item">
+                <span class="check">✓</span>
+                <strong>启动托盘与浮窗</strong>
+                <span>完成</span>
+              </div>
+              <div class="boot-item">
+                <span class="check">•</span>
+                <strong>监听剪贴板变化</strong>
+                <span>进行中</span>
+              </div>
+            </div>
+
+            <div class="progress" aria-hidden="true"></div>
+            <p class="hint">启动完成后自动进入主面板</p>
+          </section>
+        </div>
+      </article>
+
+      <aside class="timeline">
+        <section class="side-head">
+          <p class="side-kicker">Startup motion</p>
+          <h2>三段式启动动画</h2>
+          <p>整体控制在 1.3 秒左右，不做炫光渐变；只用透明、缩放、线条点亮和状态切换，保持和现有 Win11 深色主题一致。</p>
+        </section>
+
+        <section class="frames">
+          <article class="frame-card">
+            <div class="mini" aria-hidden="true"><span class="on"></span><span></span><span></span></div>
+            <span class="time">0.00s</span>
+            <h3>窗口轻微放大淡入</h3>
+            <p>背景先出现毛玻璃主面板，Logo 两个卡片错位进入。</p>
+          </article>
+
+          <article class="frame-card is-active">
+            <div class="mini" aria-hidden="true"><span class="on"></span><span class="on"></span><span></span></div>
+            <span class="time">0.55s</span>
+            <h3>启动步骤逐项点亮</h3>
+            <p>读取设置、启动托盘、监听剪贴板按顺序完成，用户能看到程序正在做什么。</p>
+          </article>
+
+          <article class="frame-card">
+            <div class="mini" aria-hidden="true"><span class="on"></span><span class="on"></span><span class="on"></span></div>
+            <span class="time">1.30s</span>
+            <h3>过渡进入主面板</h3>
+            <p>进度条收尾，启动卡片淡出，主界面从中心平滑展开。</p>
+          </article>
+        </section>
+      </aside>
+    </section>
+  </main>
+</body>
+</html>

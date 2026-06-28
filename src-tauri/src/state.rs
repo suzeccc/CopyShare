@@ -51,6 +51,7 @@ struct PeerHandle {
     join: JoinHandle<()>,
     device_id: Option<String>,
     endpoint: Option<String>,
+    remote_trusted: bool,
 }
 
 struct PendingPeerIdentity {
@@ -111,18 +112,32 @@ impl AppState {
         let mut status = self.inner.status.read().await.clone();
         let config = self.config().await;
         let peers = self.inner.peers.lock().await;
-        status.connected_count = peers.len();
+        let manual_trust_required = self.inner.manual_trust_required.lock().await;
+        status.connected_count = peers
+            .iter()
+            .filter(|(connection_id, peer)| {
+                peer_is_mutually_trusted(&config, connection_id, peer, &manual_trust_required)
+            })
+            .count();
         if status.running && peers.is_empty() {
             status.message = Some("正在监听，等待设备连接".to_string());
         } else if status.running {
-            let manual_trust_required = self.inner.manual_trust_required.lock().await;
             status.message = Some(if peers
+                .iter()
+                .any(|(connection_id, peer)| {
+                    peer_is_mutually_trusted(&config, connection_id, peer, &manual_trust_required)
+                })
+            {
+                "已连接，双方设备已互相信任".to_string()
+            } else if peers
                 .iter()
                 .any(|(connection_id, peer)| {
                     peer_is_trusted(&config, connection_id, peer, &manual_trust_required)
                 })
             {
-                "已信任对方设备，可发送本机剪贴板；要双向同步，请确认对方也信任本机".to_string()
+                "本机已信任对方设备，等待对方信任本机".to_string()
+            } else if peers.iter().any(|(_, peer)| peer.remote_trusted) {
+                "对方已信任本机，等待本机确认信任".to_string()
             } else {
                 "连接已建立，等待两台电脑互相信任设备".to_string()
             });
@@ -162,6 +177,11 @@ impl AppState {
         history::push_history(&mut items, item);
     }
 
+    pub async fn upsert_history_by_content(&self, item: HistoryItem) -> HistoryItem {
+        let mut items = self.inner.history.write().await;
+        history::upsert_history_by_content(&mut items, item)
+    }
+
     pub async fn replace_devices(&self, devices: Vec<DeviceInfo>) {
         let mut device_map = self.inner.devices.write().await;
         device_map.clear();
@@ -190,6 +210,7 @@ impl AppState {
             port: endpoint_port,
             connected: true,
             trusted: false,
+            remote_trusted: false,
             last_seen_at: None,
             status: DeviceStatus::Online,
         };
@@ -246,6 +267,37 @@ impl AppState {
         let device_id = device_id_for_key(&devices, device_id, default_port)?;
         let device = devices.get_mut(&device_id)?;
         device.trusted = true;
+        device.last_seen_at = Some(Utc::now());
+        Some(device.clone())
+    }
+
+    pub async fn mark_peer_remote_trusted(
+        &self,
+        connection_id: &str,
+        device_id: &str,
+    ) -> Option<DeviceInfo> {
+        let (device_key, endpoint) = {
+            let mut peers = self.inner.peers.lock().await;
+            let peer = peers.get_mut(connection_id)?;
+            if peer.device_id.as_deref() != Some(device_id) {
+                return None;
+            }
+            peer.remote_trusted = true;
+            (
+                peer.device_id.clone().unwrap_or_else(|| device_id.to_string()),
+                peer.endpoint.clone(),
+            )
+        };
+
+        let default_port = self.config().await.port;
+        let mut devices = self.inner.devices.write().await;
+        let device_id = device_id_for_key(&devices, &device_key, default_port).or_else(|| {
+            endpoint
+                .as_deref()
+                .and_then(|key| device_id_for_key(&devices, key, default_port))
+        })?;
+        let device = devices.get_mut(&device_id)?;
+        device.remote_trusted = true;
         device.last_seen_at = Some(Utc::now());
         Some(device.clone())
     }
@@ -452,6 +504,7 @@ impl AppState {
                 join,
                 device_id: device_id.clone(),
                 endpoint: endpoint.clone(),
+                remote_trusted: false,
             },
         );
         if let Some(device_id) = device_id.as_deref() {
@@ -562,6 +615,7 @@ impl AppState {
         }
     }
 
+    #[cfg(test)]
     pub async fn has_trusted_peers(&self, config: &AppConfig) -> bool {
         let peers = self.inner.peers.lock().await;
         let manual_trust_required = self.inner.manual_trust_required.lock().await;
@@ -573,14 +627,18 @@ impl AppState {
             })
     }
 
-    pub async fn broadcast_trusted(&self, config: &AppConfig, message: WireMessage) {
+    pub async fn broadcast_trusted(&self, config: &AppConfig, message: WireMessage) -> usize {
         let peers = self.inner.peers.lock().await;
         let manual_trust_required = self.inner.manual_trust_required.lock().await;
+        let mut sent_count = 0;
         for (connection_id, peer) in peers.iter() {
-            if peer_is_trusted(config, connection_id, peer, &manual_trust_required) {
-                let _ = peer.sender.send(message.clone());
+            if peer_is_trusted(config, connection_id, peer, &manual_trust_required)
+                && peer.sender.send(message.clone()).is_ok()
+            {
+                sent_count += 1;
             }
         }
+        sent_count
     }
 
     pub async fn clipboard_sender_is_trusted(
@@ -661,6 +719,15 @@ impl AppState {
 
         keys
     }
+}
+
+fn peer_is_mutually_trusted(
+    config: &AppConfig,
+    connection_id: &str,
+    peer: &PeerHandle,
+    manual_trust_required: &HashSet<String>,
+) -> bool {
+    peer.remote_trusted && peer_is_trusted(config, connection_id, peer, manual_trust_required)
 }
 
 fn peer_is_trusted(
@@ -832,6 +899,7 @@ fn device_candidate_from_key(key: &str, default_port: u16) -> Option<DeviceInfo>
         port: url.port().unwrap_or(default_port),
         connected: true,
         trusted: false,
+        remote_trusted: false,
         last_seen_at: None,
         status: DeviceStatus::Online,
     })
@@ -849,6 +917,7 @@ fn merge_device(existing: DeviceInfo, incoming: DeviceInfo) -> DeviceInfo {
 
     DeviceInfo {
         trusted: incoming.trusted || (existing.connected && existing.trusted),
+        remote_trusted: incoming.remote_trusted || (existing.connected && existing.remote_trusted),
         connected: incoming.connected || existing.connected,
         status: if incoming.connected || existing.connected {
             DeviceStatus::Online
@@ -953,6 +1022,7 @@ mod runtime_tests {
                 port: 8765,
                 connected: true,
                 trusted: true,
+                remote_trusted: true,
                 last_seen_at: Some(Utc::now()),
                 status: DeviceStatus::Online,
             })
@@ -995,6 +1065,7 @@ mod runtime_tests {
                 port: 8765,
                 connected: true,
                 trusted: true,
+                remote_trusted: true,
                 last_seen_at: Some(Utc::now()),
                 status: DeviceStatus::Online,
             })
@@ -1095,7 +1166,7 @@ mod status_diagnostics_tests {
 
         let status = state.status().await;
 
-        assert_eq!(status.connected_count, 1);
+        assert_eq!(status.connected_count, 0);
         assert_eq!(
             status.message.as_deref(),
             Some("连接已建立，等待两台电脑互相信任设备")
@@ -1125,11 +1196,55 @@ mod status_diagnostics_tests {
 
         let status = state.status().await;
 
-        assert_eq!(status.connected_count, 1);
+        assert_eq!(status.connected_count, 0);
         assert_eq!(
             status.message.as_deref(),
-            Some("已信任对方设备，可发送本机剪贴板；要双向同步，请确认对方也信任本机")
+            Some("本机已信任对方设备，等待对方信任本机")
         );
+    }
+
+    #[tokio::test]
+    async fn running_status_counts_only_mutually_trusted_peers() {
+        let state = AppState::new();
+        let mut config = AppConfig::default();
+        config.trusted_devices.push("device-b".to_string());
+        state.set_config(config.clone()).await;
+        let (sender, _receiver) = mpsc::unbounded_channel();
+        let join = tauri::async_runtime::spawn(async {
+            futures_util::future::pending::<()>().await;
+        });
+
+        state
+            .set_running(true, Some("127.0.0.1".to_string()), "listening".to_string())
+            .await;
+        state
+            .register_peer("10.0.0.2:51234".to_string(), sender, join)
+            .await;
+        state
+            .attach_peer_device("10.0.0.2:51234", "device-b".to_string(), None)
+            .await;
+        state
+            .upsert_device(DeviceInfo {
+                id: "device-b".to_string(),
+                name: "Laptop B".to_string(),
+                ip: "10.0.0.2".to_string(),
+                port: 8765,
+                connected: true,
+                trusted: true,
+                remote_trusted: false,
+                last_seen_at: Some(Utc::now()),
+                status: DeviceStatus::Online,
+            })
+            .await;
+
+        state
+            .mark_peer_remote_trusted("10.0.0.2:51234", "device-b")
+            .await
+            .expect("attached peer should be marked remote trusted");
+        let status = state.status().await;
+
+        assert_eq!(status.connected_count, 1);
+        assert_eq!(status.message.as_deref(), Some("已连接，双方设备已互相信任"));
     }
 }
 
@@ -1157,6 +1272,7 @@ mod device_dedup_tests {
             port: 8765,
             connected,
             trusted: false,
+            remote_trusted: false,
             last_seen_at: Some(Utc::now()),
             status: if connected {
                 DeviceStatus::Online
@@ -1593,6 +1709,7 @@ mod trusted_broadcast_tests {
                 port: 8765,
                 connected: false,
                 trusted: true,
+                remote_trusted: false,
                 last_seen_at: Some(Utc::now()),
                 status: DeviceStatus::Offline,
             })
@@ -1754,7 +1871,7 @@ mod trusted_broadcast_tests {
             )
             .await;
 
-        assert_eq!(state.status().await.connected_count, 1);
+        assert_eq!(state.status().await.connected_count, 0);
         state.broadcast_trusted(&config, clipboard_message()).await;
         assert!(first_receiver.try_recv().is_err());
         assert!(second_receiver.try_recv().is_ok());
@@ -1798,7 +1915,7 @@ mod trusted_broadcast_tests {
             .register_peer("10.194.33.156:51235".to_string(), second_sender, second_join)
             .await;
 
-        assert_eq!(state.status().await.connected_count, 1);
+        assert_eq!(state.status().await.connected_count, 0);
         state.broadcast_trusted(&config, clipboard_message()).await;
         assert!(first_receiver.try_recv().is_err());
         assert!(second_receiver.try_recv().is_ok());

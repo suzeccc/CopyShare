@@ -23,6 +23,7 @@ function device(id: string, connected: boolean): DeviceInfo {
     port: 8765,
     connected,
     trusted: false,
+    remoteTrusted: false,
     lastSeenAt: "2026-06-23T00:19:42Z",
     status: connected ? "online" : "offline",
   };
@@ -32,6 +33,14 @@ function trustedDevice(id: string, connected: boolean): DeviceInfo {
   return {
     ...device(id, connected),
     trusted: true,
+    remoteTrusted: true,
+  };
+}
+
+function mutuallyTrustedDevice(id: string, connected: boolean): DeviceInfo {
+  return {
+    ...trustedDevice(id, connected),
+    remoteTrusted: true,
   };
 }
 
@@ -66,7 +75,14 @@ assert.deepEqual(
   [],
 );
 assert.deepEqual(
-  connectedTrustedDevices([existingTrusted, reconnectPlaceholder]).map((item) => item.id),
+  connectedTrustedDevices([
+    { ...existingTrusted, remoteTrusted: false },
+    reconnectPlaceholder,
+  ]).map((item) => item.id),
+  [],
+);
+assert.deepEqual(
+  connectedTrustedDevices([mutuallyTrustedDevice("device-remote", true)]).map((item) => item.id),
   ["device-remote"],
 );
 

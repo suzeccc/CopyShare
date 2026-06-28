@@ -47,6 +47,7 @@ fn device_history_snapshot(devices: &[DeviceInfo]) -> Vec<DeviceInfo> {
 
     for device in &mut snapshot {
         device.connected = false;
+        device.remote_trusted = false;
         device.status = DeviceStatus::Offline;
     }
 
@@ -66,6 +67,7 @@ mod tests {
             port: 8765,
             connected,
             trusted: true,
+            remote_trusted: false,
             last_seen_at: Some(Utc::now()),
             status: if connected {
                 DeviceStatus::Online
@@ -77,7 +79,9 @@ mod tests {
 
     #[test]
     fn saved_devices_reload_as_offline_history() {
-        let devices = vec![device("device-remote", true)];
+        let mut remote_trusted = device("device-remote", true);
+        remote_trusted.remote_trusted = true;
+        let devices = vec![remote_trusted];
         let text = serde_json::to_string(&device_history_snapshot(&devices)).unwrap();
         let loaded = load_device_items_from_text(&text).unwrap();
 
@@ -86,6 +90,7 @@ mod tests {
         assert!(!loaded[0].connected);
         assert_eq!(loaded[0].status, DeviceStatus::Offline);
         assert!(loaded[0].trusted);
+        assert!(!loaded[0].remote_trusted);
     }
 
     #[test]

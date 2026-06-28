@@ -17,9 +17,10 @@ use crate::{
     device_store,
     error::{AppError, AppResult},
     history,
+    mobile,
     models::{
         ClipboardContentType, ClipboardMessage, DeviceInfo, DeviceStatus, HistoryDirection,
-        SyncState, WireMessage,
+        SyncState, SyncStatus, WireMessage,
     },
     network,
     security,
@@ -28,8 +29,8 @@ use crate::{
 use crate::models::AppConfig;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
-const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(2);
-const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(6);
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
+const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(60);
 
 fn heartbeat_timed_out(
     last_seen_at: tokio::time::Instant,
@@ -174,7 +175,6 @@ pub async fn run_sync_runtime(app: AppHandle, state: AppState, mut stop_rx: watc
         .await;
     emit_status(&app, &state).await;
 
-    let mut interval = tokio::time::interval(Duration::from_millis(450));
     loop {
         tokio::select! {
             _ = stop_rx.changed() => {
@@ -204,11 +204,6 @@ pub async fn run_sync_runtime(app: AppHandle, state: AppState, mut stop_rx: watc
                     }
                 }
             }
-            _ = interval.tick() => {
-                if let Err(error) = poll_local_clipboard(&app, &state).await {
-                    let _ = app.emit("sync-error", error.to_string());
-                }
-            }
         }
     }
 
@@ -216,6 +211,18 @@ pub async fn run_sync_runtime(app: AppHandle, state: AppState, mut stop_rx: watc
         .set_running(false, None, "同步已停止".to_string())
         .await;
     emit_status(&app, &state).await;
+}
+
+pub fn start_clipboard_monitor(app: AppHandle, state: AppState) {
+    tauri::async_runtime::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_millis(450));
+        loop {
+            interval.tick().await;
+            if let Err(error) = poll_local_clipboard(&app, &state).await {
+                let _ = app.emit("sync-error", error.to_string());
+            }
+        }
+    });
 }
 
 pub async fn start_sync_runtime(app: AppHandle, state: AppState) -> AppResult<()> {
@@ -316,6 +323,7 @@ pub async fn connect_to_peer(
         port,
         connected: true,
         trusted: false,
+        remote_trusted: false,
         last_seen_at: Some(Utc::now()),
         status: DeviceStatus::Online,
     };
@@ -490,6 +498,7 @@ async fn handle_wire_text(app: &AppHandle, state: &AppState, connection_id: &str
                 port,
                 connected: true,
                 trusted,
+                remote_trusted: false,
                 last_seen_at: Some(Utc::now()),
                 status: DeviceStatus::Online,
             };
@@ -505,7 +514,7 @@ async fn handle_wire_text(app: &AppHandle, state: &AppState, connection_id: &str
             trusted_device_ids,
         } => {
             let mut config = state.config().await;
-            if apply_peer_trust_grant(
+            if let Some(device) = apply_peer_trust_grant(
                 state,
                 &mut config,
                 connection_id,
@@ -514,15 +523,8 @@ async fn handle_wire_text(app: &AppHandle, state: &AppState, connection_id: &str
             )
             .await
             {
-                match app_config::save_config(app, &config) {
-                    Ok(()) => {
-                        state.set_config(config.clone()).await;
-                        let _ = app.emit("config-updated", config);
-                    }
-                    Err(error) => {
-                        let _ = app.emit("sync-error", error.to_string());
-                    }
-                }
+                persist_devices(app, state).await;
+                let _ = app.emit("device-connected", device);
                 emit_status(app, state).await;
             }
         }
@@ -581,7 +583,7 @@ async fn handle_wire_text(app: &AppHandle, state: &AppState, connection_id: &str
 
 async fn poll_local_clipboard(app: &AppHandle, state: &AppState) -> AppResult<()> {
     let config = state.config().await;
-    if !should_read_local_clipboard(state, &config).await {
+    if !should_read_local_clipboard(&config) {
         return Ok(());
     }
 
@@ -589,8 +591,8 @@ async fn poll_local_clipboard(app: &AppHandle, state: &AppState) -> AppResult<()
 
     if config.sync_text {
         if let Ok(text) = clipboard::read_clipboard_text(app) {
-            if let Some(message) = publish_local_text_if_needed(state, &config, text).await {
-                record_local_history(app, state, &config, &message).await?;
+            if let Some(message) = state.observe_local_text(text).await {
+                record_observed_local_history(app, state, &config, &message).await?;
                 changed = true;
             }
         }
@@ -598,10 +600,8 @@ async fn poll_local_clipboard(app: &AppHandle, state: &AppState) -> AppResult<()
 
     if config.sync_image {
         if let Some(image_base64) = clipboard::read_clipboard_image_base64(app)? {
-            if let Some(message) =
-                publish_local_image_if_needed(state, &config, image_base64).await
-            {
-                record_local_history(app, state, &config, &message).await?;
+            if let Some(message) = state.observe_local_image(image_base64).await {
+                record_observed_local_history(app, state, &config, &message).await?;
                 changed = true;
             }
         }
@@ -613,10 +613,11 @@ async fn poll_local_clipboard(app: &AppHandle, state: &AppState) -> AppResult<()
     Ok(())
 }
 
-async fn should_read_local_clipboard(state: &AppState, config: &AppConfig) -> bool {
-    (config.sync_text || config.sync_image) && state.has_trusted_peers(config).await
+fn should_read_local_clipboard(config: &AppConfig) -> bool {
+    config.sync_text || config.sync_image
 }
 
+#[cfg(test)]
 async fn publish_local_text_if_needed(
     state: &AppState,
     config: &AppConfig,
@@ -632,42 +633,70 @@ async fn publish_local_text_if_needed(
     Some(message)
 }
 
-async fn publish_local_image_if_needed(
-    state: &AppState,
-    config: &AppConfig,
-    image_base64: String,
-) -> Option<ClipboardMessage> {
-    if !config.sync_image || !state.has_trusted_peers(config).await {
-        return None;
-    }
-
-    let message = state.observe_local_image(image_base64).await?;
-    state.touch_last_sync().await;
-    state.broadcast_trusted(config, message.clone().into()).await;
-    Some(message)
-}
-
-async fn record_local_history(
+async fn record_observed_local_history(
     app: &AppHandle,
     state: &AppState,
     config: &AppConfig,
     message: &ClipboardMessage,
 ) -> AppResult<()> {
-    if !config.save_history {
-        return Ok(());
+    let sent_count = if state.status().await.running {
+        state.broadcast_trusted(config, message.clone().into()).await
+    } else {
+        0
+    };
+    if sent_count > 0 {
+        state.touch_last_sync().await;
     }
 
-    let item = history::make_history_item(
-        HistoryDirection::Local,
-        message.source_device_name.clone(),
+    if message.content_type == ClipboardContentType::Text {
+        let _ = mobile::append_pc_clipboard_text(
+            message.content.clone(),
+            message.source_device_name.clone(),
+        )
+        .await;
+    }
+
+    if let Some(item) = push_local_history_item(
+        state,
+        config,
         message,
-    );
-    state.push_history(item.clone()).await;
-    history::save_history(app, &state.history().await)?;
-    let _ = app.emit("clipboard-synced", item);
+        local_sync_status_from_sent_count(sent_count),
+    )
+    .await
+    {
+        history::save_history(app, &state.history().await)?;
+        let _ = app.emit("clipboard-synced", item);
+    }
+
     Ok(())
 }
 
+async fn push_local_history_item(
+    state: &AppState,
+    config: &AppConfig,
+    message: &ClipboardMessage,
+    sync_status: SyncStatus,
+) -> Option<crate::models::HistoryItem> {
+    if !config.save_history {
+        return None;
+    }
+
+    let item = history::make_history_item_with_status(
+        HistoryDirection::Local,
+        message.source_device_name.clone(),
+        message,
+        sync_status,
+    );
+    Some(state.upsert_history_by_content(item).await)
+}
+
+fn local_sync_status_from_sent_count(sent_count: usize) -> SyncStatus {
+    if sent_count > 0 {
+        SyncStatus::Synced
+    } else {
+        SyncStatus::Unsynced
+    }
+}
 fn should_accept_clipboard_type(config: &AppConfig, content_type: &ClipboardContentType) -> bool {
     match content_type {
         ClipboardContentType::Text => config.sync_text,
@@ -710,22 +739,24 @@ async fn apply_peer_trust_grant(
     connection_id: &str,
     source_device_id: &str,
     trusted_device_ids: &[String],
-) -> bool {
+) -> Option<DeviceInfo> {
     if !trusted_device_ids
         .iter()
         .any(|device_id| device_id == &config.device_id)
     {
-        return false;
+        return None;
     }
 
     if !state
         .peer_connection_matches_device(connection_id, source_device_id)
         .await
     {
-        return false;
+        return None;
     }
 
-    false
+    state
+        .mark_peer_remote_trusted(connection_id, source_device_id)
+        .await
 }
 
 async fn build_hello(state: &AppState) -> WireMessage {
@@ -893,6 +924,20 @@ mod tests {
         assert!(heartbeat_timed_out(
             last_seen,
             last_seen + HEARTBEAT_TIMEOUT
+        ));
+    }
+
+    #[test]
+    fn heartbeat_timeout_tolerates_short_background_stalls() {
+        let last_seen = tokio::time::Instant::now();
+
+        assert!(
+            !heartbeat_timed_out(last_seen, last_seen + Duration::from_secs(30)),
+            "brief app or network stalls should not mark a peer offline"
+        );
+        assert!(heartbeat_timed_out(
+            last_seen,
+            last_seen + Duration::from_secs(60)
         ));
     }
 
@@ -1224,14 +1269,15 @@ mod tests {
                 .is_none()
         );
 
-        assert!(!apply_peer_trust_grant(
+        assert!(apply_peer_trust_grant(
             &state,
             &mut config,
             "10.194.34.119:51234",
             "device-a",
             &["device-b".to_string()],
         )
-        .await);
+        .await
+        .is_none());
         state.set_config(config.clone()).await;
 
         assert!(
@@ -1244,14 +1290,85 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn local_clipboard_is_read_when_any_enabled_type_has_trusted_peers() {
+    async fn trust_grant_marks_remote_trusted_without_local_trust() {
         let state = AppState::new();
         let mut config = crate::models::AppConfig::default();
+        config.device_id = "device-b".to_string();
+        config.device_name = "Laptop B".to_string();
+        state.set_config(config.clone()).await;
 
-        assert!(!should_read_local_clipboard(&state, &config).await);
+        let (sender, _outbound) = mpsc::unbounded_channel();
+        let join = tauri::async_runtime::spawn(async {
+            futures_util::future::pending::<()>().await;
+        });
+        state
+            .register_peer("10.194.34.119:51234".to_string(), sender, join)
+            .await;
+        state
+            .attach_peer_device(
+                "10.194.34.119:51234",
+                "device-a".to_string(),
+                Some("ws://10.194.34.119:8766/".to_string()),
+            )
+            .await;
+        state
+            .upsert_device(DeviceInfo {
+                id: "device-a".to_string(),
+                name: "Laptop A".to_string(),
+                ip: "10.194.34.119".to_string(),
+                port: 8766,
+                connected: true,
+                trusted: false,
+                remote_trusted: false,
+                last_seen_at: Some(Utc::now()),
+                status: DeviceStatus::Online,
+            })
+            .await;
 
+        let device = apply_peer_trust_grant(
+            &state,
+            &mut config,
+            "10.194.34.119:51234",
+            "device-a",
+            &["device-b".to_string()],
+        )
+        .await
+        .expect("valid trust grant should update device");
+
+        assert!(!config.trusted_devices.contains(&"device-a".to_string()));
+        assert!(!device.trusted);
+        assert!(device.remote_trusted);
+        assert_eq!(state.status().await.connected_count, 0);
+    }
+
+    #[tokio::test]
+    async fn local_history_records_unsynced_without_trusted_peer() {
+        let state = AppState::new();
+        let config = crate::models::AppConfig::default();
+        let message = state
+            .observe_local_text("offline local copy".to_string())
+            .await
+            .expect("local clipboard should be observed even without peers");
+
+        let item = push_local_history_item(
+            &state,
+            &config,
+            &message,
+            crate::models::SyncStatus::Unsynced,
+        )
+        .await
+        .expect("history should be recorded");
+
+        assert_eq!(item.sync_status, crate::models::SyncStatus::Unsynced);
+        assert_eq!(state.history().await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn local_history_records_synced_when_trusted_broadcast_succeeds() {
+        let state = AppState::new();
+        let mut config = crate::models::AppConfig::default();
         config.trusted_devices.push("device-b".to_string());
-        let (sender, _receiver) = mpsc::unbounded_channel();
+        let (sender, mut outbound) = mpsc::unbounded_channel();
         let join = tauri::async_runtime::spawn(async {
             futures_util::future::pending::<()>().await;
         });
@@ -1262,16 +1379,37 @@ mod tests {
             .attach_peer_device("a-to-b", "device-b".to_string(), None)
             .await;
 
-        assert!(should_read_local_clipboard(&state, &config).await);
+        let message = state
+            .observe_local_text("synced local copy".to_string())
+            .await
+            .expect("local clipboard should be observed");
+        let sent_count = state.broadcast_trusted(&config, message.clone().into()).await;
+        let item = push_local_history_item(
+            &state,
+            &config,
+            &message,
+            local_sync_status_from_sent_count(sent_count),
+        )
+        .await
+        .expect("history should be recorded");
+
+        assert!(outbound.try_recv().is_ok());
+        assert_eq!(item.sync_status, crate::models::SyncStatus::Synced);
+    }
+    #[test]
+    fn local_clipboard_is_read_when_any_supported_type_is_enabled() {
+        let mut config = crate::models::AppConfig::default();
+
+        assert!(should_read_local_clipboard(&config));
 
         config.sync_text = false;
-        assert!(should_read_local_clipboard(&state, &config).await);
+        assert!(should_read_local_clipboard(&config));
 
         config.sync_image = false;
-        assert!(!should_read_local_clipboard(&state, &config).await);
+        assert!(!should_read_local_clipboard(&config));
 
         config.sync_image = true;
-        assert!(should_read_local_clipboard(&state, &config).await);
+        assert!(should_read_local_clipboard(&config));
     }
 
     #[tokio::test]

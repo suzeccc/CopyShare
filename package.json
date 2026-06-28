@@ -1,6 +1,6 @@
 {
   "name": "copyshare",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -14,11 +14,13 @@
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-autostart": "^2.0.0",
+    "@types/qrcode": "^1.5.6",
     "@vueuse/core": "latest",
     "class-variance-authority": "latest",
     "clsx": "latest",
     "lucide-vue-next": "latest",
     "pinia": "latest",
+    "qrcode": "^1.5.4",
     "tailwind-merge": "latest",
     "vue": "latest",
     "vue-router": "latest"

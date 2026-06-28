@@ -15,6 +15,7 @@ function trustedDevice(connected: boolean): DeviceInfo {
     port: 8765,
     connected,
     trusted: true,
+    remoteTrusted: true,
     lastSeenAt: connected ? "2026-06-23T18:51:11Z" : "2026-06-23T18:52:20Z",
     status: connected ? "online" : "offline",
   };
@@ -28,6 +29,7 @@ const disconnected = applyDeviceDisconnected(
 assert.equal(disconnected.length, 1);
 assert.equal(disconnected[0].id, "device-remote");
 assert.equal(disconnected[0].trusted, true);
+assert.equal(disconnected[0].remoteTrusted, true);
 assert.equal(disconnected[0].connected, false);
 assert.equal(disconnected[0].status, "offline");
 assert.equal(disconnected[0].lastSeenAt, "2026-06-23T18:52:20Z");

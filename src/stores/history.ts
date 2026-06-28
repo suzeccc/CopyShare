@@ -32,7 +32,7 @@ export const useHistoryStore = defineStore("history", {
     },
     async subscribe() {
       await onAppEvent<HistoryItem>("clipboard-synced", (item) => {
-        this.items = [item, ...this.items].slice(0, 100);
+        this.items = [item, ...this.items.filter((existing) => existing.id !== item.id)].slice(0, 100);
       });
     },
   },

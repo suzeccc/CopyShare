@@ -6,6 +6,7 @@ mod device_store;
 mod discovery;
 mod error;
 mod history;
+mod mobile;
 mod models;
 mod network;
 mod security;
@@ -33,6 +34,7 @@ pub fn run() {
 
             tauri::async_runtime::block_on(state_for_setup.load_from_disk(app.handle()))?;
             tray::setup_tray(app, state_for_setup.clone())?;
+            sync::start_clipboard_monitor(app.handle().clone(), state_for_setup.clone());
 
             let app_handle = app.handle().clone();
             let state_for_auto_sync = state_for_setup.clone();
@@ -63,6 +65,10 @@ pub fn run() {
             commands::update_config,
             commands::get_history,
             commands::get_clipboard_history,
+            commands::create_mobile_session,
+            commands::get_mobile_session_status,
+            commands::close_mobile_session,
+            commands::confirm_mobile_clipboard_write,
             commands::clear_history,
             commands::copy_history_item,
             commands::open_external_url,
@@ -72,3 +78,4 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running CopyShare");
 }
+
