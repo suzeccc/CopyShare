@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::{
     error::AppResult,
-    models::{ClipboardContentType, ClipboardMessage, HistoryDirection, HistoryItem},
+    models::{ClipboardContentType, ClipboardMessage, HistoryDirection, HistoryItem, SyncStatus},
 };
 
 const HISTORY_FILE: &str = "history.json";
@@ -46,6 +46,15 @@ pub fn make_history_item(
     source_device: impl Into<String>,
     message: &ClipboardMessage,
 ) -> HistoryItem {
+    make_history_item_with_status(direction, source_device, message, SyncStatus::Synced)
+}
+
+pub fn make_history_item_with_status(
+    direction: HistoryDirection,
+    source_device: impl Into<String>,
+    message: &ClipboardMessage,
+    sync_status: SyncStatus,
+) -> HistoryItem {
     HistoryItem {
         id: Uuid::new_v4().to_string(),
         direction,
@@ -53,6 +62,7 @@ pub fn make_history_item(
         summary: summarize_message(message),
         content: history_content(message),
         content_type: message.content_type.clone(),
+        sync_status,
         success: true,
         created_at: Utc::now(),
     }
@@ -61,6 +71,33 @@ pub fn make_history_item(
 pub fn push_history(items: &mut Vec<HistoryItem>, item: HistoryItem) {
     items.insert(0, item);
     items.truncate(HISTORY_LIMIT);
+}
+
+pub fn upsert_history_by_content(items: &mut Vec<HistoryItem>, item: HistoryItem) -> HistoryItem {
+    if let Some(index) = items
+        .iter()
+        .position(|existing| should_update_existing_history(existing, &item))
+    {
+        let mut existing = items.remove(index);
+        existing.direction = item.direction;
+        existing.source_device = item.source_device;
+        existing.summary = item.summary;
+        if !item.content.trim().is_empty() {
+            existing.content = item.content;
+        }
+        existing.content_type = item.content_type;
+        existing.success = item.success;
+        existing.created_at = item.created_at;
+        if item.sync_status == SyncStatus::Synced {
+            existing.sync_status = SyncStatus::Synced;
+        }
+        items.insert(0, existing.clone());
+        items.truncate(HISTORY_LIMIT);
+        return existing;
+    }
+
+    push_history(items, item.clone());
+    item
 }
 
 pub fn summarize(content: &str) -> String {
@@ -73,6 +110,21 @@ pub fn summarize(content: &str) -> String {
         summary.push(ch);
     }
     summary
+}
+
+fn should_update_existing_history(existing: &HistoryItem, item: &HistoryItem) -> bool {
+    existing.sync_status == SyncStatus::Unsynced
+        && existing.content_type == item.content_type
+        && history_identity(existing) == history_identity(item)
+}
+
+fn history_identity(item: &HistoryItem) -> &str {
+    let content = item.content.trim();
+    if content.is_empty() {
+        item.summary.trim()
+    } else {
+        content
+    }
 }
 
 fn summarize_message(message: &ClipboardMessage) -> String {
@@ -305,6 +357,7 @@ mod tests {
             summary: "image".to_string(),
             content: content.clone(),
             content_type: ClipboardContentType::Image,
+            sync_status: SyncStatus::Synced,
             success: true,
             created_at: Utc::now(),
         };
@@ -333,6 +386,7 @@ mod tests {
             summary: "image".to_string(),
             content: STANDARD.encode(vec![1; 16]),
             content_type: ClipboardContentType::Image,
+            sync_status: SyncStatus::Synced,
             success: true,
             created_at: Utc::now(),
         };
@@ -344,6 +398,50 @@ mod tests {
         assert!(image_dir.join("keep.b64").exists());
         fs::remove_dir_all(image_dir)?;
         Ok(())
+    }
+
+    #[test]
+    fn legacy_history_items_default_to_synced_status() {
+        let text = r#"[{"id":"old","direction":"local","sourceDevice":"CopyShare","summary":"hello","content":"hello","contentType":"text","success":true,"createdAt":"2026-06-28T00:00:00Z"}]"#;
+        let items = load_history_items_from_text(text).expect("legacy history should load");
+
+        assert_eq!(items[0].sync_status, crate::models::SyncStatus::Synced);
+    }
+
+    #[test]
+    fn unsynced_history_item_upgrades_to_synced_without_duplicate() {
+        let message = ClipboardMessage {
+            message_id: "m".to_string(),
+            source_device_id: "d".to_string(),
+            source_device_name: "Device".to_string(),
+            content_type: crate::models::ClipboardContentType::Text,
+            content: "same content".to_string(),
+            content_hash: "hash".to_string(),
+            timestamp: 1,
+        };
+        let mut items = Vec::new();
+
+        upsert_history_by_content(
+            &mut items,
+            make_history_item_with_status(
+                HistoryDirection::Local,
+                "Device",
+                &message,
+                crate::models::SyncStatus::Unsynced,
+            ),
+        );
+        upsert_history_by_content(
+            &mut items,
+            make_history_item_with_status(
+                HistoryDirection::Local,
+                "Device",
+                &message,
+                crate::models::SyncStatus::Synced,
+            ),
+        );
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].sync_status, crate::models::SyncStatus::Synced);
     }
 
     #[test]

@@ -17,6 +17,7 @@ assert.match(home, /@click="showClipboardHistoryModal = false"/);
 assert.match(home, /v-for="item in allClipboardItems"/);
 assert.match(home, /data-clipboard-history-row/);
 assert.match(home, /grid-cols-\[minmax\(0,1fr\)_auto\]/);
+assert.match(home, /data-clipboard-history-actions/);
 assert.match(home, /data-clipboard-history-text/);
 assert.match(home, /\bbreak-all\b/);
 assert.match(home, /<CopyTextButton/);

@@ -4,6 +4,7 @@ import About from "@/pages/About.vue";
 import Devices from "@/pages/Devices.vue";
 import Home from "@/pages/Home.vue";
 import Logs from "@/pages/Logs.vue";
+import MobileQr from "@/pages/MobileQr.vue";
 import Settings from "@/pages/Settings.vue";
 
 const router = createRouter({
@@ -11,6 +12,7 @@ const router = createRouter({
   routes: [
     { path: "/", name: "home", component: Home },
     { path: "/devices", name: "devices", component: Devices },
+    { path: "/mobile", name: "mobile", component: MobileQr },
     { path: "/logs", name: "logs", component: Logs },
     { path: "/history", redirect: "/logs" },
     { path: "/settings", name: "settings", component: Settings },

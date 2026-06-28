@@ -31,7 +31,7 @@ export function mergeRefreshedDevices(
 }
 
 export function connectedTrustedDevices(devices: DeviceInfo[]): DeviceInfo[] {
-  return dedupeDevices(devices).filter((device) => device.connected && device.trusted);
+  return dedupeDevices(devices).filter(isMutuallyTrustedConnectedDevice);
 }
 
 export function pendingTrustDevices(devices: DeviceInfo[]): DeviceInfo[] {
@@ -55,6 +55,7 @@ export function historicalDevices(devices: DeviceInfo[]): DeviceInfo[] {
     const merged = {
       ...preferred,
       trusted: existing.trusted || device.trusted,
+      remoteTrusted: existing.remoteTrusted || device.remoteTrusted,
       connected: existing.connected || device.connected,
       status: existing.connected || device.connected ? "online" : preferred.status,
       lastSeenAt: existing.lastSeenAt ?? device.lastSeenAt,
@@ -95,10 +96,12 @@ export function applyDeviceDisconnected(
   );
   const deviceKey = existing?.id ?? disconnectedDevice.id;
   const trusted = existing?.trusted || disconnectedDevice.trusted;
+  const remoteTrusted = existing?.remoteTrusted || disconnectedDevice.remoteTrusted;
   const next = upsertDevice(devices, {
     ...disconnectedDevice,
     connected: false,
     trusted,
+    remoteTrusted,
     status: "offline",
   });
 
@@ -108,6 +111,7 @@ export function applyDeviceDisconnected(
           ...device,
           connected: false,
           trusted: device.trusted || trusted,
+          remoteTrusted: device.remoteTrusted || remoteTrusted,
           status: "offline",
           lastSeenAt: disconnectedDevice.lastSeenAt ?? device.lastSeenAt,
         }
@@ -198,6 +202,7 @@ function mergeDevice(existing: DeviceInfo, incoming: DeviceInfo): DeviceInfo {
     return {
       ...existing,
       trusted: existing.trusted || incoming.trusted,
+      remoteTrusted: existing.remoteTrusted || incoming.remoteTrusted,
       lastSeenAt: incoming.lastSeenAt ?? existing.lastSeenAt,
     };
   }
@@ -206,6 +211,7 @@ function mergeDevice(existing: DeviceInfo, incoming: DeviceInfo): DeviceInfo {
     return {
       ...existing,
       connected: true,
+      remoteTrusted: existing.remoteTrusted || incoming.remoteTrusted,
       lastSeenAt: incoming.lastSeenAt ?? existing.lastSeenAt,
       status: "online",
     };
@@ -214,9 +220,14 @@ function mergeDevice(existing: DeviceInfo, incoming: DeviceInfo): DeviceInfo {
   return {
     ...incoming,
     trusted: incoming.trusted || (existing.connected && existing.trusted),
+    remoteTrusted: incoming.remoteTrusted || (existing.connected && existing.remoteTrusted),
     connected: incoming.connected || existing.connected,
     status: incoming.connected || existing.connected ? "online" : incoming.status,
   };
+}
+
+function isMutuallyTrustedConnectedDevice(device: DeviceInfo): boolean {
+  return device.connected && device.trusted && device.remoteTrusted;
 }
 
 function preferHistoryDevice(existing: DeviceInfo, incoming: DeviceInfo): DeviceInfo {

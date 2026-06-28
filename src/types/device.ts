@@ -7,6 +7,7 @@ export interface DeviceInfo {
   port: number;
   connected: boolean;
   trusted: boolean;
+  remoteTrusted: boolean;
   lastSeenAt: string | null;
   status: DeviceStatus;
 }

@@ -37,13 +37,33 @@ const status = computed(() => {
       };
     }
 
-    if (props.device.trusted) {
+    if (props.device.trusted && props.device.remoteTrusted) {
       return {
         label: "已连接",
         detail: "连接正常，剪贴板状态会实时更新。",
         badgeClass: "border-emerald-400/45 bg-emerald-400/10 text-emerald-100",
         dotClass: "bg-emerald-300 shadow-[0_0_14px_rgba(110,231,183,0.65)]",
         cardClass: "border-[color:var(--main-line-soft)] bg-[color:var(--panel-bg-soft)]",
+      };
+    }
+
+    if (props.device.trusted) {
+      return {
+        label: "等待对方信任",
+        detail: "本机已信任此设备，等待对方也信任本机后开始双向同步。",
+        badgeClass: "border-amber-300/35 bg-amber-400/10 text-amber-100",
+        dotClass: "bg-amber-300 shadow-[0_0_14px_rgba(252,211,77,0.45)]",
+        cardClass: "border-amber-300/25 bg-[color:var(--panel-bg-soft)]",
+      };
+    }
+
+    if (props.device.remoteTrusted) {
+      return {
+        label: "对方已信任，等待本机确认",
+        detail: "对方已经信任本机，点击信任设备后即可双向同步。",
+        badgeClass: "border-[color:var(--accent-line)] bg-[color:var(--accent-soft)] text-[color:var(--accent-text)]",
+        dotClass: "bg-[color:var(--theme-accent)] shadow-[0_0_14px_var(--accent-glow)]",
+        cardClass: "border-[color:var(--accent-line)] bg-[color:var(--panel-bg-soft)]",
       };
     }
 
@@ -58,8 +78,8 @@ const status = computed(() => {
 
   if (props.mode === "connected") {
     return {
-      label: "已信任同步中",
-      detail: "本机已信任此设备；若仍只能单向同步，请在对方电脑也信任本机。",
+      label: "已连接",
+      detail: "双方设备已互相信任，剪贴板状态会实时更新。",
       badgeClass: "border-emerald-400/45 bg-emerald-400/10 text-emerald-100",
       dotClass: "bg-emerald-300 shadow-[0_0_14px_rgba(110,231,183,0.65)]",
       cardClass: "border-emerald-400/30 bg-[rgba(20,54,72,0.58)]",

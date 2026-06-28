@@ -9,7 +9,11 @@ use crate::{
     device_store,
     error::{AppError, AppResult},
     history,
-    models::{AppConfig, AppStatus, ClipboardContentType, ClipboardTextItem, DeviceInfo, HistoryItem},
+    mobile,
+    models::{
+        AppConfig, AppStatus, ClipboardContentType, ClipboardTextItem, DeviceInfo, HistoryItem,
+        MobileSessionView,
+    },
     security,
     state::AppState,
     sync,
@@ -177,6 +181,56 @@ pub async fn get_history(state: State<'_, AppState>) -> AppResult<Vec<HistoryIte
 #[tauri::command]
 pub async fn get_clipboard_history() -> AppResult<Vec<ClipboardTextItem>> {
     clipboard::read_clipboard_history_text(3).await
+}
+
+#[tauri::command]
+pub async fn create_mobile_session(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<MobileSessionView> {
+    let mut contents = Vec::new();
+    let current = clipboard::read_clipboard_text(&app).unwrap_or_default();
+    push_unique_clipboard_text(&mut contents, current);
+
+    if let Ok(history_items) = clipboard::read_clipboard_history_text(5).await {
+        for item in history_items {
+            push_unique_clipboard_text(&mut contents, item.text);
+            if contents.len() >= 5 {
+                break;
+            }
+        }
+    }
+
+    let device_name = state.config().await.device_name;
+    mobile::create_session(app, state.inner().clone(), contents, device_name).await
+}
+
+fn push_unique_clipboard_text(contents: &mut Vec<String>, text: String) {
+    let trimmed = text.trim().to_string();
+    if trimmed.is_empty() || contents.iter().any(|item| item == &trimmed) {
+        return;
+    }
+    contents.push(trimmed);
+}
+
+#[tauri::command]
+pub async fn get_mobile_session_status(session_id: String) -> AppResult<MobileSessionView> {
+    mobile::get_session_view(&session_id).await
+}
+
+#[tauri::command]
+pub async fn close_mobile_session(session_id: String) -> AppResult<MobileSessionView> {
+    mobile::close_session(&session_id).await
+}
+
+#[tauri::command]
+pub async fn confirm_mobile_clipboard_write(
+    app: AppHandle,
+    session_id: String,
+) -> AppResult<MobileSessionView> {
+    let content = mobile::take_submitted_content_for_write(&session_id).await?;
+    clipboard::write_clipboard_text(&app, &content)?;
+    mobile::get_session_view(&session_id).await
 }
 
 #[tauri::command]

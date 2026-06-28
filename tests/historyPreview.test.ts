@@ -11,13 +11,14 @@ function historyItem(partial: Partial<HistoryItem>): HistoryItem {
     summary: partial.summary ?? "",
     content: partial.content,
     contentType: partial.contentType ?? "text",
+    syncStatus: partial.syncStatus ?? "synced",
     success: true,
     createdAt: partial.createdAt ?? new Date().toISOString(),
   };
 }
 
 function systemItem(index: number) {
-  return { id: `system-${index}`, text: `System ${index}`, contentType: "text" as const };
+  return { id: `system-${index}`, text: `System ${index}`, contentType: "text" as const, syncStatus: "unsynced" as const };
 }
 
 const items = getRecentClipboardItems([
@@ -30,18 +31,23 @@ const items = getRecentClipboardItems([
 ]);
 
 assert.deepEqual(items, [
-  { id: "1", text: "Full one", contentType: "text", sourceDevice: "Office-PC" },
-  { id: "2", text: "Summary two", contentType: "text", sourceDevice: "Laptop" },
-  { id: "3", text: "Full three", contentType: "text", sourceDevice: "Desktop" },
-  { id: "4", text: "Full four", contentType: "text", sourceDevice: "Phone" },
-  { id: "5", text: "Full five", contentType: "text", sourceDevice: "Tablet" },
+  { id: "1", text: "Full one", contentType: "text", sourceDevice: "Office-PC", syncStatus: "synced" },
+  { id: "2", text: "Summary two", contentType: "text", sourceDevice: "Laptop", syncStatus: "synced" },
+  { id: "3", text: "Full three", contentType: "text", sourceDevice: "Desktop", syncStatus: "synced" },
+  { id: "4", text: "Full four", contentType: "text", sourceDevice: "Phone", syncStatus: "synced" },
+  { id: "5", text: "Full five", contentType: "text", sourceDevice: "Tablet", syncStatus: "synced" },
 ]);
 
 assert.deepEqual(
   getRecentClipboardItems([
     historyItem({ id: "image-1", summary: "图片 1089 KB", content: "base64", contentType: "image" }),
   ]),
-  [{ id: "image-1", text: "图片 1089 KB", contentType: "image", sourceDevice: "Device" }],
+  [{ id: "image-1", text: "图片 1089 KB", contentType: "image", sourceDevice: "Device", syncStatus: "synced" }],
+);
+
+assert.equal(
+  getRecentClipboardItems([historyItem({ id: "offline", summary: "Offline copy", syncStatus: "unsynced" })], 1)[0]?.syncStatus,
+  "unsynced",
 );
 
 assert.deepEqual(getRecentClipboardItems([], 3), []);
@@ -52,36 +58,36 @@ assert.equal(getFloatingClipboardItems(Array.from({ length: 11 }, (_, index) => 
 assert.deepEqual(
   getFloatingClipboardItems(
     [
-      { id: "system-1", text: "WinV one", contentType: "text" },
-      { id: "system-2", text: "WinV two", contentType: "text" },
-      { id: "system-3", text: "WinV three", contentType: "text" },
-      { id: "system-4", text: "WinV four", contentType: "text" },
-      { id: "system-5", text: "WinV five", contentType: "text" },
-      { id: "system-6", text: "WinV six", contentType: "text" },
+      { id: "system-1", text: "WinV one", contentType: "text", syncStatus: "unsynced" },
+      { id: "system-2", text: "WinV two", contentType: "text", syncStatus: "unsynced" },
+      { id: "system-3", text: "WinV three", contentType: "text", syncStatus: "unsynced" },
+      { id: "system-4", text: "WinV four", contentType: "text", syncStatus: "unsynced" },
+      { id: "system-5", text: "WinV five", contentType: "text", syncStatus: "unsynced" },
+      { id: "system-6", text: "WinV six", contentType: "text", syncStatus: "unsynced" },
     ],
     [historyItem({ id: "app-1", summary: "App history", sourceDevice: "Office-PC" })],
   ),
   [
-    { id: "system-1", text: "WinV one", contentType: "text" },
-    { id: "system-2", text: "WinV two", contentType: "text" },
-    { id: "system-3", text: "WinV three", contentType: "text" },
-    { id: "system-4", text: "WinV four", contentType: "text" },
-    { id: "system-5", text: "WinV five", contentType: "text" },
-    { id: "system-6", text: "WinV six", contentType: "text" },
-    { id: "app-1", text: "App history", contentType: "text", sourceDevice: "Office-PC" },
+    { id: "system-1", text: "WinV one", contentType: "text", syncStatus: "unsynced" },
+    { id: "system-2", text: "WinV two", contentType: "text", syncStatus: "unsynced" },
+    { id: "system-3", text: "WinV three", contentType: "text", syncStatus: "unsynced" },
+    { id: "system-4", text: "WinV four", contentType: "text", syncStatus: "unsynced" },
+    { id: "system-5", text: "WinV five", contentType: "text", syncStatus: "unsynced" },
+    { id: "system-6", text: "WinV six", contentType: "text", syncStatus: "unsynced" },
+    { id: "app-1", text: "App history", contentType: "text", sourceDevice: "Office-PC", syncStatus: "synced" },
   ],
 );
 
 assert.deepEqual(
   getFloatingClipboardItems([], [historyItem({ id: "app-1", summary: "App history", sourceDevice: "Office-PC" })]),
-  [{ id: "app-1", text: "App history", contentType: "text", sourceDevice: "Office-PC" }],
+  [{ id: "app-1", text: "App history", contentType: "text", sourceDevice: "Office-PC", syncStatus: "synced" }],
 );
 
 assert.deepEqual(
   getFloatingClipboardItems(
     [
-      { id: "system-1", text: "System one", contentType: "text" },
-      { id: "system-2", text: "System two", contentType: "text" },
+      { id: "system-1", text: "System one", contentType: "text", syncStatus: "unsynced" },
+      { id: "system-2", text: "System two", contentType: "text", syncStatus: "unsynced" },
     ],
     [
       historyItem({ id: "app-1", summary: "App one", sourceDevice: "Office-PC" }),
@@ -89,8 +95,8 @@ assert.deepEqual(
     ],
   ),
   [
-    { id: "system-1", text: "System one", contentType: "text" },
-    { id: "system-2", text: "System two", contentType: "text" },
-    { id: "app-1", text: "App one", contentType: "text", sourceDevice: "Office-PC" },
+    { id: "system-1", text: "System one", contentType: "text", syncStatus: "unsynced" },
+    { id: "system-2", text: "System two", contentType: "text", syncStatus: "unsynced" },
+    { id: "app-1", text: "App one", contentType: "text", sourceDevice: "Office-PC", syncStatus: "synced" },
   ],
 );

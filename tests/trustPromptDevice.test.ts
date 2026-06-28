@@ -15,6 +15,7 @@ function device(overrides: Partial<DeviceInfo>): DeviceInfo {
     port: 8765,
     connected: true,
     trusted: false,
+    remoteTrusted: false,
     lastSeenAt: null,
     status: "online",
     ...overrides,

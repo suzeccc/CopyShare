@@ -221,6 +221,7 @@ pub async fn read_clipboard_history_text(limit: usize) -> AppResult<Vec<Clipboar
                 .map_err(|error| AppError::Clipboard(error.to_string()))?
                 .to_string(),
             text,
+            source_device: String::new(),
         });
     }
 

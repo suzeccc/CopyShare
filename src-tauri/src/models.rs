@@ -42,6 +42,8 @@ pub struct DeviceInfo {
     pub port: u16,
     pub connected: bool,
     pub trusted: bool,
+    #[serde(default)]
+    pub remote_trusted: bool,
     pub last_seen_at: Option<DateTime<Utc>>,
     pub status: DeviceStatus,
 }
@@ -153,6 +155,19 @@ pub enum HistoryDirection {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum SyncStatus {
+    Synced,
+    Unsynced,
+}
+
+impl Default for SyncStatus {
+    fn default() -> Self {
+        Self::Synced
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct HistoryItem {
     pub id: String,
@@ -162,6 +177,8 @@ pub struct HistoryItem {
     #[serde(default)]
     pub content: String,
     pub content_type: ClipboardContentType,
+    #[serde(default)]
+    pub sync_status: SyncStatus,
     pub success: bool,
     pub created_at: DateTime<Utc>,
 }
@@ -171,6 +188,43 @@ pub struct HistoryItem {
 pub struct ClipboardTextItem {
     pub id: String,
     pub text: String,
+    #[serde(default)]
+    pub source_device: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum MobileSessionMode {
+    SendToMobile,
+    ReceiveFromMobile,
+    Bidirectional,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum MobileSessionPhase {
+    Waiting,
+    Opened,
+    Copied,
+    Submitted,
+    Written,
+    Expired,
+    Closed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MobileSessionView {
+    pub id: String,
+    pub url: String,
+    pub mode: MobileSessionMode,
+    pub phase: MobileSessionPhase,
+    pub expires_at: Option<DateTime<Utc>>,
+    pub remaining_seconds: Option<i64>,
+    pub summary: String,
+    pub submitted_summary: Option<String>,
+    pub content_items: Vec<ClipboardTextItem>,
+    pub submitted_items: Vec<ClipboardTextItem>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

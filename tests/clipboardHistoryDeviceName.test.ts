@@ -11,6 +11,7 @@ const item: HistoryItem = {
   summary: "hello",
   content: "hello",
   contentType: "text",
+  syncStatus: "synced",
   success: true,
   createdAt: "2026-06-24T00:00:00.000Z",
 };

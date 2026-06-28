@@ -17,6 +17,7 @@ import {
 import type { AppConfig } from "@/types/config";
 import type { DeviceInfo } from "@/types/device";
 import type { HistoryItem } from "@/types/history";
+import type { MobileSessionView } from "@/types/mobile";
 import type { AppStatus } from "@/types/status";
 
 export type AppEventName =
@@ -74,6 +75,22 @@ export function getHistory(): Promise<HistoryItem[]> {
 
 export function getClipboardHistory(): Promise<Array<{ id: string; text: string }>> {
   return invoke<Array<{ id: string; text: string }>>("get_clipboard_history");
+}
+
+export function createMobileSession(): Promise<MobileSessionView> {
+  return invoke<MobileSessionView>("create_mobile_session");
+}
+
+export function getMobileSessionStatus(sessionId: string): Promise<MobileSessionView> {
+  return invoke<MobileSessionView>("get_mobile_session_status", { sessionId });
+}
+
+export function closeMobileSession(sessionId: string): Promise<MobileSessionView> {
+  return invoke<MobileSessionView>("close_mobile_session", { sessionId });
+}
+
+export function confirmMobileClipboardWrite(sessionId: string): Promise<MobileSessionView> {
+  return invoke<MobileSessionView>("confirm_mobile_clipboard_write", { sessionId });
 }
 
 export function clearHistory(): Promise<void> {
@@ -174,3 +191,4 @@ export function onAppEvent<T>(
 ): Promise<UnlistenFn> {
   return listen<T>(eventName, (event) => callback(event.payload));
 }
+

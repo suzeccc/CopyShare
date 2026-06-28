@@ -1,0 +1,500 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CopyShare 手机扫码信息块移位预览</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: "Microsoft YaHei UI", "Segoe UI", system-ui, sans-serif;
+      --bg: #202020;
+      --panel: #242424;
+      --panel-soft: #2a2a2a;
+      --field: #1f1f1f;
+      --line: #3b3b3b;
+      --line-soft: #343434;
+      --text: #f3f4f6;
+      --muted: #a6a6a6;
+      --subtle: #7d7d7d;
+      --accent: #8aa4b8;
+      --accent-soft: #263039;
+      --green: #93c5a4;
+      --orange: #d7b179;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      background: var(--bg);
+      color: var(--text);
+      padding: 28px;
+    }
+
+    .frame {
+      width: 1180px;
+      min-height: 780px;
+      border: 1px solid var(--line);
+      border-radius: 28px;
+      background: rgba(36, 36, 36, .94);
+      box-shadow: 0 28px 90px rgba(0, 0, 0, .42);
+      padding: 28px;
+      overflow: hidden;
+    }
+
+    .top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 20px;
+    }
+
+    .eyebrow {
+      margin: 0;
+      color: var(--accent);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: .02em;
+    }
+
+    h1 {
+      margin: 8px 0 0;
+      font-size: 28px;
+      line-height: 1.15;
+      font-weight: 750;
+    }
+
+    .desc {
+      margin: 10px 0 0;
+      max-width: 640px;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.7;
+    }
+
+    .badges {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .badge {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--field);
+      color: var(--muted);
+      padding: 10px 15px;
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(320px, .42fr) minmax(0, .58fr);
+      gap: 22px;
+    }
+
+    .rail,
+    .content-card,
+    .list-card,
+    .notice {
+      border: 1px solid var(--line-soft);
+      border-radius: 24px;
+      background: var(--panel-soft);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, .05);
+    }
+
+    .rail {
+      display: grid;
+      align-content: start;
+      gap: 18px;
+      padding: 22px;
+    }
+
+    .rail-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .label {
+      margin: 0;
+      color: var(--subtle);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .rail-title {
+      margin: 6px 0 0;
+      font-size: 17px;
+      font-weight: 750;
+    }
+
+    .status {
+      border: 1px solid rgba(138, 164, 184, .42);
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: #dce9f2;
+      padding: 6px 12px;
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .qr {
+      width: 300px;
+      height: 300px;
+      margin: 0 auto;
+      display: grid;
+      place-items: center;
+      border: 1px solid rgba(255, 255, 255, .72);
+      border-radius: 22px;
+      background: white;
+      padding: 18px;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, .30);
+    }
+
+    .qr-grid {
+      width: 244px;
+      height: 244px;
+      display: block;
+    }
+
+    .actions {
+      width: 300px;
+      margin: 0 auto;
+      display: grid;
+      gap: 10px;
+    }
+
+    button {
+      height: 44px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: #303030;
+      color: var(--text);
+      font-size: 14px;
+      font-weight: 720;
+    }
+
+    .primary {
+      border-color: rgba(138, 164, 184, .5);
+      background: #3a3f43;
+    }
+
+    .danger {
+      border-color: rgba(248, 113, 113, .42);
+      color: #fecaca;
+      background: rgba(127, 29, 29, .28);
+    }
+
+    .right {
+      display: grid;
+      align-content: start;
+      gap: 16px;
+    }
+
+    .content-card {
+      padding: 18px;
+    }
+
+    .content-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .title-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .icon {
+      width: 42px;
+      height: 42px;
+      display: grid;
+      place-items: center;
+      border-radius: 999px;
+      border: 1px solid rgba(138, 164, 184, .42);
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-size: 20px;
+      flex: none;
+    }
+
+    .content-title {
+      margin: 0;
+      font-size: 17px;
+      font-weight: 760;
+    }
+
+    .content-copy {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.65;
+    }
+
+    .session-chip {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--field);
+      color: var(--muted);
+      padding: 7px 12px;
+      font-size: 12px;
+      font-weight: 650;
+      white-space: nowrap;
+    }
+
+    .notice {
+      margin-top: 16px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 14px;
+      align-items: center;
+      background: #222222;
+      padding: 13px 15px;
+    }
+
+    .notice-main {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px 14px;
+      min-width: 0;
+    }
+
+    .notice-strong {
+      color: #eeeeee;
+      font-size: 14px;
+      font-weight: 760;
+      white-space: nowrap;
+    }
+
+    .notice-text {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    .notice-tag {
+      border: 1px solid rgba(138, 164, 184, .42);
+      border-radius: 999px;
+      color: #dbe8f1;
+      background: rgba(138, 164, 184, .12);
+      padding: 7px 11px;
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .lists {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+
+    .list-card {
+      padding: 16px;
+      min-height: 252px;
+    }
+
+    .list-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 0 0 12px;
+      font-size: 15px;
+      font-weight: 760;
+    }
+
+    .clip {
+      border: 1px solid var(--line-soft);
+      border-radius: 18px;
+      background: rgba(0, 0, 0, .16);
+      padding: 12px;
+      margin-top: 10px;
+    }
+
+    .clip-meta {
+      margin: 0 0 6px;
+      color: var(--subtle);
+      font-size: 11px;
+      font-weight: 650;
+    }
+
+    .clip-text {
+      margin: 0;
+      color: #e5e7eb;
+      font-size: 13px;
+      line-height: 1.6;
+      word-break: break-all;
+    }
+
+    .auto {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      border: 1px solid rgba(147, 197, 164, .24);
+      border-radius: 22px;
+      background: rgba(147, 197, 164, .08);
+      padding: 14px 16px;
+    }
+
+    .auto p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    .auto strong {
+      display: block;
+      color: var(--text);
+      font-size: 14px;
+      margin-bottom: 3px;
+    }
+
+    .auto-pill {
+      border: 1px solid rgba(147, 197, 164, .32);
+      border-radius: 999px;
+      color: #d8f3df;
+      background: rgba(147, 197, 164, .10);
+      padding: 10px 13px;
+      font-size: 13px;
+      font-weight: 720;
+      white-space: nowrap;
+    }
+  </style>
+</head>
+<body>
+  <main class="frame">
+    <section class="top">
+      <div>
+        <p class="eyebrow">局域网临时传输</p>
+        <h1>手机扫码</h1>
+        <p class="desc">手机扫码进入同一局域网页，在本次运行期内完成电脑到手机、手机到电脑的临时剪贴板传输。</p>
+      </div>
+      <div class="badges">
+        <span class="badge">最近 5 条</span>
+        <span class="badge">单条 100KB</span>
+        <span class="badge">本次运行期有效</span>
+      </div>
+    </section>
+
+    <section class="layout">
+      <aside class="rail">
+        <div class="rail-head">
+          <div>
+            <p class="label">扫码连接</p>
+            <p class="rail-title">CopyShare Mobile</p>
+          </div>
+          <span class="status">等待扫码</span>
+        </div>
+        <div class="qr">
+          <svg class="qr-grid" viewBox="0 0 244 244" aria-label="二维码示意">
+            <rect width="244" height="244" fill="#fff" />
+            <rect x="0" y="0" width="52" height="52" fill="#111" />
+            <rect x="10" y="10" width="32" height="32" fill="#fff" />
+            <rect x="18" y="18" width="16" height="16" fill="#111" />
+            <rect x="192" y="0" width="52" height="52" fill="#111" />
+            <rect x="202" y="10" width="32" height="32" fill="#fff" />
+            <rect x="210" y="18" width="16" height="16" fill="#111" />
+            <rect x="0" y="192" width="52" height="52" fill="#111" />
+            <rect x="10" y="202" width="32" height="32" fill="#fff" />
+            <rect x="18" y="210" width="16" height="16" fill="#111" />
+            <rect x="72" y="0" width="14" height="14" fill="#111" />
+            <rect x="110" y="0" width="28" height="14" fill="#111" />
+            <rect x="154" y="18" width="14" height="14" fill="#111" />
+            <rect x="82" y="36" width="28" height="14" fill="#111" />
+            <rect x="126" y="44" width="14" height="14" fill="#111" />
+            <rect x="68" y="72" width="14" height="28" fill="#111" />
+            <rect x="100" y="72" width="14" height="14" fill="#111" />
+            <rect x="132" y="72" width="28" height="14" fill="#111" />
+            <rect x="180" y="72" width="14" height="14" fill="#111" />
+            <rect x="72" y="112" width="42" height="14" fill="#111" />
+            <rect x="132" y="108" width="14" height="42" fill="#111" />
+            <rect x="164" y="108" width="28" height="14" fill="#111" />
+            <rect x="206" y="96" width="14" height="42" fill="#111" />
+            <rect x="68" y="150" width="14" height="14" fill="#111" />
+            <rect x="98" y="150" width="30" height="14" fill="#111" />
+            <rect x="154" y="150" width="14" height="30" fill="#111" />
+            <rect x="184" y="154" width="42" height="14" fill="#111" />
+            <rect x="72" y="192" width="14" height="42" fill="#111" />
+            <rect x="100" y="196" width="42" height="14" fill="#111" />
+            <rect x="132" y="224" width="14" height="14" fill="#111" />
+            <rect x="164" y="196" width="14" height="14" fill="#111" />
+            <rect x="192" y="192" width="14" height="42" fill="#111" />
+            <rect x="220" y="206" width="14" height="14" fill="#111" />
+          </svg>
+        </div>
+        <div class="actions">
+          <button class="primary">生成二维码</button>
+          <button>复制链接</button>
+          <button class="danger">结束会话</button>
+        </div>
+      </aside>
+
+      <section class="right">
+        <div class="content-card">
+          <div class="content-head">
+            <div class="title-row">
+              <span class="icon">⇄</span>
+              <div>
+                <p class="content-title">本次临时传输</p>
+                <p class="content-copy">生成二维码后，用手机扫码打开局域网页，无需安装 App。</p>
+              </div>
+            </div>
+            <span class="session-chip">会话已创建</span>
+          </div>
+
+          <div class="notice">
+            <div class="notice-main">
+              <span class="notice-strong">保持到手动结束</span>
+              <span class="notice-text">关闭 CopyShare 或点击结束会话后，手机页面会停止同步。</span>
+            </div>
+            <span class="notice-tag">本次运行期有效</span>
+          </div>
+        </div>
+
+        <div class="lists">
+          <article class="list-card">
+            <p class="list-title">▣ 电脑剪贴板</p>
+            <div class="clip">
+              <p class="clip-meta">电脑剪贴板 1</p>
+              <p class="clip-text">复制的命令、账号、临时文本会在这里显示，手机可按条选择复制。</p>
+            </div>
+            <div class="clip">
+              <p class="clip-meta">电脑剪贴板 2</p>
+              <p class="clip-text">https://example.local/share?token=cef6</p>
+            </div>
+          </article>
+
+          <article class="list-card">
+            <p class="list-title">▣ 手机提交</p>
+            <div class="clip">
+              <p class="clip-meta">手机提交 1</p>
+              <p class="clip-text">手机端可以连续发送多条内容，电脑端会自动写入剪贴板。</p>
+            </div>
+          </article>
+        </div>
+
+        <div class="auto">
+          <p><strong>手机发送后自动写入电脑剪贴板</strong>手机端每发送一条，都会直接覆盖电脑当前剪贴板，并保留在本次会话列表里。</p>
+          <span class="auto-pill">自动写入</span>
+        </div>
+      </section>
+    </section>
+  </main>
+</body>
+</html>

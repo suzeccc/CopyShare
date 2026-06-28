@@ -1,10 +1,10 @@
-import type { HistoryItem } from "@/types/history";
-import type { ClipboardContentType } from "@/types/history";
+import type { ClipboardContentType, HistoryItem, HistorySyncStatus } from "@/types/history";
 
 export type ClipboardPreviewItem = {
   id: string;
   text: string;
   contentType: ClipboardContentType;
+  syncStatus: HistorySyncStatus;
   sourceDevice?: string;
 };
 
@@ -13,6 +13,10 @@ export const FLOATING_CLIPBOARD_PREVIEW_LIMIT = 10;
 
 function previewText(item: HistoryItem): string {
   return item.contentType === "text" ? item.content || item.summary : item.summary;
+}
+
+function syncStatus(item: Pick<HistoryItem, "syncStatus">): HistorySyncStatus {
+  return item.syncStatus ?? "synced";
 }
 
 export function getRecentClipboardItems(
@@ -25,6 +29,7 @@ export function getRecentClipboardItems(
       text: previewText(item).trim(),
       contentType: item.contentType,
       sourceDevice: item.sourceDevice,
+      syncStatus: syncStatus(item),
     }))
     .filter((item) => item.text.length > 0)
     .slice(0, limit);
@@ -37,7 +42,12 @@ export function getFloatingClipboardItems(
 ): ClipboardPreviewItem[] {
   const seen = new Set<string>();
   const recentSystemItems = systemItems
-    .map((item) => ({ id: item.id, text: item.text.trim(), contentType: item.contentType }))
+    .map((item) => ({
+      id: item.id,
+      text: item.text.trim(),
+      contentType: item.contentType,
+      syncStatus: item.syncStatus ?? "unsynced",
+    }))
     .filter((item) => item.text.length > 0)
     .slice(0, limit);
   const mergedItems = [...recentSystemItems];
