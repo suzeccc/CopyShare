@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import {
   applyDeviceDisconnected,
   getDeviceDisconnectNotice,
+  getDeviceRejectedNotice,
 } from "../src/lib/deviceList.ts";
 import type { DeviceInfo } from "../src/types/device.ts";
 
@@ -36,6 +37,8 @@ assert.equal(disconnected[0].lastSeenAt, "2026-06-23T18:52:20Z");
 
 assert.match(getDeviceDisconnectNotice(trustedDevice(false)), /Office PC/);
 assert.match(getDeviceDisconnectNotice(trustedDevice(false)), /已断开连接/);
+assert.match(getDeviceRejectedNotice(trustedDevice(false)), /Office PC/);
+assert.match(getDeviceRejectedNotice(trustedDevice(false)), /已拒绝连接/);
 
 const devicesStore = readFileSync("src/stores/devices.ts", "utf8");
 const appShell = readFileSync("src/components/layout/AppShell.vue", "utf8");
@@ -43,9 +46,14 @@ const appShell = readFileSync("src/components/layout/AppShell.vue", "utf8");
 assert.match(devicesStore, /disconnectNotice/);
 assert.match(devicesStore, /applyDeviceDisconnected/);
 assert.match(devicesStore, /getDeviceDisconnectNotice/);
+assert.match(devicesStore, /getDeviceRejectedNotice/);
 assert.match(
   devicesStore,
   /onAppEvent<DeviceInfo>\("device-disconnected",\s*\(device\) => \{[\s\S]*useStatusStore\(\)\.refresh\(\)/,
+);
+assert.match(
+  devicesStore,
+  /onAppEvent<DeviceInfo>\("device-rejected",\s*\(device\) => \{[\s\S]*getDeviceRejectedNotice\(device\)/,
 );
 assert.match(appShell, /data-device-disconnect-notice/);
 assert.match(appShell, /devicesStore\.disconnectNotice/);

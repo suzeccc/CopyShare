@@ -1,6 +1,6 @@
 [package]
 name = "copyshare"
-version = "2.4.0"
+version = "2.5.0"
 description = "LAN clipboard sharing desktop app"
 authors = ["CopyShare"]
 edition = "2021"
@@ -28,10 +28,11 @@ sha2 = "0.10"
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-autostart = "2"
 tauri-plugin-clipboard-manager = "2"
+tauri-plugin-single-instance = "2"
 thiserror = "1"
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = "0.24"
 tracing = "0.1"
 url = "2"
 uuid = { version = "1", features = ["v4", "serde"] }
-windows = { version = "0.61.3", features = ["ApplicationModel_DataTransfer", "Foundation", "Foundation_Collections", "Win32_System_DataExchange", "Win32_System_Ole", "Win32_UI_Shell"] }
+windows = { version = "0.61.3", features = ["ApplicationModel_DataTransfer", "Foundation", "Foundation_Collections", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_System_Ole", "Win32_UI_Shell"] }

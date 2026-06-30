@@ -17,7 +17,7 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  (event: "restore"): void;
+  (event: "restore", pointer: { clientX: number; clientY: number }): void;
   (event: "hide"): void;
   (event: "close"): void;
 }>();
@@ -32,6 +32,13 @@ const statusClass = computed(() =>
 
 function handleWindowDrag(event: MouseEvent) {
   startWindowDragFromMouseEvent(event, startWindowDrag);
+}
+
+function restoreMainPanel(event: MouseEvent) {
+  emit("restore", {
+    clientX: event.clientX,
+    clientY: event.clientY,
+  });
 }
 </script>
 
@@ -66,7 +73,7 @@ function handleWindowDrag(event: MouseEvent) {
           type="button"
           title="返回主面板"
           data-window-control
-          @click="emit('restore')"
+          @click="restoreMainPanel"
         >
           <LayoutDashboard class="h-3.5 w-3.5" />
           主面板

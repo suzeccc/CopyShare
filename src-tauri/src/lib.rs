@@ -15,6 +15,7 @@ mod sync;
 mod tray;
 
 use state::AppState;
+use tauri::Manager;
 use tauri_plugin_autostart::MacosLauncher;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -22,7 +23,20 @@ pub fn run() {
     let state = AppState::new();
     let state_for_setup = state.clone();
 
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+
+    #[cfg(desktop)]
+    {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+        }));
+    }
+
+    builder
         .manage(state.clone())
         .plugin(tauri_plugin_clipboard_manager::init())
         .setup(move |app| {

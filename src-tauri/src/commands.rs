@@ -112,6 +112,7 @@ pub async fn reject_device(
     device_id: String,
 ) -> AppResult<()> {
     let trust_keys = state.trust_keys_for_device(&device_id).await;
+    sync::notify_peer_rejected(state.inner(), &device_id).await;
     state.remove_peer(&device_id).await;
     state.remove_device(&device_id).await;
 

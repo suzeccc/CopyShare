@@ -7,8 +7,8 @@ export type WindowTransitionPhase =
   | "floating-exit"
   | "main-enter";
 
-export const WINDOW_MODE_EXIT_MS = 120;
-export const WINDOW_MODE_ENTER_MS = 170;
+export const WINDOW_MODE_EXIT_MS = 220;
+export const WINDOW_MODE_ENTER_MS = 220;
 
 export type WindowTransitionPointer = {
   clientX: number;

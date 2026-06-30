@@ -167,7 +167,7 @@ function errorMessage(error: unknown, fallback: string) {
       <div class="min-w-0 flex-1">
         <p class="text-xs font-semibold text-[color:var(--accent-text)]">局域网临时传输</p>
         <h2 class="mt-2 text-2xl font-semibold text-white">手机扫码</h2>
-        <p data-mobile-intro-copy class="mt-2 max-w-xl text-sm leading-6 text-[color:var(--muted-text)]">
+        <p data-mobile-intro-copy class="mt-2 max-w-none whitespace-nowrap text-sm leading-6 text-[color:var(--muted-text)]">
           手机扫码进入同一局域网页，在本次运行期内完成电脑到手机、手机到电脑的临时剪贴板传输。
         </p>
       </div>
@@ -246,7 +246,7 @@ function errorMessage(error: unknown, fallback: string) {
 
             <div
               data-mobile-session-lifetime-notice
-              class="mt-4 grid gap-3 rounded-[22px] border border-[color:var(--main-line-soft)] bg-[color:var(--field-bg)] px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
+              class="mt-4 rounded-[22px] border border-[color:var(--main-line-soft)] bg-[color:var(--field-bg)] px-4 py-3"
             >
               <div class="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2">
                 <span class="text-sm font-semibold text-slate-100">保持到手动结束</span>
@@ -254,9 +254,6 @@ function errorMessage(error: unknown, fallback: string) {
                   关闭 CopyShare 或点击结束会话后，手机页面会停止同步。
                 </span>
               </div>
-              <span class="w-fit rounded-full border border-[color:var(--accent-line)] bg-[color:var(--accent-soft)] px-3 py-1.5 text-xs font-semibold text-[color:var(--accent-text)]">
-                本次运行期有效
-              </span>
             </div>
           </section>
 

@@ -308,7 +308,7 @@ pub async fn connect_to_peer(
         }
     };
     let connection_id = url.clone();
-    state.mark_manual_trust_required(&connection_id).await;
+    state.mark_peer_confirmation_required(&connection_id).await;
     spawn_socket(app.clone(), state.clone(), connection_id.clone(), socket).await?;
 
     if let Some(local_ip) = network::preferred_local_ip_for_peer(network::peer_ip_hint(&ip, port)) {
@@ -350,6 +350,20 @@ pub async fn notify_peer_trusted(state: &AppState, config: &AppConfig, trusted_d
         .await;
 }
 
+pub async fn notify_peer_rejected(state: &AppState, rejected_device_id: &str) {
+    let status = state.status().await;
+    state
+        .send_to_device(
+            rejected_device_id,
+            WireMessage::TrustRejected {
+                source_device_id: status.device_id,
+                source_device_name: status.device_name,
+                port: status.port,
+            },
+        )
+        .await;
+}
+
 async fn spawn_socket<S>(
     app: AppHandle,
     state: AppState,
@@ -361,7 +375,7 @@ where
 {
     let (mut sink, mut stream) = socket.split();
     let (sender, mut receiver) = mpsc::unbounded_channel::<WireMessage>();
-    let hello = build_hello(&state).await;
+    let hello = build_hello(&state, &connection_id).await;
     let connection_id_for_task = connection_id.clone();
     let app_for_task = app.clone();
     let state_for_task = state.clone();
@@ -432,9 +446,14 @@ where
             .forget_peer(&connection_id_for_task)
             .await
             .unwrap_or_else(|| connection_id_for_task.clone());
-        if let Some(device) = state_for_task.mark_device_disconnected(&device_id).await {
-            persist_devices(&app_for_task, &state_for_task).await;
-            let _ = app_for_task.emit("device-disconnected", device);
+        let was_rejected = state_for_task
+            .take_peer_rejected(&connection_id_for_task)
+            .await;
+        if !was_rejected {
+            if let Some(device) = state_for_task.mark_device_disconnected(&device_id).await {
+                persist_devices(&app_for_task, &state_for_task).await;
+                let _ = app_for_task.emit("device-disconnected", device);
+            }
         }
         emit_status(&app_for_task, &state_for_task).await;
     });
@@ -457,6 +476,7 @@ async fn handle_wire_text(app: &AppHandle, state: &AppState, connection_id: &str
             device_id,
             device_name,
             port,
+            manual_trust_required,
             ..
         } => {
             let mut config = state.config().await;
@@ -465,6 +485,9 @@ async fn handle_wire_text(app: &AppHandle, state: &AppState, connection_id: &str
             state
                 .attach_peer_device(connection_id, device_id.clone(), Some(endpoint.clone()))
                 .await;
+            if manual_trust_required {
+                state.mark_manual_trust_required(connection_id).await;
+            }
             let manual_trust_required = state
                 .manual_trust_required_for_peer(connection_id, &device_id, &endpoint)
                 .await;
@@ -525,6 +548,21 @@ async fn handle_wire_text(app: &AppHandle, state: &AppState, connection_id: &str
             {
                 persist_devices(app, state).await;
                 let _ = app.emit("device-connected", device);
+                emit_status(app, state).await;
+            }
+        }
+        WireMessage::TrustRejected {
+            source_device_id,
+            source_device_name,
+            port: _,
+        } => {
+            state.mark_peer_rejected(connection_id).await;
+            if let Some(mut device) = state.mark_device_disconnected(&source_device_id).await {
+                if !source_device_name.trim().is_empty() {
+                    device.name = source_device_name;
+                }
+                persist_devices(app, state).await;
+                let _ = app.emit("device-rejected", device);
                 emit_status(app, state).await;
             }
         }
@@ -759,13 +797,16 @@ async fn apply_peer_trust_grant(
         .await
 }
 
-async fn build_hello(state: &AppState) -> WireMessage {
+async fn build_hello(state: &AppState, connection_id: &str) -> WireMessage {
     let status = state.status().await;
     WireMessage::Hello {
         device_id: status.device_id,
         device_name: status.device_name,
         app_version: env!("CARGO_PKG_VERSION").to_string(),
         port: status.port,
+        manual_trust_required: state
+            .take_peer_confirmation_required(connection_id)
+            .await,
     }
 }
 
@@ -960,6 +1001,23 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn manual_reconnect_hello_requests_peer_confirmation() {
+        let state = AppState::new();
+        state
+            .mark_peer_confirmation_required("ws://10.194.33.156:8765/")
+            .await;
+
+        let WireMessage::Hello {
+            manual_trust_required,
+            ..
+        } = build_hello(&state, "ws://10.194.33.156:8765/").await else {
+            panic!("build_hello should produce a Hello message");
+        };
+
+        assert!(manual_trust_required);
+    }
+
+    #[tokio::test]
     async fn websocket_connection_carries_clipboard_updates_both_directions() {
         let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
         let address = listener.local_addr().unwrap();
@@ -976,6 +1034,7 @@ mod tests {
                     device_name: "Laptop A".to_string(),
                     app_version: "test".to_string(),
                     port: 8765,
+                    manual_trust_required: false,
                 }
             );
             send_wire_message(
@@ -985,6 +1044,7 @@ mod tests {
                     device_name: "Laptop B".to_string(),
                     app_version: "test".to_string(),
                     port: 8766,
+                    manual_trust_required: false,
                 },
             )
             .await;
@@ -1010,6 +1070,7 @@ mod tests {
                 device_name: "Laptop A".to_string(),
                 app_version: "test".to_string(),
                 port: 8765,
+                manual_trust_required: false,
             },
         )
         .await;
@@ -1022,6 +1083,7 @@ mod tests {
                 device_name: "Laptop B".to_string(),
                 app_version: "test".to_string(),
                 port: 8766,
+                manual_trust_required: false,
             }
         );
 
@@ -1064,6 +1126,7 @@ mod tests {
                     device_name: "Laptop B".to_string(),
                     app_version: "test".to_string(),
                     port: 8765,
+                    manual_trust_required: false,
                 },
             )
             .await;
@@ -1094,6 +1157,7 @@ mod tests {
                 device_name: "Laptop A".to_string(),
                 app_version: "test".to_string(),
                 port: 8766,
+                manual_trust_required: false,
             },
         )
         .await;
@@ -1238,6 +1302,44 @@ mod tests {
             trusted_device_ids.contains(&"device-b".to_string()),
             "receiver must see its stable device id in trust aliases"
         );
+    }
+
+    #[tokio::test]
+    async fn manual_reject_notifies_connected_peer_that_it_was_rejected() {
+        let state = AppState::new();
+        let mut config = crate::models::AppConfig::default();
+        config.device_id = "device-a".to_string();
+        config.device_name = "Laptop A".to_string();
+        config.port = 8766;
+        state.set_config(config.clone()).await;
+
+        let (sender, mut outbound) = mpsc::unbounded_channel();
+        let join = tauri::async_runtime::spawn(async {
+            futures_util::future::pending::<()>().await;
+        });
+        state
+            .register_peer("10.194.33.156:51051".to_string(), sender, join)
+            .await;
+        state
+            .attach_peer_device(
+                "10.194.33.156:51051",
+                "device-b".to_string(),
+                Some("ws://10.194.33.156:8765/".to_string()),
+            )
+            .await;
+
+        notify_peer_rejected(&state, "device-b").await;
+
+        let WireMessage::TrustRejected {
+            source_device_id,
+            source_device_name,
+            port,
+        } = outbound.try_recv().unwrap() else {
+            panic!("manual reject should send a trust rejection");
+        };
+        assert_eq!(source_device_id, "device-a");
+        assert_eq!(source_device_name, "Laptop A");
+        assert_eq!(port, 8766);
     }
 
     #[tokio::test]

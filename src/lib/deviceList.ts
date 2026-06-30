@@ -124,6 +124,11 @@ export function getDeviceDisconnectNotice(device: DeviceInfo): string {
   return `${deviceName} 已断开连接，状态已更新为离线`;
 }
 
+export function getDeviceRejectedNotice(device: DeviceInfo): string {
+  const deviceName = device.name.trim() || device.ip;
+  return `${deviceName} 已拒绝连接`;
+}
+
 export function removeDeviceByKey(
   devices: DeviceInfo[],
   deviceKey: string,

@@ -151,7 +151,7 @@ async function checkForUpdate() {
               查看最新版本
             </Button>
           </div>
-          <p data-github-star-hint class="max-w-sm text-right text-xs leading-5 text-[color:var(--muted-text)]">
+          <p data-github-star-hint class="max-w-md text-right text-sm leading-6 text-[color:var(--muted-text)]">
             如果这个项目帮到了你，欢迎在 GitHub 仓库点一颗 Star。
           </p>
         </div>

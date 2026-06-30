@@ -80,9 +80,9 @@ const status = computed(() => {
     return {
       label: "已连接",
       detail: "双方设备已互相信任，剪贴板状态会实时更新。",
-      badgeClass: "border-emerald-400/45 bg-emerald-400/10 text-emerald-100",
-      dotClass: "bg-emerald-300 shadow-[0_0_14px_rgba(110,231,183,0.65)]",
-      cardClass: "border-emerald-400/30 bg-[rgba(20,54,72,0.58)]",
+      badgeClass: "border-white/15 bg-white/[0.07] text-slate-100",
+      dotClass: "bg-[#8fd6a8] shadow-[0_0_10px_rgba(143,214,168,0.34)]",
+      cardClass: "border-[color:var(--main-line-soft)] bg-[#2a2a2a] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]",
     };
   }
 
@@ -93,6 +93,13 @@ const status = computed(() => {
     dotClass: "bg-[color:var(--theme-accent)] shadow-[0_0_14px_var(--accent-glow)]",
     cardClass: "border-[color:var(--accent-line)] bg-[color:var(--panel-bg-soft)]",
   };
+});
+
+const showActionButtons = computed(() => {
+  if (!props.showActions) return false;
+  if (props.mode === "pending") return true;
+  if (props.mode === "connected") return true;
+  return props.mode === "status" && !props.device.connected;
 });
 </script>
 
@@ -122,7 +129,7 @@ const status = computed(() => {
       <p>最后在线：{{ formatTime(device.lastSeenAt) }}</p>
     </div>
 
-    <div v-if="showActions" class="mt-4 flex flex-wrap gap-2">
+    <div v-if="showActionButtons" class="mt-4 flex flex-wrap gap-2">
       <template v-if="mode === 'pending'">
         <Button size="sm" variant="secondary" @click="$emit('trust', device.id)">
           <ShieldQuestion class="h-4 w-4" />
@@ -137,7 +144,7 @@ const status = computed(() => {
         <RefreshCw class="h-4 w-4" />
         重新连接
       </Button>
-      <Button v-else size="sm" variant="ghost" @click="$emit('disconnect', device.id)">
+      <Button v-else-if="mode === 'connected'" size="sm" variant="ghost" @click="$emit('disconnect', device.id)">
         <Unplug class="h-4 w-4" />
         断开
       </Button>

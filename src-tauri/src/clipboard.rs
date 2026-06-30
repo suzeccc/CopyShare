@@ -25,6 +25,10 @@ pub fn read_clipboard_image_base64(app: &AppHandle) -> AppResult<Option<String>>
         return image_to_png_base64(&image).map(Some);
     }
 
+    if let Ok(Some(image)) = read_clipboard_dib_base64() {
+        return Ok(Some(image));
+    }
+
     match read_clipboard_image_file_base64() {
         Ok(image) => Ok(image),
         Err(_) => Ok(None),
@@ -71,6 +75,89 @@ pub fn image_file_to_png_base64(path: &Path) -> AppResult<String> {
     image_to_png_base64(&Image::new_owned(image.into_raw(), width, height))
 }
 
+fn dib_to_png_base64(dib: &[u8]) -> AppResult<String> {
+    let pixel_offset = dib_pixel_offset(dib)?;
+    let file_size = 14usize
+        .checked_add(dib.len())
+        .ok_or_else(|| AppError::Clipboard("DIB image is too large".to_string()))?;
+    if file_size > u32::MAX as usize || pixel_offset > u32::MAX as usize {
+        return Err(AppError::Clipboard("DIB image is too large".to_string()));
+    }
+
+    let mut bmp = Vec::with_capacity(file_size);
+    bmp.extend_from_slice(b"BM");
+    bmp.extend_from_slice(&(file_size as u32).to_le_bytes());
+    bmp.extend_from_slice(&0u16.to_le_bytes());
+    bmp.extend_from_slice(&0u16.to_le_bytes());
+    bmp.extend_from_slice(&(pixel_offset as u32).to_le_bytes());
+    bmp.extend_from_slice(dib);
+
+    let image = image::load_from_memory(&bmp)
+        .map_err(|error| AppError::Clipboard(error.to_string()))?
+        .to_rgba8();
+    let (width, height) = image.dimensions();
+    image_to_png_base64(&Image::new_owned(image.into_raw(), width, height))
+}
+
+fn dib_pixel_offset(dib: &[u8]) -> AppResult<usize> {
+    let header_size = read_dib_u32(dib, 0)? as usize;
+    if header_size < 12 || dib.len() < header_size {
+        return Err(AppError::Clipboard("Invalid DIB header".to_string()));
+    }
+
+    let (bit_count, compression, colors_used, palette_entry_size) = if header_size == 12 {
+        (read_dib_u16(dib, 10)?, 0, 0, 3usize)
+    } else {
+        (
+            read_dib_u16(dib, 14)?,
+            read_dib_u32(dib, 16)?,
+            read_dib_u32(dib, 32)?,
+            4usize,
+        )
+    };
+
+    let color_count = if bit_count <= 8 {
+        if colors_used > 0 {
+            colors_used as usize
+        } else {
+            1usize << bit_count
+        }
+    } else {
+        0
+    };
+    let mask_bytes = if header_size == 40 && compression == 3 {
+        12
+    } else if header_size == 40 && compression == 6 {
+        16
+    } else {
+        0
+    };
+    let dib_offset = header_size
+        .checked_add(mask_bytes)
+        .and_then(|offset| offset.checked_add(color_count.checked_mul(palette_entry_size)?))
+        .ok_or_else(|| AppError::Clipboard("Invalid DIB pixel offset".to_string()))?;
+
+    if dib_offset > dib.len() {
+        return Err(AppError::Clipboard("Invalid DIB pixel offset".to_string()));
+    }
+
+    Ok(14 + dib_offset)
+}
+
+fn read_dib_u16(dib: &[u8], offset: usize) -> AppResult<u16> {
+    let bytes = dib
+        .get(offset..offset + 2)
+        .ok_or_else(|| AppError::Clipboard("Invalid DIB header".to_string()))?;
+    Ok(u16::from_le_bytes([bytes[0], bytes[1]]))
+}
+
+fn read_dib_u32(dib: &[u8], offset: usize) -> AppResult<u32> {
+    let bytes = dib
+        .get(offset..offset + 4)
+        .ok_or_else(|| AppError::Clipboard("Invalid DIB header".to_string()))?;
+    Ok(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+}
+
 fn image_file_path_to_png_base64(path: &Path) -> AppResult<Option<String>> {
     if !is_supported_image_file(path) {
         return Ok(None);
@@ -99,6 +186,61 @@ fn read_clipboard_image_file_base64() -> AppResult<Option<String>> {
         }
     }
 
+    Ok(None)
+}
+
+#[cfg(target_os = "windows")]
+fn read_clipboard_dib_base64() -> AppResult<Option<String>> {
+    use windows::Win32::{
+        Foundation::HGLOBAL,
+        System::{
+            DataExchange::{
+                CloseClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
+            },
+            Memory::{GlobalLock, GlobalSize, GlobalUnlock},
+        },
+    };
+
+    const CF_DIB: u32 = 8;
+    const CF_DIBV5: u32 = 17;
+
+    let Some(format) = [CF_DIBV5, CF_DIB]
+        .into_iter()
+        .find(|format| unsafe { IsClipboardFormatAvailable(*format) }.is_ok())
+    else {
+        return Ok(None);
+    };
+
+    struct ClipboardGuard;
+
+    impl Drop for ClipboardGuard {
+        fn drop(&mut self) {
+            let _ = unsafe { CloseClipboard() };
+        }
+    }
+
+    unsafe { OpenClipboard(None) }.map_err(|error| AppError::Clipboard(error.to_string()))?;
+    let _guard = ClipboardGuard;
+    let handle = unsafe { GetClipboardData(format) }
+        .map_err(|error| AppError::Clipboard(error.to_string()))?;
+    let global = HGLOBAL(handle.0);
+    let size = unsafe { GlobalSize(global) };
+    if size == 0 {
+        return Ok(None);
+    }
+
+    let ptr = unsafe { GlobalLock(global) };
+    if ptr.is_null() {
+        return Ok(None);
+    }
+
+    let bytes = unsafe { std::slice::from_raw_parts(ptr as *const u8, size) }.to_vec();
+    let _ = unsafe { GlobalUnlock(global) };
+    dib_to_png_base64(&bytes).map(Some)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn read_clipboard_dib_base64() -> AppResult<Option<String>> {
     Ok(None)
 }
 
@@ -292,6 +434,39 @@ mod tests {
             image_file_path_to_png_base64(&path)
                 .expect("unsupported extension should not be an error")
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn windows_dib_payload_encodes_as_png_base64() {
+        let mut dib = Vec::new();
+        dib.extend_from_slice(&40u32.to_le_bytes());
+        dib.extend_from_slice(&2i32.to_le_bytes());
+        dib.extend_from_slice(&(-2i32).to_le_bytes());
+        dib.extend_from_slice(&1u16.to_le_bytes());
+        dib.extend_from_slice(&32u16.to_le_bytes());
+        dib.extend_from_slice(&0u32.to_le_bytes());
+        dib.extend_from_slice(&16u32.to_le_bytes());
+        dib.extend_from_slice(&0i32.to_le_bytes());
+        dib.extend_from_slice(&0i32.to_le_bytes());
+        dib.extend_from_slice(&0u32.to_le_bytes());
+        dib.extend_from_slice(&0u32.to_le_bytes());
+        dib.extend_from_slice(&[0, 0, 255, 255]);
+        dib.extend_from_slice(&[0, 255, 0, 255]);
+        dib.extend_from_slice(&[255, 0, 0, 255]);
+        dib.extend_from_slice(&[255, 255, 255, 255]);
+
+        let encoded =
+            dib_to_png_base64(&dib).expect("Windows DIB payload should encode to PNG base64");
+        let decoded = png_base64_to_image(&encoded).expect("encoded DIB image should decode");
+
+        assert_eq!(decoded.width(), 2);
+        assert_eq!(decoded.height(), 2);
+        assert_eq!(
+            decoded.rgba(),
+            &[
+                255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255,
+            ]
         );
     }
 }

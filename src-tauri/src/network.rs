@@ -366,4 +366,34 @@ mod tests {
 
         assert_eq!(ClipboardMessage::try_from(decoded).unwrap(), message);
     }
+
+    #[test]
+    fn trust_rejected_message_round_trips_as_wire_json() {
+        let message = WireMessage::TrustRejected {
+            source_device_id: "device-a".to_string(),
+            source_device_name: "Laptop A".to_string(),
+            port: 8765,
+        };
+
+        let encoded = encode_wire_message(&message).unwrap();
+        assert!(encoded.contains("\"type\":\"trustRejected\""));
+        assert_eq!(decode_wire_message(&encoded).unwrap(), message);
+    }
+
+    #[test]
+    fn legacy_hello_without_manual_trust_flag_defaults_to_false() {
+        let decoded = decode_wire_message(
+            r#"{"type":"hello","device_id":"device-a","device_name":"Laptop A","app_version":"2.4.0","port":8765}"#,
+        )
+        .unwrap();
+
+        let WireMessage::Hello {
+            manual_trust_required,
+            ..
+        } = decoded else {
+            panic!("legacy hello json should decode as Hello");
+        };
+
+        assert!(!manual_trust_required);
+    }
 }

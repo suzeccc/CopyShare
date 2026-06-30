@@ -9,10 +9,10 @@ import {
 
 import {
   FLOATING_WINDOW_BOUNDS,
-  MAIN_WINDOW_BACKGROUND,
   MAIN_WINDOW_BOUNDS,
   TRANSPARENT_WINDOW_BACKGROUND,
   getFloatingWindowTopRightPosition,
+  getMainWindowCenteredPosition,
 } from "@/lib/windowMode";
 import type { AppConfig } from "@/types/config";
 import type { DeviceInfo } from "@/types/device";
@@ -25,6 +25,7 @@ export type AppEventName =
   | "device-discovered"
   | "device-connected"
   | "device-disconnected"
+  | "device-rejected"
   | "clipboard-synced"
   | "sync-error"
   | "config-updated";
@@ -150,6 +151,27 @@ async function moveFloatingWindowToTopRight(
   }
 }
 
+async function moveMainWindowToCenter(
+  window: ReturnType<typeof getCurrentWindow>,
+): Promise<void> {
+  try {
+    const monitor = await currentMonitor();
+    if (!monitor) {
+      return;
+    }
+
+    const position = getMainWindowCenteredPosition({
+      position: monitor.workArea.position,
+      size: monitor.workArea.size,
+      scaleFactor: monitor.scaleFactor,
+    });
+
+    await window.setPosition(new PhysicalPosition(position.x, position.y));
+  } catch (error) {
+    console.warn("Unable to move main window to center", error);
+  }
+}
+
 export async function enterFloatingWindow(): Promise<void> {
   const window = getCurrentWindow();
   const size = new LogicalSize(
@@ -171,17 +193,17 @@ export async function enterFloatingWindow(): Promise<void> {
 export async function restoreMainWindow(): Promise<void> {
   const window = getCurrentWindow();
 
+  await window.setBackgroundColor(TRANSPARENT_WINDOW_BACKGROUND);
   await window.setMaxSize(null);
   await window.setMinSize(
     new LogicalSize(MAIN_WINDOW_BOUNDS.minWidth, MAIN_WINDOW_BOUNDS.minHeight),
   );
   await window.setResizable(true);
   await window.setAlwaysOnTop(false);
+  await moveMainWindowToCenter(window);
   await window.setSize(
     new LogicalSize(MAIN_WINDOW_BOUNDS.width, MAIN_WINDOW_BOUNDS.height),
   );
-  await window.center();
-  await window.setBackgroundColor(MAIN_WINDOW_BACKGROUND);
   await window.setFocus();
 }
 

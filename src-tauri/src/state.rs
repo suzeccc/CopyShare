@@ -38,6 +38,8 @@ struct AppStateInner {
     pending_peer_identities: Mutex<HashMap<String, PendingPeerIdentity>>,
     ignored_peer_connections: Mutex<HashSet<String>>,
     manual_trust_required: Mutex<HashSet<String>>,
+    peer_confirmation_requests: Mutex<HashSet<String>>,
+    rejected_peer_connections: Mutex<HashSet<String>>,
 }
 
 struct RuntimeHandle {
@@ -85,6 +87,8 @@ impl AppState {
                 pending_peer_identities: Mutex::new(HashMap::new()),
                 ignored_peer_connections: Mutex::new(HashSet::new()),
                 manual_trust_required: Mutex::new(HashSet::new()),
+                peer_confirmation_requests: Mutex::new(HashSet::new()),
+                rejected_peer_connections: Mutex::new(HashSet::new()),
             }),
         }
     }
@@ -358,6 +362,22 @@ impl AppState {
             Some(device_id),
             Some(endpoint),
         )
+    }
+
+    pub async fn mark_peer_confirmation_required(&self, connection_id: &str) {
+        self.inner
+            .peer_confirmation_requests
+            .lock()
+            .await
+            .insert(connection_id.to_string());
+    }
+
+    pub async fn take_peer_confirmation_required(&self, connection_id: &str) -> bool {
+        self.inner
+            .peer_confirmation_requests
+            .lock()
+            .await
+            .remove(connection_id)
     }
 
     pub async fn remove_device(&self, device_id: &str) -> Option<DeviceInfo> {
@@ -641,18 +661,54 @@ impl AppState {
         sent_count
     }
 
+    pub async fn send_to_device(&self, device_id: &str, message: WireMessage) -> bool {
+        let peers = self.inner.peers.lock().await;
+        peers
+            .iter()
+            .find(|(connection_id, peer)| {
+                connection_id.as_str() == device_id || peer_matches_key(peer, device_id)
+            })
+            .map(|(_, peer)| peer.sender.send(message).is_ok())
+            .unwrap_or(false)
+    }
+
+    pub async fn mark_peer_rejected(&self, connection_id: &str) {
+        self.inner
+            .rejected_peer_connections
+            .lock()
+            .await
+            .insert(connection_id.to_string());
+    }
+
+    pub async fn take_peer_rejected(&self, connection_id: &str) -> bool {
+        self.inner
+            .rejected_peer_connections
+            .lock()
+            .await
+            .remove(connection_id)
+    }
+
     pub async fn clipboard_sender_is_trusted(
         &self,
         config: &AppConfig,
         connection_id: &str,
         source_device_id: &str,
     ) -> bool {
+        let peers = self.inner.peers.lock().await;
+        let manual_trust_required = self.inner.manual_trust_required.lock().await;
+        if manual_trust_required_matches_peer(
+            &manual_trust_required,
+            connection_id,
+            Some(source_device_id),
+            peers.get(connection_id).and_then(|peer| peer.endpoint.as_deref()),
+        ) {
+            return false;
+        }
+
         if security::is_device_id_trusted(config, source_device_id) {
             return true;
         }
 
-        let peers = self.inner.peers.lock().await;
-        let manual_trust_required = self.inner.manual_trust_required.lock().await;
         peers
             .get(connection_id)
             .map(|peer| peer_is_trusted(config, connection_id, peer, &manual_trust_required))
@@ -1633,6 +1689,73 @@ mod trusted_broadcast_tests {
         state.clear_manual_trust_required("device-remote").await;
 
         assert!(state.has_trusted_peers(&config).await);
+    }
+
+    #[tokio::test]
+    async fn manual_confirmation_blocks_clipboard_sender_even_for_trusted_device_id() {
+        let state = AppState::new();
+        let mut config = AppConfig::default();
+        config.trusted_devices.push("device-remote".to_string());
+        let (sender, _receiver) = mpsc::unbounded_channel();
+        let join = tauri::async_runtime::spawn(async {
+            futures_util::future::pending::<()>().await;
+        });
+
+        state
+            .mark_manual_trust_required("ws://10.194.33.156:8765/")
+            .await;
+        state
+            .register_peer("ws://10.194.33.156:8765/".to_string(), sender, join)
+            .await;
+        state
+            .attach_peer_device(
+                "ws://10.194.33.156:8765/",
+                "device-remote".to_string(),
+                Some("ws://10.194.33.156:8765/".to_string()),
+            )
+            .await;
+
+        assert!(!state
+            .clipboard_sender_is_trusted(
+                &config,
+                "ws://10.194.33.156:8765/",
+                "device-remote",
+            )
+            .await);
+    }
+
+    #[tokio::test]
+    async fn outgoing_manual_reconnect_request_does_not_block_local_trust() {
+        let state = AppState::new();
+        let mut config = AppConfig::default();
+        config.trusted_devices.push("device-remote".to_string());
+        let (sender, _receiver) = mpsc::unbounded_channel();
+        let join = tauri::async_runtime::spawn(async {
+            futures_util::future::pending::<()>().await;
+        });
+
+        state
+            .mark_peer_confirmation_required("ws://10.194.33.156:8765/")
+            .await;
+        state
+            .register_peer("ws://10.194.33.156:8765/".to_string(), sender, join)
+            .await;
+        state
+            .attach_peer_device(
+                "ws://10.194.33.156:8765/",
+                "device-remote".to_string(),
+                Some("ws://10.194.33.156:8765/".to_string()),
+            )
+            .await;
+
+        assert!(state.has_trusted_peers(&config).await);
+        assert!(state
+            .clipboard_sender_is_trusted(
+                &config,
+                "ws://10.194.33.156:8765/",
+                "device-remote",
+            )
+            .await);
     }
 
     #[tokio::test]

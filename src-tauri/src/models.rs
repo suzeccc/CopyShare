@@ -235,12 +235,19 @@ pub enum WireMessage {
         device_name: String,
         app_version: String,
         port: u16,
+        #[serde(default)]
+        manual_trust_required: bool,
     },
     TrustGranted {
         source_device_id: String,
         source_device_name: String,
         port: u16,
         trusted_device_ids: Vec<String>,
+    },
+    TrustRejected {
+        source_device_id: String,
+        source_device_name: String,
+        port: u16,
     },
     Clipboard {
         message_id: String,

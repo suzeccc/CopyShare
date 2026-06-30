@@ -44,6 +44,19 @@ export function getFloatingWindowTopRightPosition(area: WindowPositionArea): {
   };
 }
 
+export function getMainWindowCenteredPosition(area: WindowPositionArea): {
+  x: number;
+  y: number;
+} {
+  const width = MAIN_WINDOW_BOUNDS.width * area.scaleFactor;
+  const height = MAIN_WINDOW_BOUNDS.height * area.scaleFactor;
+
+  return {
+    x: Math.round(area.position.x + (area.size.width - width) / 2),
+    y: Math.round(area.position.y + (area.size.height - height) / 2),
+  };
+}
+
 export function getClipboardPreview(summary: string | null | undefined): string {
   const preview = summary?.trim();
   return preview ? preview : "暂无剪贴板内容";

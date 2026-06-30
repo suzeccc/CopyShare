@@ -17,6 +17,7 @@ import {
   applyDeviceDisconnected,
   connectedTrustedDevices,
   getDeviceDisconnectNotice,
+  getDeviceRejectedNotice,
   historicalDevices,
   markDeviceDisconnected,
   markDeviceTrusted,
@@ -115,6 +116,11 @@ export const useDevicesStore = defineStore("devices", {
         onAppEvent<DeviceInfo>("device-disconnected", (device) => {
           this.devices = applyDeviceDisconnected(this.devices, device);
           this.disconnectNotice = getDeviceDisconnectNotice(device);
+          void useStatusStore().refresh();
+        }),
+        onAppEvent<DeviceInfo>("device-rejected", (device) => {
+          this.devices = applyDeviceDisconnected(this.devices, device);
+          this.disconnectNotice = getDeviceRejectedNotice(device);
           void useStatusStore().refresh();
         }),
       ]);

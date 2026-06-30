@@ -178,8 +178,8 @@ async function switchToFloatingMode(pointer: WindowTransitionPointer) {
   await switchWindowMode("floating", enterFloatingWindow, pointer);
 }
 
-async function switchToMainMode() {
-  await switchWindowMode("main", restoreMainWindow);
+async function switchToMainMode(pointer: WindowTransitionPointer) {
+  await switchWindowMode("main", restoreMainWindow, pointer);
 }
 
 async function trustPromptDeviceNow() {
@@ -212,36 +212,34 @@ async function rejectPromptDevice() {
       isSwitchingWindowMode ? 'pointer-events-none' : '',
     ]"
   >
-    <Transition name="window-panel" mode="out-in">
-      <FloatingPanel
-        v-if="isFloating"
-        :status-label="statusStore.statusLabel"
-        :running="statusStore.status.running"
-        :connected-count="statusStore.status.connectedCount"
-        :latency-label="latencyLabel"
-        :clipboard-items="clipboardItems"
-        :clipboard-history-items="clipboardHistoryItems"
-        @restore="switchToMainMode"
-        @hide="hideMainWindow"
-        @close="hideMainWindow"
-      />
+    <FloatingPanel
+      v-if="isFloating"
+      :status-label="statusStore.statusLabel"
+      :running="statusStore.status.running"
+      :connected-count="statusStore.status.connectedCount"
+      :latency-label="latencyLabel"
+      :clipboard-items="clipboardItems"
+      :clipboard-history-items="clipboardHistoryItems"
+      @restore="switchToMainMode"
+      @hide="hideMainWindow"
+      @close="hideMainWindow"
+    />
 
-      <div v-else class="main-window-content flex min-h-0 flex-1 flex-col overflow-hidden">
-        <WindowTitleBar />
-        <div class="flex min-h-0 flex-1 overflow-hidden">
-          <Sidebar />
-          <main class="flex min-w-0 flex-1 flex-col">
-            <TitleBar
-              :switching-window-mode="isSwitchingWindowMode"
-              @switch-floating="switchToFloatingMode"
-            />
-            <div class="min-h-0 flex-1 overflow-auto px-6 pb-6 pt-1.5">
-              <RouterView />
-            </div>
-          </main>
-        </div>
+    <div v-else class="main-window-content flex min-h-0 flex-1 flex-col overflow-hidden">
+      <WindowTitleBar />
+      <div class="flex min-h-0 flex-1 overflow-hidden">
+        <Sidebar />
+        <main class="flex min-w-0 flex-1 flex-col">
+          <TitleBar
+            :switching-window-mode="isSwitchingWindowMode"
+            @switch-floating="switchToFloatingMode"
+          />
+          <div class="min-h-0 flex-1 overflow-auto px-6 pb-6 pt-1.5">
+            <RouterView />
+          </div>
+        </main>
       </div>
-    </Transition>
+    </div>
 
     <Transition name="trust-prompt">
       <div

@@ -18,4 +18,8 @@ assert.match(deviceCard, /等待对方信任/);
 assert.match(deviceCard, /对方已信任，等待本机确认/);
 assert.match(deviceCard, /v-if="mode === 'pending'"/);
 assert.match(deviceCard, /v-else-if="mode === 'status' && !device\.connected"/);
+assert.match(deviceCard, /const showActionButtons = computed/);
+assert.match(deviceCard, /v-if="showActionButtons"/);
+assert.match(deviceCard, /v-else-if="mode === 'connected'"/);
+assert.doesNotMatch(deviceCard, /<Button v-else size="sm" variant="ghost" @click="\$emit\('disconnect', device\.id\)"/);
 assert.match(deviceCard, /重新连接/);
