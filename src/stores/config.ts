@@ -4,7 +4,7 @@ import { getConfig, onAppEvent, updateConfig } from "@/lib/tauri";
 import type { AppConfig } from "@/types/config";
 
 const defaultConfig: AppConfig = {
-  configVersion: 1,
+  configVersion: 3,
   deviceName: "CopyShare",
   deviceId: "",
   theme: "win11Dark",
@@ -17,6 +17,14 @@ const defaultConfig: AppConfig = {
   syncText: true,
   syncImage: true,
   syncFiles: false,
+  discoveryScanRanges: [],
+  desktopNotifications: true,
+  notifyClipboard: true,
+  notifyTrustRequired: true,
+  notifyFileTransfer: true,
+  notifyDeviceStatus: true,
+  notifySyncError: true,
+  notificationClipboardPreview: true,
 };
 
 export const useConfigStore = defineStore("config", {

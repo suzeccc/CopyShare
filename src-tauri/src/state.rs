@@ -215,6 +215,7 @@ impl AppState {
             connected: true,
             trusted: false,
             remote_trusted: false,
+            has_connected_before: false,
             last_seen_at: None,
             status: DeviceStatus::Online,
         };
@@ -271,6 +272,36 @@ impl AppState {
         let device_id = device_id_for_key(&devices, device_id, default_port)?;
         let device = devices.get_mut(&device_id)?;
         device.trusted = true;
+        if device.remote_trusted {
+            device.has_connected_before = true;
+        }
+        device.last_seen_at = Some(Utc::now());
+        Some(device.clone())
+    }
+
+    pub async fn mark_device_rejected(&self, device_id: &str) -> Option<DeviceInfo> {
+        let default_port = self.config().await.port;
+        let should_keep_history = {
+            let devices = self.inner.devices.read().await;
+            let device_id = device_id_for_key(&devices, device_id, default_port)?;
+            devices
+                .get(&device_id)
+                .map(has_successful_connection)
+                .unwrap_or(false)
+        };
+
+        if !should_keep_history {
+            return self.remove_device(device_id).await;
+        }
+
+        let mut devices = self.inner.devices.write().await;
+        let device_id = device_id_for_key(&devices, device_id, default_port)?;
+        let device = devices.get_mut(&device_id)?;
+        device.connected = false;
+        device.trusted = false;
+        device.remote_trusted = false;
+        device.has_connected_before = true;
+        device.status = DeviceStatus::Offline;
         device.last_seen_at = Some(Utc::now());
         Some(device.clone())
     }
@@ -301,9 +332,14 @@ impl AppState {
                 .and_then(|key| device_id_for_key(&devices, key, default_port))
         })?;
         let device = devices.get_mut(&device_id)?;
+        let should_report_update =
+            !device.remote_trusted || (device.trusted && !device.has_connected_before);
         device.remote_trusted = true;
+        if device.trusted {
+            device.has_connected_before = true;
+        }
         device.last_seen_at = Some(Utc::now());
-        Some(device.clone())
+        should_report_update.then(|| device.clone())
     }
 
     pub async fn mark_manual_trust_required(&self, connection_id: &str) {
@@ -672,6 +708,34 @@ impl AppState {
             .unwrap_or(false)
     }
 
+    pub async fn send_trusted_to_device(
+        &self,
+        config: &AppConfig,
+        device_id: &str,
+        message: WireMessage,
+    ) -> bool {
+        let peers = self.inner.peers.lock().await;
+        let manual_trust_required = self.inner.manual_trust_required.lock().await;
+        peers
+            .iter()
+            .find(|(connection_id, peer)| {
+                (connection_id.as_str() == device_id || peer_matches_key(peer, device_id))
+                    && peer_is_trusted(config, connection_id, peer, &manual_trust_required)
+            })
+            .map(|(_, peer)| peer.sender.send(message).is_ok())
+            .unwrap_or(false)
+    }
+
+    pub async fn peer_remote_trusted(&self, connection_id: &str, device_id: &str) -> bool {
+        self.inner
+            .peers
+            .lock()
+            .await
+            .get(connection_id)
+            .map(|peer| peer.device_id.as_deref() == Some(device_id) && peer.remote_trusted)
+            .unwrap_or(false)
+    }
+
     pub async fn mark_peer_rejected(&self, connection_id: &str) {
         self.inner
             .rejected_peer_connections
@@ -956,6 +1020,7 @@ fn device_candidate_from_key(key: &str, default_port: u16) -> Option<DeviceInfo>
         connected: true,
         trusted: false,
         remote_trusted: false,
+        has_connected_before: false,
         last_seen_at: None,
         status: DeviceStatus::Online,
     })
@@ -963,25 +1028,42 @@ fn device_candidate_from_key(key: &str, default_port: u16) -> Option<DeviceInfo>
 
 fn merge_device(existing: DeviceInfo, incoming: DeviceInfo) -> DeviceInfo {
     if existing.connected && existing.trusted && !incoming.trusted {
+        let has_connected_before = existing.has_connected_before
+            || incoming.has_connected_before
+            || has_successful_connection(&existing);
         return DeviceInfo {
             connected: true,
+            has_connected_before,
             last_seen_at: incoming.last_seen_at.or(existing.last_seen_at),
             status: DeviceStatus::Online,
             ..existing
         };
     }
 
+    let trusted = incoming.trusted || (existing.connected && existing.trusted);
+    let remote_trusted = incoming.remote_trusted || (existing.connected && existing.remote_trusted);
+    let connected = incoming.connected || existing.connected;
+    let has_connected_before =
+        has_successful_connection(&existing)
+            || has_successful_connection(&incoming)
+            || (connected && trusted && remote_trusted);
+
     DeviceInfo {
-        trusted: incoming.trusted || (existing.connected && existing.trusted),
-        remote_trusted: incoming.remote_trusted || (existing.connected && existing.remote_trusted),
-        connected: incoming.connected || existing.connected,
-        status: if incoming.connected || existing.connected {
+        trusted,
+        remote_trusted,
+        has_connected_before,
+        connected,
+        status: if connected {
             DeviceStatus::Online
         } else {
             incoming.status
         },
         ..incoming
     }
+}
+
+fn has_successful_connection(device: &DeviceInfo) -> bool {
+    device.has_connected_before || (device.trusted && device.remote_trusted)
 }
 
 #[cfg(test)]
@@ -1079,6 +1161,7 @@ mod runtime_tests {
                 connected: true,
                 trusted: true,
                 remote_trusted: true,
+                has_connected_before: false,
                 last_seen_at: Some(Utc::now()),
                 status: DeviceStatus::Online,
             })
@@ -1122,6 +1205,7 @@ mod runtime_tests {
                 connected: true,
                 trusted: true,
                 remote_trusted: true,
+                has_connected_before: false,
                 last_seen_at: Some(Utc::now()),
                 status: DeviceStatus::Online,
             })
@@ -1288,6 +1372,7 @@ mod status_diagnostics_tests {
                 connected: true,
                 trusted: true,
                 remote_trusted: false,
+                has_connected_before: false,
                 last_seen_at: Some(Utc::now()),
                 status: DeviceStatus::Online,
             })
@@ -1297,8 +1382,17 @@ mod status_diagnostics_tests {
             .mark_peer_remote_trusted("10.0.0.2:51234", "device-b")
             .await
             .expect("attached peer should be marked remote trusted");
+        assert!(
+            state
+                .mark_peer_remote_trusted("10.0.0.2:51234", "device-b")
+                .await
+                .is_none(),
+            "duplicate trust grants should not report a second connection update"
+        );
+        let devices = state.devices().await;
         let status = state.status().await;
 
+        assert!(devices[0].has_connected_before);
         assert_eq!(status.connected_count, 1);
         assert_eq!(status.message.as_deref(), Some("已连接，双方设备已互相信任"));
     }
@@ -1329,6 +1423,7 @@ mod device_dedup_tests {
             connected,
             trusted: false,
             remote_trusted: false,
+            has_connected_before: false,
             last_seen_at: Some(Utc::now()),
             status: if connected {
                 DeviceStatus::Online
@@ -1559,6 +1654,24 @@ mod device_dedup_tests {
     }
 
     #[tokio::test]
+    async fn mark_device_trusted_records_success_when_remote_already_trusted() {
+        let state = AppState::new();
+        let mut existing = device("device-remote", true);
+        existing.remote_trusted = true;
+        state.upsert_device(existing).await;
+
+        let updated = state
+            .mark_device_trusted("ws://10.194.33.156:8765/")
+            .await
+            .expect("endpoint alias should find the connected device");
+
+        assert!(updated.trusted);
+        assert!(updated.remote_trusted);
+        assert!(updated.has_connected_before);
+        assert!(state.devices().await[0].has_connected_before);
+    }
+
+    #[tokio::test]
     async fn mark_device_disconnected_accepts_endpoint_alias() {
         let state = AppState::new();
         let mut existing = device("device-remote", true);
@@ -1586,6 +1699,42 @@ mod device_dedup_tests {
             .expect("endpoint alias should remove the device");
 
         assert_eq!(removed.id, "device-remote");
+        assert!(state.devices().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn mark_device_rejected_keeps_offline_history_record() {
+        let state = AppState::new();
+        let mut existing = device("device-remote", true);
+        existing.trusted = true;
+        existing.remote_trusted = true;
+        state.upsert_device(existing).await;
+
+        let rejected = state
+            .mark_device_rejected("ws://10.194.33.156:8765/")
+            .await
+            .expect("endpoint alias should keep and update the history device");
+
+        assert_eq!(rejected.id, "device-remote");
+        assert!(!rejected.connected);
+        assert!(!rejected.trusted);
+        assert!(!rejected.remote_trusted);
+        assert!(rejected.has_connected_before);
+        assert_eq!(rejected.status, DeviceStatus::Offline);
+        assert_eq!(state.devices().await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn mark_device_rejected_removes_first_time_connection() {
+        let state = AppState::new();
+        state.upsert_device(device("new-device", true)).await;
+
+        let rejected = state
+            .mark_device_rejected("ws://10.194.33.156:8765/")
+            .await
+            .expect("endpoint alias should find the first-time device");
+
+        assert_eq!(rejected.id, "new-device");
         assert!(state.devices().await.is_empty());
     }
 }
@@ -1833,6 +1982,7 @@ mod trusted_broadcast_tests {
                 connected: false,
                 trusted: true,
                 remote_trusted: false,
+                has_connected_before: false,
                 last_seen_at: Some(Utc::now()),
                 status: DeviceStatus::Offline,
             })

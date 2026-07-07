@@ -34,10 +34,25 @@ fn devices_path(app: &AppHandle) -> AppResult<PathBuf> {
 }
 
 fn load_device_items_from_text(text: &str) -> AppResult<Vec<DeviceInfo>> {
-    match serde_json::from_str::<Vec<DeviceInfo>>(text) {
-        Ok(items) => Ok(device_history_snapshot(&items)),
-        Err(_) => Ok(Vec::new()),
+    let values = match serde_json::from_str::<Vec<serde_json::Value>>(text) {
+        Ok(values) => values,
+        Err(_) => return Ok(Vec::new()),
+    };
+    let mut items = Vec::with_capacity(values.len());
+
+    for value in values {
+        let has_explicit_history = value.get("hasConnectedBefore").is_some();
+        let mut device = match serde_json::from_value::<DeviceInfo>(value) {
+            Ok(device) => device,
+            Err(_) => return Ok(Vec::new()),
+        };
+        if (!has_explicit_history && device.trusted) || (device.trusted && device.remote_trusted) {
+            device.has_connected_before = true;
+        }
+        items.push(device);
     }
+
+    Ok(device_history_snapshot(&items))
 }
 
 fn device_history_snapshot(devices: &[DeviceInfo]) -> Vec<DeviceInfo> {
@@ -46,6 +61,9 @@ fn device_history_snapshot(devices: &[DeviceInfo]) -> Vec<DeviceInfo> {
     snapshot.truncate(DEVICES_LIMIT);
 
     for device in &mut snapshot {
+        if device.trusted && device.remote_trusted {
+            device.has_connected_before = true;
+        }
         device.connected = false;
         device.remote_trusted = false;
         device.status = DeviceStatus::Offline;
@@ -68,6 +86,7 @@ mod tests {
             connected,
             trusted: true,
             remote_trusted: false,
+            has_connected_before: false,
             last_seen_at: Some(Utc::now()),
             status: if connected {
                 DeviceStatus::Online
@@ -91,6 +110,7 @@ mod tests {
         assert_eq!(loaded[0].status, DeviceStatus::Offline);
         assert!(loaded[0].trusted);
         assert!(!loaded[0].remote_trusted);
+        assert!(loaded[0].has_connected_before);
     }
 
     #[test]
@@ -98,5 +118,27 @@ mod tests {
         let loaded = load_device_items_from_text(r#"[{"id":"broken""#).unwrap();
 
         assert!(loaded.is_empty());
+    }
+
+    #[test]
+    fn legacy_trusted_devices_load_as_connected_before_history() {
+        let loaded = load_device_items_from_text(
+            r#"[{
+                "id":"device-remote",
+                "name":"Laptop",
+                "ip":"10.194.33.156",
+                "port":8765,
+                "connected":false,
+                "trusted":true,
+                "remoteTrusted":false,
+                "lastSeenAt":"2026-06-23T00:19:42Z",
+                "status":"offline"
+            }]"#,
+        )
+        .unwrap();
+
+        assert_eq!(loaded.len(), 1);
+        assert!(loaded[0].trusted);
+        assert!(loaded[0].has_connected_before);
     }
 }

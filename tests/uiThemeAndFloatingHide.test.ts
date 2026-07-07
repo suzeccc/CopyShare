@@ -22,9 +22,9 @@ assert.doesNotMatch(appShell, /@close="closeWindow"/);
 assert.doesNotMatch(floatingPanel, /statusMessage/);
 assert.doesNotMatch(appShell, /:status-message=/);
 
-assert.match(style, /--main-bg:\s*#10203a;/);
-assert.match(style, /--main-bg-deep:\s*#0b172c;/);
-assert.match(windowMode, /MAIN_WINDOW_BACKGROUND\s*=\s*"#10203a"/);
+assert.match(style, /--main-bg:\s*#0b100e;/);
+assert.match(style, /--main-bg-deep:\s*#080c0a;/);
+assert.match(windowMode, /MAIN_WINDOW_BACKGROUND\s*=\s*"#0b100e"/);
 
 assert.match(style, /button\[data-window-control\]\s*\{[\s\S]*transition:/);
 assert.match(style, /button\[data-window-control\]:hover\s*\{[\s\S]*transform:\s*translateY\(-1px\)\s*scale\(1\.03\);/);

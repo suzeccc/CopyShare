@@ -2,6 +2,7 @@ import { createRouter, createWebHashHistory } from "vue-router";
 
 import About from "@/pages/About.vue";
 import Devices from "@/pages/Devices.vue";
+import FileTransfer from "@/pages/FileTransfer.vue";
 import Home from "@/pages/Home.vue";
 import Logs from "@/pages/Logs.vue";
 import MobileQr from "@/pages/MobileQr.vue";
@@ -12,6 +13,7 @@ const router = createRouter({
   routes: [
     { path: "/", name: "home", component: Home },
     { path: "/devices", name: "devices", component: Devices },
+    { path: "/files", name: "files", component: FileTransfer },
     { path: "/mobile", name: "mobile", component: MobileQr },
     { path: "/logs", name: "logs", component: Logs },
     { path: "/history", redirect: "/logs" },

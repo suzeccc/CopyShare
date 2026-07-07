@@ -16,6 +16,7 @@ function device(overrides: Partial<DeviceInfo>): DeviceInfo {
     connected: true,
     trusted: false,
     remoteTrusted: false,
+    hasConnectedBefore: false,
     lastSeenAt: null,
     status: "online",
     ...overrides,

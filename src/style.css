@@ -3,57 +3,57 @@
 @tailwind utilities;
 
 :root {
-  color: #e5edf7;
+  color: #dce8df;
   background: transparent;
-  --main-bg: #10203a;
-  --main-bg-deep: #0b172c;
-  --main-bg-soft: #172b4c;
-  --main-bg-muted: #1b355d;
-  --main-line: rgba(108, 150, 210, 0.58);
-  --main-line-soft: rgba(108, 150, 210, 0.36);
-  --panel-bg: rgba(16, 32, 58, 0.88);
-  --panel-bg-soft: rgba(19, 34, 63, 0.58);
-  --field-bg: rgba(19, 34, 63, 0.72);
-  --stat-bg: rgba(28, 49, 84, 0.8);
-  --theme-accent: #7dd3fc;
-  --muted-text: #b8c7dc;
-  --subtle-text: #94a8c4;
-  --accent-bg: #2563eb;
-  --accent-bg-hover: #3b82f6;
-  --accent-line: rgba(125, 211, 252, 0.42);
-  --accent-soft: rgba(56, 189, 248, 0.14);
-  --accent-text: #bae6fd;
-  --accent-glow: rgba(125, 211, 252, 0.46);
-  --button-primary-bg: #2563eb;
-  --button-primary-bg-hover: #3b82f6;
-  --button-primary-line: #3b82f6;
-  --button-primary-text: #ffffff;
-  --dialog-bg: rgba(14, 31, 55, 0.94);
-  --dialog-overlay-bg: rgba(2, 6, 23, 0.45);
-  --disconnect-notice-bg: rgba(10, 29, 47, 0.96);
-  --disconnect-notice-line: rgba(125, 211, 252, 0.66);
-  --disconnect-notice-ring: rgba(125, 211, 252, 0.18);
-  --disconnect-notice-text: #f0f9ff;
-  --disconnect-notice-muted-text: #bae6fd;
-  --disconnect-notice-icon-bg: rgba(14, 165, 233, 0.18);
-  --disconnect-notice-icon-line: rgba(125, 211, 252, 0.66);
-  --disconnect-notice-icon-text: #bae6fd;
-  --disconnect-notice-close-hover: rgba(14, 165, 233, 0.16);
-  --disconnect-notice-shadow: 0 18px 52px rgba(2, 8, 23, 0.52), 0 0 30px rgba(14, 165, 233, 0.12);
-  --floating-surface-line: rgba(125, 190, 255, 0.48);
-  --floating-surface-bg: linear-gradient(135deg, rgba(42, 120, 198, 0.22), transparent 42%),
-    rgba(5, 18, 39, 0.68);
-  --floating-stat-bg: rgba(7, 35, 71, 0.52);
-  --floating-stat-line: rgba(125, 190, 255, 0.22);
-  --floating-muted-text: rgba(186, 230, 253, 0.76);
-  --floating-strong-text: #f0f9ff;
-  --floating-control-bg: rgba(224, 242, 254, 0.1);
-  --floating-control-bg-hover: rgba(224, 242, 254, 0.22);
-  --floating-control-line: rgba(186, 230, 253, 0.28);
-  --floating-control-text: #f0f9ff;
-  --scrollbar-track: rgba(11, 23, 44, 0.9);
-  --scrollbar-thumb: rgba(98, 142, 202, 0.76);
-  --scrollbar-thumb-hover: rgba(148, 163, 184, 0.9);
+  --main-bg: #0b100e;
+  --main-bg-deep: #080c0a;
+  --main-bg-soft: #151d18;
+  --main-bg-muted: #243028;
+  --main-line: rgba(111, 130, 118, 0.46);
+  --main-line-soft: rgba(111, 130, 118, 0.24);
+  --panel-bg: rgba(27, 36, 31, 0.92);
+  --panel-bg-soft: rgba(32, 43, 36, 0.78);
+  --field-bg: rgba(43, 55, 46, 0.88);
+  --stat-bg: rgba(31, 43, 36, 0.92);
+  --theme-accent: #35c85a;
+  --muted-text: #a9b9ad;
+  --subtle-text: #7f9184;
+  --accent-bg: #1f7a3a;
+  --accent-bg-hover: #2ba64a;
+  --accent-line: rgba(86, 202, 111, 0.52);
+  --accent-soft: rgba(63, 199, 93, 0.16);
+  --accent-text: #7ff0a1;
+  --accent-glow: rgba(67, 216, 100, 0.34);
+  --button-primary-bg: #1f7a3a;
+  --button-primary-bg-hover: #2ba64a;
+  --button-primary-line: #39cf5d;
+  --button-primary-text: #f3fff5;
+  --dialog-bg: rgba(20, 28, 24, 0.96);
+  --dialog-overlay-bg: rgba(2, 6, 4, 0.5);
+  --disconnect-notice-bg: rgba(20, 31, 25, 0.98);
+  --disconnect-notice-line: rgba(86, 202, 111, 0.62);
+  --disconnect-notice-ring: rgba(86, 202, 111, 0.18);
+  --disconnect-notice-text: #effcf2;
+  --disconnect-notice-muted-text: #bdf8c9;
+  --disconnect-notice-icon-bg: rgba(53, 200, 90, 0.16);
+  --disconnect-notice-icon-line: rgba(86, 202, 111, 0.58);
+  --disconnect-notice-icon-text: #7ff0a1;
+  --disconnect-notice-close-hover: rgba(53, 200, 90, 0.14);
+  --disconnect-notice-shadow: 0 18px 52px rgba(1, 8, 4, 0.54), 0 0 30px rgba(53, 200, 90, 0.12);
+  --floating-surface-line: rgba(86, 202, 111, 0.44);
+  --floating-surface-bg: linear-gradient(135deg, rgba(53, 200, 90, 0.14), transparent 44%),
+    rgba(11, 16, 14, 0.72);
+  --floating-stat-bg: rgba(24, 36, 30, 0.72);
+  --floating-stat-line: rgba(86, 202, 111, 0.2);
+  --floating-muted-text: rgba(188, 216, 195, 0.78);
+  --floating-strong-text: #f3fff5;
+  --floating-control-bg: rgba(188, 248, 201, 0.1);
+  --floating-control-bg-hover: rgba(188, 248, 201, 0.2);
+  --floating-control-line: rgba(188, 248, 201, 0.24);
+  --floating-control-text: #effcf2;
+  --scrollbar-track: rgba(9, 14, 12, 0.9);
+  --scrollbar-thumb: rgba(61, 87, 70, 0.76);
+  --scrollbar-thumb-hover: rgba(86, 122, 98, 0.9);
   font-synthesis: none;
   text-rendering: geometricPrecision;
   -webkit-font-smoothing: antialiased;
@@ -163,10 +163,18 @@ textarea,
 }
 
 button:focus-visible,
-input:focus-visible,
 a:focus-visible {
   outline: 2px solid var(--theme-accent);
   outline-offset: 2px;
+}
+
+input:focus-visible,
+textarea:focus-visible {
+  outline: 1px solid color-mix(in srgb, var(--theme-accent) 58%, transparent);
+  outline-offset: 1px;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--theme-accent) 18%, transparent),
+    0 0 0 4px rgba(0, 0, 0, 0.12);
 }
 
 button[data-window-control] {
@@ -241,6 +249,8 @@ button[data-window-control]:active {
   z-index: 100;
   display: grid;
   place-items: center;
+  border-radius: 18px;
+  overflow: hidden;
   background:
     radial-gradient(circle at 50% 38%, rgba(96, 205, 255, 0.12), transparent 30%),
     rgba(17, 17, 17, 0.68);

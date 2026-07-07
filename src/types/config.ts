@@ -15,4 +15,12 @@ export interface AppConfig {
   syncText: boolean;
   syncImage: boolean;
   syncFiles: boolean;
+  discoveryScanRanges: string[];
+  desktopNotifications: boolean;
+  notifyClipboard: boolean;
+  notifyTrustRequired: boolean;
+  notifyFileTransfer: boolean;
+  notifyDeviceStatus: boolean;
+  notifySyncError: boolean;
+  notificationClipboardPreview: boolean;
 }

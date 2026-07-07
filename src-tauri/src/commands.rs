@@ -8,15 +8,19 @@ use crate::{
     discovery,
     device_store,
     error::{AppError, AppResult},
+    file_transfer,
     history,
     mobile,
+    notifications,
     models::{
         AppConfig, AppStatus, ClipboardContentType, ClipboardTextItem, DeviceInfo, HistoryItem,
-        MobileSessionView,
+        FileTransferTask, MobileSessionView, SelectedTransferFile,
     },
     security,
     state::AppState,
     sync,
+    tray,
+    window_position,
 };
 
 #[tauri::command]
@@ -27,8 +31,9 @@ pub async fn get_status(state: State<'_, AppState>) -> AppResult<AppStatus> {
 #[tauri::command]
 pub async fn start_sync(app: AppHandle, state: State<'_, AppState>) -> AppResult<AppStatus> {
     let app_state = state.inner().clone();
-    sync::start_sync_runtime(app, app_state.clone()).await?;
+    sync::start_sync_runtime(app.clone(), app_state.clone()).await?;
     sync::wait_for_sync_ready(&app_state, Duration::from_secs(2)).await?;
+    tray::update_tray_status(&app, &app_state).await;
     Ok(state.status().await)
 }
 
@@ -36,13 +41,15 @@ pub async fn start_sync(app: AppHandle, state: State<'_, AppState>) -> AppResult
 pub async fn stop_sync(app: AppHandle, state: State<'_, AppState>) -> AppResult<AppStatus> {
     state.stop_runtime().await?;
     device_store::save_devices(&app, &state.devices().await)?;
+    tray::update_tray_status(&app, state.inner()).await;
     Ok(state.status().await)
 }
 
 #[tauri::command]
-pub async fn get_devices(state: State<'_, AppState>) -> AppResult<Vec<DeviceInfo>> {
+pub async fn get_devices(app: AppHandle, state: State<'_, AppState>) -> AppResult<Vec<DeviceInfo>> {
     let mut devices = state.devices().await;
-    devices.extend(discovery::discover_devices().await);
+    let config = state.config().await;
+    devices.extend(discovery::discover_devices(app, &config).await);
     Ok(devices)
 }
 
@@ -66,7 +73,9 @@ pub async fn connect_device(
         sync::wait_for_sync_ready(&app_state, Duration::from_secs(2)).await?;
     }
 
-    sync::connect_to_peer(app, app_state, ip, port).await
+    let device = sync::connect_to_peer(app.clone(), app_state.clone(), ip, port).await?;
+    tray::update_tray_status(&app, &app_state).await;
+    Ok(device)
 }
 
 #[tauri::command]
@@ -81,6 +90,7 @@ pub async fn disconnect_device(
         .await
         .ok_or(AppError::UnknownDevice(device_id))?;
     device_store::save_devices(&app, &state.devices().await)?;
+    tray::update_tray_status(&app, state.inner()).await;
     Ok(())
 }
 
@@ -94,6 +104,7 @@ pub async fn trust_device(
     for key in state.trust_keys_for_device(&device_id).await {
         security::trust_device(&mut next_config, key);
     }
+    config::normalize_config(&mut next_config);
     config::save_config(&app, &next_config)?;
     state.set_config(next_config.clone()).await;
     state.mark_device_trusted(&device_id).await;
@@ -101,6 +112,7 @@ pub async fn trust_device(
     state.reset_local_clipboard_observation().await;
     device_store::save_devices(&app, &state.devices().await)?;
     sync::notify_peer_trusted(state.inner(), &next_config, &device_id).await;
+    tray::update_tray_status(&app, state.inner()).await;
     app.emit("config-updated", next_config)?;
     Ok(())
 }
@@ -114,16 +126,18 @@ pub async fn reject_device(
     let trust_keys = state.trust_keys_for_device(&device_id).await;
     sync::notify_peer_rejected(state.inner(), &device_id).await;
     state.remove_peer(&device_id).await;
-    state.remove_device(&device_id).await;
+    state.mark_device_rejected(&device_id).await;
 
     let mut next_config = state.config().await;
     for key in trust_keys {
         security::untrust_device(&mut next_config, &key);
     }
+    config::normalize_config(&mut next_config);
     state.clear_manual_trust_required(&device_id).await;
     config::save_config(&app, &next_config)?;
     state.set_config(next_config.clone()).await;
     device_store::save_devices(&app, &state.devices().await)?;
+    tray::update_tray_status(&app, state.inner()).await;
     app.emit("config-updated", next_config)?;
     Ok(())
 }
@@ -163,6 +177,7 @@ pub async fn update_config(
     };
     next_config.sync_text = true;
     next_config.sync_files = false;
+    config::normalize_config(&mut next_config);
     let current_auto_start =
         autostart::is_autostart_enabled(&app).unwrap_or(current.auto_start);
     if autostart::should_update_autostart(current_auto_start, next_config.auto_start) {
@@ -182,6 +197,77 @@ pub async fn get_history(state: State<'_, AppState>) -> AppResult<Vec<HistoryIte
 #[tauri::command]
 pub async fn get_clipboard_history() -> AppResult<Vec<ClipboardTextItem>> {
     clipboard::read_clipboard_history_text(3).await
+}
+
+#[tauri::command]
+pub async fn select_file_for_transfer(
+    app: AppHandle,
+) -> AppResult<Option<SelectedTransferFile>> {
+    file_transfer::select_file_for_transfer(app).await
+}
+
+#[tauri::command]
+pub async fn select_files_for_transfer(
+    app: AppHandle,
+) -> AppResult<Vec<SelectedTransferFile>> {
+    file_transfer::select_files_for_transfer(app).await
+}
+
+#[tauri::command]
+pub async fn send_file_to_device(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    device_id: String,
+    file_path: String,
+) -> AppResult<FileTransferTask> {
+    file_transfer::send_file_to_device(app, state.inner().clone(), device_id, file_path).await
+}
+
+#[tauri::command]
+pub async fn send_files_to_device(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    device_id: String,
+    file_paths: Vec<String>,
+) -> AppResult<FileTransferTask> {
+    file_transfer::send_files_to_device(app, state.inner().clone(), device_id, file_paths).await
+}
+
+#[tauri::command]
+pub async fn accept_file_transfer(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    transfer_id: String,
+) -> AppResult<FileTransferTask> {
+    file_transfer::accept_file_transfer(app, state.inner().clone(), transfer_id).await
+}
+
+#[tauri::command]
+pub async fn reject_file_transfer(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    transfer_id: String,
+) -> AppResult<FileTransferTask> {
+    file_transfer::reject_file_transfer(app, state.inner().clone(), transfer_id).await
+}
+
+#[tauri::command]
+pub async fn cancel_file_transfer(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    transfer_id: String,
+) -> AppResult<FileTransferTask> {
+    file_transfer::cancel_file_transfer(app, state.inner().clone(), transfer_id).await
+}
+
+#[tauri::command]
+pub async fn get_file_transfers() -> AppResult<Vec<FileTransferTask>> {
+    file_transfer::get_file_transfers().await
+}
+
+#[tauri::command]
+pub async fn open_transfer_folder() -> AppResult<()> {
+    file_transfer::open_transfer_folder()
 }
 
 #[tauri::command]
@@ -332,4 +418,20 @@ pub async fn hide_main_window(app: AppHandle) -> AppResult<()> {
         window.hide()?;
     }
     Ok(())
+}
+
+#[tauri::command]
+pub async fn send_test_notification(app: AppHandle) -> AppResult<()> {
+    notifications::notify_test(&app);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn move_floating_window_to_cursor(app: AppHandle) -> AppResult<()> {
+    window_position::move_floating_window_to_cursor(&app)
+}
+
+#[tauri::command]
+pub async fn move_main_window_to_center(app: AppHandle) -> AppResult<()> {
+    window_position::move_main_window_to_center(&app)
 }

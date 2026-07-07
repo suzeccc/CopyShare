@@ -15,13 +15,15 @@ withDefaults(
 );
 
 const emit = defineEmits<{
-  (event: "switch-floating", pointer: { clientX: number; clientY: number }): void;
+  (event: "switch-floating", pointer: { clientX: number; clientY: number; screenX: number; screenY: number }): void;
 }>();
 
 function switchFloating(event: MouseEvent) {
   emit("switch-floating", {
     clientX: event.clientX,
     clientY: event.clientY,
+    screenX: event.screenX,
+    screenY: event.screenY,
   });
 }
 </script>

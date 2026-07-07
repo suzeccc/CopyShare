@@ -18,6 +18,14 @@ export interface UpdateState {
   updateUrl: string;
 }
 
+export interface StartupUpdatePrompt {
+  currentVersion: string;
+  latestVersion: string;
+  updateUrl: string;
+}
+
+let didRunStartupUpdateCheck = false;
+
 export function normalizeVersion(version: string): string {
   const match = version.trim().match(/\d+(?:\.\d+){0,2}/);
   return match?.[0] ?? version.trim().replace(/^v/i, "");
@@ -35,6 +43,51 @@ export function getUpdateState(
     latestVersion: latest,
     updateUrl: latestRelease.url,
   };
+}
+
+export function getAutomaticUpdateMessage(
+  currentVersion: string,
+  latestRelease: ReleaseInfo,
+): string | null {
+  const update = getUpdateState(currentVersion, latestRelease);
+  if (!update.hasUpdate) {
+    return null;
+  }
+
+  return `发现新版本 v${update.latestVersion}，请前往关于页查看。`;
+}
+
+export function getStartupUpdatePrompt(
+  currentVersion: string,
+  latestRelease: ReleaseInfo,
+): StartupUpdatePrompt | null {
+  const update = getUpdateState(currentVersion, latestRelease);
+  if (!update.hasUpdate) {
+    return null;
+  }
+
+  return {
+    currentVersion: normalizeVersion(currentVersion),
+    latestVersion: update.latestVersion,
+    updateUrl: update.updateUrl,
+  };
+}
+
+export async function checkForAppUpdateOnStartup(
+  notify: (update: StartupUpdatePrompt) => void,
+): Promise<void> {
+  if (didRunStartupUpdateCheck) {
+    return;
+  }
+  didRunStartupUpdateCheck = true;
+
+  try {
+    const update = getStartupUpdatePrompt(APP_VERSION, await getLatestRelease());
+    if (update) {
+      notify(update);
+    }
+  } catch {
+  }
 }
 
 export async function getLatestRelease(): Promise<ReleaseInfo> {

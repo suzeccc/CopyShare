@@ -5,6 +5,7 @@ import {
   dedupeDevices,
   hasConnectedDeviceEndpoint,
   historicalDevices,
+  markDeviceRejected,
   markDeviceDisconnected,
   markDeviceTrusted,
   mergeRefreshedDevices,
@@ -24,6 +25,7 @@ function device(id: string, connected: boolean): DeviceInfo {
     connected,
     trusted: false,
     remoteTrusted: false,
+    hasConnectedBefore: false,
     lastSeenAt: "2026-06-23T00:19:42Z",
     status: connected ? "online" : "offline",
   };
@@ -34,6 +36,7 @@ function trustedDevice(id: string, connected: boolean): DeviceInfo {
     ...device(id, connected),
     trusted: true,
     remoteTrusted: true,
+    hasConnectedBefore: true,
   };
 }
 
@@ -69,6 +72,13 @@ const trustedRefreshResult = upsertDevice([connectedPlaceholder], trustedOffline
 assert.equal(trustedRefreshResult.length, 1);
 assert.equal(trustedRefreshResult[0].connected, true);
 assert.equal(trustedRefreshResult[0].trusted, true);
+
+const newlyMutualConnection = upsertDevice(
+  [{ ...device("device-remote", true), trusted: true }],
+  { ...device("device-remote", true), remoteTrusted: true },
+);
+
+assert.equal(newlyMutualConnection[0].hasConnectedBefore, true);
 
 assert.deepEqual(
   pendingTrustDevices([existingTrusted, reconnectPlaceholder]).map((item) => item.id),
@@ -224,6 +234,29 @@ const aliasDisconnected = markDeviceDisconnected(
 assert.equal(aliasDisconnected[0].id, "device-remote");
 assert.equal(aliasDisconnected[0].connected, false);
 assert.equal(aliasDisconnected[0].status, "offline");
+
+const rejectedHistoryDevice = markDeviceRejected(
+  [{ ...trustedDevice("device-remote", true), hasConnectedBefore: true }],
+  "ws://10.194.33.156:8765/",
+);
+
+assert.equal(rejectedHistoryDevice.length, 1);
+assert.equal(rejectedHistoryDevice[0].id, "device-remote");
+assert.equal(rejectedHistoryDevice[0].connected, false);
+assert.equal(rejectedHistoryDevice[0].trusted, false);
+assert.equal(rejectedHistoryDevice[0].remoteTrusted, false);
+assert.equal(rejectedHistoryDevice[0].hasConnectedBefore, true);
+assert.equal(rejectedHistoryDevice[0].status, "offline");
+assert.deepEqual(historicalDevices(rejectedHistoryDevice).map((item) => item.id), [
+  "device-remote",
+]);
+
+const rejectedFirstTimeDevice = markDeviceRejected(
+  [device("new-device", true)],
+  "ws://10.194.33.156:8765/",
+);
+
+assert.deepEqual(rejectedFirstTimeDevice, []);
 
 assert.deepEqual(
   removeDeviceByKey(

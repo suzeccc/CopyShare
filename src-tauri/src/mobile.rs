@@ -27,6 +27,7 @@ use crate::{
         MobileSessionMode, MobileSessionPhase, MobileSessionView, SyncStatus,
     },
     network,
+    notifications,
     state::AppState,
     sync,
 };
@@ -199,7 +200,7 @@ impl MobileSessionStore {
         let session = self
             .sessions
             .get(id)
-            .ok_or_else(|| AppError::InvalidInput("手机扫码会话不存在".to_string()))?;
+            .ok_or_else(|| AppError::InvalidInput("手机连接会话不存在".to_string()))?;
         Ok(self.session_view(session))
     }
 
@@ -238,7 +239,7 @@ impl MobileSessionStore {
             let session = self
                 .sessions
                 .get_mut(id)
-                .ok_or_else(|| AppError::InvalidInput("手机扫码会话不存在".to_string()))?;
+                .ok_or_else(|| AppError::InvalidInput("手机连接会话不存在".to_string()))?;
             if !matches!(session.mode, MobileSessionMode::SendToMobile | MobileSessionMode::Bidirectional) {
                 return Err(AppError::InvalidInput("此二维码不是发送到手机会话".to_string()));
             }
@@ -283,7 +284,7 @@ impl MobileSessionStore {
             let session = self
                 .sessions
                 .get_mut(id)
-                .ok_or_else(|| AppError::InvalidInput("手机扫码会话不存在".to_string()))?;
+                .ok_or_else(|| AppError::InvalidInput("手机连接会话不存在".to_string()))?;
             session.phase = MobileSessionPhase::Closed;
             session.clone()
         };
@@ -383,7 +384,7 @@ impl MobileSessionStore {
         let session = self
             .sessions
             .get(id)
-            .ok_or_else(|| AppError::InvalidInput("手机扫码会话不存在".to_string()))?;
+            .ok_or_else(|| AppError::InvalidInput("手机连接会话不存在".to_string()))?;
         reject_closed_session(session)?;
         if session.token != token {
             return Err(AppError::InvalidInput("二维码 token 无效".to_string()));
@@ -469,7 +470,7 @@ fn session_is_finished(phase: &MobileSessionPhase) -> bool {
 
 fn reject_closed_session(session: &MobileSession) -> AppResult<()> {
     if session.phase == MobileSessionPhase::Closed {
-        return Err(AppError::InvalidInput("手机扫码会话已结束".to_string()));
+        return Err(AppError::InvalidInput("手机连接会话已结束".to_string()));
     }
     if session.phase == MobileSessionPhase::Expired {
         return Err(AppError::InvalidInput("此二维码已过期".to_string()));
@@ -657,7 +658,7 @@ fn select_mobile_bind_ip() -> AppResult<IpAddr> {
     match network::preferred_local_ip_for_peer(None) {
         Some(IpAddr::V4(ip)) if is_lan_ipv4(ip) => Ok(IpAddr::V4(ip)),
         _ => Err(AppError::InvalidInput(
-            "没有找到可用于手机扫码的局域网 IPv4 地址".to_string(),
+            "没有找到可用于手机连接的局域网 IPv4 地址".to_string(),
         )),
     }
 }
@@ -841,6 +842,11 @@ async fn route_mobile_request(
             if let Err(error) = clipboard::write_clipboard_text(&app, &message.content) {
                 return http_error(500, &error.to_string());
             }
+            notifications::notify_mobile_clipboard_received(
+                &app,
+                &state.config().await,
+                &message,
+            );
             if let Err(error) = record_mobile_submitted_history(&app, &state, &message).await {
                 return http_error(500, &error.to_string());
             }
@@ -862,7 +868,7 @@ fn mobile_page_html(id: &str, token: &str) -> String {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>CopyShare 手机扫码</title>
+  <title>CopyShare 手机连接</title>
   <style>
     :root {{ color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
     body {{ margin: 0; min-height: 100vh; background: #202020; color: #f5f5f5; display: grid; align-items: start; justify-items: center; padding: 18px; overflow-y: auto; -webkit-overflow-scrolling: touch; }}
@@ -1066,12 +1072,30 @@ function copySelectedPcItems() {{
 function renderPcShell() {{
   return '<h2>电脑剪贴板</h2><div id="pcList"></div>';
 }}
+function readPhoneClipboard(areaId) {{
+  const textarea = document.getElementById(areaId);
+  if (!textarea) return;
+  if (!navigator.clipboard || !navigator.clipboard.readText) {{
+    textarea.focus();
+    setStatus("无法读取手机剪贴板，请长按输入框手动粘贴。");
+    return;
+  }}
+  navigator.clipboard.readText().then(function(text) {{
+    textarea.value = text || "";
+    textarea.focus();
+    setStatus(textarea.value.trim() ? "已粘贴手机剪贴板内容。" : "手机剪贴板为空。");
+  }}).catch(function(error) {{
+    textarea.focus();
+    const detail = error && error.message ? " " + error.message : "";
+    setStatus("无法读取手机剪贴板，请长按输入框手动粘贴。" + detail);
+  }});
+}}
 function senderHtml(areaId) {{
   return '<textarea id="' + areaId + '" placeholder="在这里粘贴要发送到电脑的文本"></textarea><button id="paste">粘贴手机内容</button><button id="send">发送到电脑</button>';
 }}
 function bindSender(areaId) {{
-  document.getElementById("paste").onclick = async function() {{
-    document.getElementById(areaId).value = await navigator.clipboard.readText();
+  document.getElementById("paste").onclick = function() {{
+    readPhoneClipboard(areaId);
   }};
   document.getElementById("send").onclick = async function() {{
     const field = document.getElementById(areaId);
@@ -1084,7 +1108,7 @@ function bindSender(areaId) {{
   }};
 }}
 function renderBoth(data) {{
-  title.textContent = "CopyShare 手机扫码";
+  title.textContent = "CopyShare 手机连接";
   hint.textContent = "可复制电脑端多条剪贴板，也可连续发送多条内容到电脑。";
   if (app.dataset.mode !== "bidirectional") {{
     app.dataset.mode = "bidirectional";
@@ -1112,10 +1136,10 @@ function renderReceive() {{
   }}
 }}
 function renderClosed() {{
-  title.textContent = "CopyShare 手机扫码";
-  hint.textContent = "电脑端已结束本次扫码会话";
+  title.textContent = "CopyShare 手机连接";
+  hint.textContent = "电脑端已结束本次连接会话";
   app.dataset.mode = "closed";
-  app.innerHTML = '<p class="empty">电脑端已结束本次扫码会话。请在电脑端重新生成二维码后再扫码。</p>';
+  app.innerHTML = '<p class="empty">电脑端已结束本次连接会话。请在电脑端重新生成二维码后再扫码。</p>';
   setStatus("");
 }}
 function preview(value) {{
@@ -1128,7 +1152,7 @@ function escapeHtml(value) {{
 load().catch(error => {{
   if (pollTimer) clearInterval(pollTimer);
   const message = error.message || "二维码已失效";
-  hint.textContent = message.includes("已结束") ? "电脑端已结束本次扫码会话" : message;
+  hint.textContent = message.includes("已结束") ? "电脑端已结束本次连接会话" : message;
   app.innerHTML = "";
 }});
 </script>
@@ -1175,7 +1199,7 @@ fn ensure_mobile_text_items_size(contents: &[String]) -> AppResult<()> {
 fn ensure_mobile_text_size(content: &str) -> AppResult<()> {
     if content.as_bytes().len() > MOBILE_TEXT_LIMIT_BYTES {
         return Err(AppError::InvalidInput(
-            "手机扫码文本不能超过 100KB".to_string(),
+            "手机连接文本不能超过 100KB".to_string(),
         ));
     }
     Ok(())
@@ -1422,7 +1446,7 @@ mod tests {
         assert!(html.contains("copySelectedPcItems"));
         assert!(html.contains("setInterval"));
         assert!(html.contains("data.phase === \"closed\""));
-        assert!(html.contains("电脑端已结束本次扫码会话"));
+        assert!(html.contains("电脑端已结束本次连接会话"));
         assert!(!html.contains("data.remainingSeconds <= 0"));
         assert!(html.contains("join(\"\\n\\n\")"));
         assert!(html.contains("deviceLabel(item)"));
@@ -1435,6 +1459,17 @@ mod tests {
         assert!(!html.contains("<label class=\"item-choice\""));
         assert!(!html.contains("data-copy-pc"));
         assert!(!html.contains("data-select-pc"));
+    }
+
+    #[test]
+    fn mobile_phone_page_reports_clipboard_read_failures() {
+        let html = super::mobile_page_html("session-id", "token");
+
+        assert!(html.contains("readPhoneClipboard"));
+        assert!(html.contains("navigator.clipboard.readText"));
+        assert!(html.contains("textarea.focus()"));
+        assert!(html.contains("setStatus(\"无法读取手机剪贴板"));
+        assert!(html.contains("catch(function(error)"));
     }
 
     #[test]

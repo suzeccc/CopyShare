@@ -1,21 +1,22 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
-  currentMonitor,
   getCurrentWindow,
   LogicalSize,
-  PhysicalPosition,
 } from "@tauri-apps/api/window";
 
 import {
   FLOATING_WINDOW_BOUNDS,
   MAIN_WINDOW_BOUNDS,
   TRANSPARENT_WINDOW_BACKGROUND,
-  getFloatingWindowTopRightPosition,
-  getMainWindowCenteredPosition,
 } from "@/lib/windowMode";
 import type { AppConfig } from "@/types/config";
 import type { DeviceInfo } from "@/types/device";
+import type {
+  FileTransferProgressEvent,
+  FileTransferTask,
+  SelectedTransferFile,
+} from "@/types/fileTransfer";
 import type { HistoryItem } from "@/types/history";
 import type { MobileSessionView } from "@/types/mobile";
 import type { AppStatus } from "@/types/status";
@@ -26,9 +27,16 @@ export type AppEventName =
   | "device-connected"
   | "device-disconnected"
   | "device-rejected"
+  | "lan-discovery-progress"
   | "clipboard-synced"
   | "sync-error"
-  | "config-updated";
+  | "config-updated"
+  | "navigate-to-page"
+  | "file-transfer-offer"
+  | "file-transfer-updated"
+  | "file-transfer-progress"
+  | "file-transfer-completed"
+  | "file-transfer-failed";
 
 export function getStatus(): Promise<AppStatus> {
   return invoke<AppStatus>("get_status");
@@ -78,6 +86,48 @@ export function getClipboardHistory(): Promise<Array<{ id: string; text: string 
   return invoke<Array<{ id: string; text: string }>>("get_clipboard_history");
 }
 
+export function selectFileForTransfer(): Promise<SelectedTransferFile | null> {
+  return invoke<SelectedTransferFile | null>("select_file_for_transfer");
+}
+
+export function selectFilesForTransfer(): Promise<SelectedTransferFile[]> {
+  return invoke<SelectedTransferFile[]>("select_files_for_transfer");
+}
+
+export function sendFileToDevice(
+  deviceId: string,
+  filePath: string,
+): Promise<FileTransferTask> {
+  return invoke<FileTransferTask>("send_file_to_device", { deviceId, filePath });
+}
+
+export function sendFilesToDevice(
+  deviceId: string,
+  filePaths: string[],
+): Promise<FileTransferTask> {
+  return invoke<FileTransferTask>("send_files_to_device", { deviceId, filePaths });
+}
+
+export function acceptFileTransfer(transferId: string): Promise<FileTransferTask> {
+  return invoke<FileTransferTask>("accept_file_transfer", { transferId });
+}
+
+export function rejectFileTransfer(transferId: string): Promise<FileTransferTask> {
+  return invoke<FileTransferTask>("reject_file_transfer", { transferId });
+}
+
+export function cancelFileTransfer(transferId: string): Promise<FileTransferTask> {
+  return invoke<FileTransferTask>("cancel_file_transfer", { transferId });
+}
+
+export function getFileTransfers(): Promise<FileTransferTask[]> {
+  return invoke<FileTransferTask[]>("get_file_transfers");
+}
+
+export function openTransferFolder(): Promise<void> {
+  return invoke<void>("open_transfer_folder");
+}
+
 export function createMobileSession(): Promise<MobileSessionView> {
   return invoke<MobileSessionView>("create_mobile_session");
 }
@@ -114,6 +164,18 @@ export function hideMainWindow(): Promise<void> {
   return invoke<void>("hide_main_window");
 }
 
+export function sendTestNotification(): Promise<void> {
+  return invoke<void>("send_test_notification");
+}
+
+export function moveFloatingWindowToCursor(): Promise<void> {
+  return invoke<void>("move_floating_window_to_cursor");
+}
+
+export function moveMainWindowToCenter(): Promise<void> {
+  return invoke<void>("move_main_window_to_center");
+}
+
 export function minimizeWindow(): Promise<void> {
   return getCurrentWindow().minimize();
 }
@@ -130,48 +192,6 @@ export function closeWindow(): Promise<void> {
   return getCurrentWindow().close();
 }
 
-async function moveFloatingWindowToTopRight(
-  window: ReturnType<typeof getCurrentWindow>,
-): Promise<void> {
-  try {
-    const monitor = await currentMonitor();
-    if (!monitor) {
-      return;
-    }
-
-    const position = getFloatingWindowTopRightPosition({
-      position: monitor.workArea.position,
-      size: monitor.workArea.size,
-      scaleFactor: monitor.scaleFactor,
-    });
-
-    await window.setPosition(new PhysicalPosition(position.x, position.y));
-  } catch (error) {
-    console.warn("Unable to move floating window to top right", error);
-  }
-}
-
-async function moveMainWindowToCenter(
-  window: ReturnType<typeof getCurrentWindow>,
-): Promise<void> {
-  try {
-    const monitor = await currentMonitor();
-    if (!monitor) {
-      return;
-    }
-
-    const position = getMainWindowCenteredPosition({
-      position: monitor.workArea.position,
-      size: monitor.workArea.size,
-      scaleFactor: monitor.scaleFactor,
-    });
-
-    await window.setPosition(new PhysicalPosition(position.x, position.y));
-  } catch (error) {
-    console.warn("Unable to move main window to center", error);
-  }
-}
-
 export async function enterFloatingWindow(): Promise<void> {
   const window = getCurrentWindow();
   const size = new LogicalSize(
@@ -185,7 +205,11 @@ export async function enterFloatingWindow(): Promise<void> {
   await window.setMinSize(size);
   await window.setMaxSize(size);
   await window.setSize(size);
-  await moveFloatingWindowToTopRight(window);
+  try {
+    await moveFloatingWindowToCursor();
+  } catch (error) {
+    console.warn("Unable to move floating window to cursor", error);
+  }
   await window.setShadow(false);
   await window.setFocus();
 }
@@ -200,10 +224,14 @@ export async function restoreMainWindow(): Promise<void> {
   );
   await window.setResizable(true);
   await window.setAlwaysOnTop(false);
-  await moveMainWindowToCenter(window);
   await window.setSize(
     new LogicalSize(MAIN_WINDOW_BOUNDS.width, MAIN_WINDOW_BOUNDS.height),
   );
+  try {
+    await moveMainWindowToCenter();
+  } catch (error) {
+    console.warn("Unable to move main window to center", error);
+  }
   await window.setFocus();
 }
 

@@ -3,8 +3,8 @@ import { readFileSync } from "node:fs";
 
 const page = readFileSync("src/pages/MobileQr.vue", "utf8");
 
-assert.match(page, /手机扫码/);
-assert.match(page, /手机扫码进入同一局域网页/);
+assert.match(page, /手机连接/);
+assert.match(page, /扫码连接同一局域网页/);
 assert.match(page, /生成二维码/);
 assert.match(page, /结束会话/);
 assert.match(page, /保持到手动结束/);
@@ -37,6 +37,11 @@ assert.match(page, /data-mobile-session-card/);
 assert.match(page, /data-mobile-layout="qr-left-content-right"/);
 assert.match(page, /data-mobile-qr-rail/);
 assert.match(page, /data-mobile-qr-zone/);
+assert.match(page, /data-mobile-qr-zone[^>]*bg-\[color:var\(--panel-bg-soft\)\]/);
+assert.match(page, /data-mobile-qr-zone[^>]*border-\[color:var\(--accent-line\)\]/);
+assert.match(page, /data-mobile-qr-placeholder[^>]*text-\[color:var\(--accent-text\)\]/);
+assert.doesNotMatch(page, /data-mobile-qr-zone[^>]*bg-white/);
+assert.doesNotMatch(page, /data-mobile-qr-zone[^>]*border-white/);
 assert.match(page, /data-mobile-content-panel/);
 assert.match(page, /data-mobile-content-panel[\s\S]*data-mobile-session-lifetime-notice/);
 assert.doesNotMatch(page, /data-mobile-qr-rail[\s\S]*data-mobile-session-lifetime-notice[\s\S]*data-mobile-content-panel/);

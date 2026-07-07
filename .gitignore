@@ -40,9 +40,13 @@ dist/
 # Node/Tauri build artifacts
 node_modules/
 .pnpm-store/
+target/
 src-tauri/target/
 src-tauri/gen/
 src-tauri/.tauri/
+
+# Accidentally captured Windows absolute-path style folders
+%SystemDrive%/
 
 # OS/editor noise
 .DS_Store

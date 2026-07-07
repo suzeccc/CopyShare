@@ -15,9 +15,9 @@ export const FLOATING_WINDOW_BOUNDS = {
 
 export const FLOATING_WINDOW_MARGIN = 16;
 
-export const FLOATING_WINDOW_BACKGROUND = "rgba(5, 18, 39, 0.68)";
+export const FLOATING_WINDOW_BACKGROUND = "rgba(11, 16, 14, 0.72)";
 export const TRANSPARENT_WINDOW_BACKGROUND = "#00000000";
-export const MAIN_WINDOW_BACKGROUND = "#10203a";
+export const MAIN_WINDOW_BACKGROUND = "#0b100e";
 
 export type WindowPositionArea = {
   position: {
@@ -29,6 +29,11 @@ export type WindowPositionArea = {
     height: number;
   };
   scaleFactor: number;
+};
+
+export type FloatingWindowPointer = {
+  screenX: number;
+  screenY: number;
 };
 
 export function getFloatingWindowTopRightPosition(area: WindowPositionArea): {
@@ -44,6 +49,27 @@ export function getFloatingWindowTopRightPosition(area: WindowPositionArea): {
   };
 }
 
+export function getFloatingWindowPointerPosition(
+  area: WindowPositionArea,
+  pointer: FloatingWindowPointer,
+): {
+  x: number;
+  y: number;
+} {
+  const margin = FLOATING_WINDOW_MARGIN * area.scaleFactor;
+  const width = FLOATING_WINDOW_BOUNDS.width * area.scaleFactor;
+  const height = FLOATING_WINDOW_BOUNDS.height * area.scaleFactor;
+  const minX = area.position.x + margin;
+  const minY = area.position.y + margin;
+  const maxX = area.position.x + area.size.width - width - margin;
+  const maxY = area.position.y + area.size.height - height - margin;
+
+  return {
+    x: Math.round(clamp(pointer.screenX - width / 2, minX, maxX)),
+    y: Math.round(clamp(pointer.screenY - height / 2, minY, maxY)),
+  };
+}
+
 export function getMainWindowCenteredPosition(area: WindowPositionArea): {
   x: number;
   y: number;
@@ -55,6 +81,10 @@ export function getMainWindowCenteredPosition(area: WindowPositionArea): {
     x: Math.round(area.position.x + (area.size.width - width) / 2),
     y: Math.round(area.position.y + (area.size.height - height) / 2),
   };
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
 }
 
 export function getClipboardPreview(summary: string | null | undefined): string {

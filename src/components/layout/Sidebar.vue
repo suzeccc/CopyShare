@@ -1,11 +1,20 @@
 <script setup lang="ts">
-import { History, Home, Info, MonitorSmartphone, Settings, Smartphone } from "lucide-vue-next";
+import {
+  FileUp,
+  History,
+  Home,
+  Info,
+  MonitorSmartphone,
+  Settings,
+  Smartphone,
+} from "lucide-vue-next";
 
 const items = [
   { label: "总览", path: "/", icon: Home },
   { label: "设备连接", path: "/devices", icon: MonitorSmartphone },
-  { label: "手机扫码", path: "/mobile", icon: Smartphone },
-  { label: "连接与粘贴日志", path: "/logs", icon: History },
+  { label: "文件传输", path: "/files", icon: FileUp },
+  { label: "手机连接", path: "/mobile", icon: Smartphone },
+  { label: "连接与剪贴日志", path: "/logs", icon: History },
   { label: "设置", path: "/settings", icon: Settings },
   { label: "关于", path: "/about", icon: Info },
 ];
@@ -33,7 +42,9 @@ const items = [
 
     <div class="mt-auto rounded-lg border border-[color:var(--main-line-soft)] bg-[color:var(--main-bg-soft)] p-3 text-xs text-slate-400">
       <p class="font-medium text-slate-200">局域网直连</p>
-      <p class="mt-1 leading-5">发现附近设备，确认信任后即可同步剪贴板内容。</p>
+      <p class="mt-1 leading-5">
+        发现附近设备，确认信任后即可同步剪贴板内容和传输文件。
+      </p>
     </div>
   </aside>
 </template>
