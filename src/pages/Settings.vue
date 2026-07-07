@@ -7,6 +7,7 @@ import Card from "@/components/ui/Card.vue";
 import Switch from "@/components/ui/Switch.vue";
 import { clampPort } from "@/lib/format";
 import { getSaveFeedbackView, type SaveFeedbackState } from "@/lib/saveFeedback";
+import { sendTestNotification } from "@/lib/tauri";
 import { useConfigStore } from "@/stores/config";
 import { useToastStore } from "@/stores/toasts";
 import type { AppConfig, AppTheme, CloseAction } from "@/types/config";
@@ -17,7 +18,7 @@ const toastStore = useToastStore();
 const draft = reactive({ ...configStore.config });
 const themeOptions: Array<{ value: AppTheme; label: string; hint: string }> = [
   { value: "win11Dark", label: "Win11 深色", hint: "深灰卡片与系统设置风格" },
-  { value: "copyBlue", label: "经典蓝", hint: "当前深蓝控制台风格" },
+  { value: "copyBlue", label: "茶话绿", hint: "茶话间深黑绿风格" },
 ];
 const closeActionOptions: Array<{ value: CloseAction; label: string; hint: string }> = [
   { value: "ask", label: "每次询问", hint: "点击关闭时弹出选择提示" },
@@ -26,8 +27,17 @@ const closeActionOptions: Array<{ value: CloseAction; label: string; hint: strin
 ];
 const basicSettingsSaving = ref(false);
 const syncContentSaving = ref(false);
+const notificationSettingsSaving = ref(false);
 const saveFeedbackState = ref<SaveFeedbackState>("idle");
 let saveFeedbackTimer: number | null = null;
+type NotificationSettingKey =
+  | "desktopNotifications"
+  | "notifyClipboard"
+  | "notifyTrustRequired"
+  | "notifyFileTransfer"
+  | "notifyDeviceStatus"
+  | "notifySyncError"
+  | "notificationClipboardPreview";
 
 function applyThemePreview(theme: AppTheme) {
   document.documentElement.dataset.appTheme = theme;
@@ -42,6 +52,17 @@ watch(
       draft.syncImage = next.syncImage;
       draft.syncFiles = next.syncFiles;
       draft.trustedDevices = next.trustedDevices;
+      return;
+    }
+
+    if (notificationSettingsSaving.value) {
+      draft.desktopNotifications = next.desktopNotifications;
+      draft.notifyClipboard = next.notifyClipboard;
+      draft.notifyTrustRequired = next.notifyTrustRequired;
+      draft.notifyFileTransfer = next.notifyFileTransfer;
+      draft.notifyDeviceStatus = next.notifyDeviceStatus;
+      draft.notifySyncError = next.notifySyncError;
+      draft.notificationClipboardPreview = next.notificationClipboardPreview;
       return;
     }
 
@@ -143,6 +164,70 @@ async function saveSyncSetting(patch: Pick<AppConfig, "syncImage">) {
 async function saveSyncImage(syncImage: boolean) {
   await saveSyncSetting({ syncImage });
 }
+
+async function saveNotificationSetting(patch: Partial<Pick<AppConfig, NotificationSettingKey>>) {
+  if (configStore.saving || notificationSettingsSaving.value) return;
+
+  notificationSettingsSaving.value = true;
+  Object.assign(draft, patch);
+
+  try {
+    await configStore.save({
+      ...configStore.config,
+      ...patch,
+      syncText: true,
+      syncFiles: false,
+    });
+
+    if (configStore.error) {
+      for (const key of Object.keys(patch) as NotificationSettingKey[]) {
+        draft[key] = configStore.config[key];
+      }
+      toastStore.error("保存失败");
+    } else {
+      toastStore.success("保存成功");
+    }
+  } finally {
+    notificationSettingsSaving.value = false;
+  }
+}
+
+async function saveDesktopNotifications(desktopNotifications: boolean) {
+  await saveNotificationSetting({ desktopNotifications });
+}
+
+async function saveNotifyClipboard(notifyClipboard: boolean) {
+  await saveNotificationSetting({ notifyClipboard });
+}
+
+async function saveNotifyTrustRequired(notifyTrustRequired: boolean) {
+  await saveNotificationSetting({ notifyTrustRequired });
+}
+
+async function saveNotifyFileTransfer(notifyFileTransfer: boolean) {
+  await saveNotificationSetting({ notifyFileTransfer });
+}
+
+async function saveNotifyDeviceStatus(notifyDeviceStatus: boolean) {
+  await saveNotificationSetting({ notifyDeviceStatus });
+}
+
+async function saveNotifySyncError(notifySyncError: boolean) {
+  await saveNotificationSetting({ notifySyncError });
+}
+
+async function saveNotificationClipboardPreview(notificationClipboardPreview: boolean) {
+  await saveNotificationSetting({ notificationClipboardPreview });
+}
+
+async function testDesktopNotification() {
+  try {
+    await sendTestNotification();
+    toastStore.success("测试通知已发送");
+  } catch (error) {
+    toastStore.error(`测试通知发送失败：${String(error)}`);
+  }
+}
 </script>
 
 <template>
@@ -189,19 +274,22 @@ async function saveSyncImage(syncImage: boolean) {
         </div>
         <div data-close-action-setting>
           <p class="mb-2 text-xs font-medium text-slate-400">关闭按钮行为</p>
-          <div class="grid gap-2 sm:grid-cols-3">
+          <div
+            data-close-action-options
+            class="grid gap-2 rounded-2xl border border-[color:var(--main-line-soft)] bg-[color:var(--panel-bg-soft)] p-1 sm:grid-cols-3"
+          >
             <button
               v-for="option in closeActionOptions"
               :key="option.value"
               type="button"
-              class="rounded-lg border px-4 py-3 text-left transition hover:border-[color:var(--main-line)] hover:bg-[color:var(--main-bg-muted)]"
+              class="min-h-[58px] rounded-xl px-3 py-2 text-left transition"
               :class="draft.closeAction === option.value
-                ? 'border-[color:var(--theme-accent)] bg-[color:var(--main-bg-muted)] text-white ring-1 ring-[color:var(--theme-accent)]'
-                : 'border-[color:var(--main-line-soft)] bg-[color:var(--panel-bg-soft)] text-slate-300'"
+                ? 'bg-[color:var(--main-bg-muted)] text-white shadow-[inset_0_0_0_1px_var(--theme-accent)]'
+                : 'text-slate-300 hover:bg-[color:var(--main-bg-soft)] hover:text-white'"
               @click="draft.closeAction = option.value"
             >
-              <span class="block text-sm font-semibold">{{ option.label }}</span>
-              <span class="mt-1 block text-xs leading-5 text-slate-400">{{ option.hint }}</span>
+              <span class="text-sm font-semibold">{{ option.label }}</span>
+              <span class="mt-1 block truncate text-xs leading-4 text-slate-400">{{ option.hint }}</span>
             </button>
           </div>
         </div>
@@ -233,7 +321,7 @@ async function saveSyncImage(syncImage: boolean) {
     <Card>
       <p class="text-sm font-semibold text-white">同步内容</p>
       <div class="mt-5 grid gap-3">
-        <Switch v-model="draft.syncText" label="同步文本" hint="MVP 默认开启，只同步文本剪贴板" disabled />
+        <Switch v-model="draft.syncText" label="同步文本" hint="只同步文本剪贴板" disabled />
         <Switch
           :model-value="draft.syncImage"
           label="同步图片"
@@ -248,6 +336,73 @@ async function saveSyncImage(syncImage: boolean) {
         <p class="mt-2 text-sm text-slate-300">
           {{ draft.trustedDevices.length ? `${draft.trustedDevices.length} 台` : "暂无" }}
         </p>
+      </div>
+    </Card>
+
+    <Card data-desktop-notification-settings>
+      <p class="text-sm font-semibold text-white">桌面通知</p>
+      <p class="mt-2 text-sm text-slate-400">
+        在右下角提醒剪贴板、信任确认、文件传输和同步异常，点击通知会打开对应页面。
+      </p>
+      <div class="mt-4">
+        <Button
+          variant="secondary"
+          :disabled="!draft.desktopNotifications"
+          @click="testDesktopNotification"
+        >
+          发送测试通知
+        </Button>
+      </div>
+      <div class="mt-5 grid gap-3">
+        <Switch
+          :model-value="draft.desktopNotifications"
+          label="启用桌面通知"
+          hint="关闭后不再显示系统右下角通知"
+          :disabled="notificationSettingsSaving"
+          @update:model-value="saveDesktopNotifications"
+        />
+        <Switch
+          :model-value="draft.notifyClipboard"
+          label="剪贴板内容提醒"
+          hint="收到其他设备或手机发送的剪贴板内容时提醒"
+          :disabled="notificationSettingsSaving || !draft.desktopNotifications"
+          @update:model-value="saveNotifyClipboard"
+        />
+        <Switch
+          :model-value="draft.notifyTrustRequired"
+          label="信任确认提醒"
+          hint="有新设备需要确认信任时提醒"
+          :disabled="notificationSettingsSaving || !draft.desktopNotifications"
+          @update:model-value="saveNotifyTrustRequired"
+        />
+        <Switch
+          :model-value="draft.notifyFileTransfer"
+          label="文件传输提醒"
+          hint="收到文件请求、传输完成或失败时提醒"
+          :disabled="notificationSettingsSaving || !draft.desktopNotifications"
+          @update:model-value="saveNotifyFileTransfer"
+        />
+        <Switch
+          :model-value="draft.notifyDeviceStatus"
+          label="设备上线/离线提醒"
+          hint="发现设备上线或离线时提醒"
+          :disabled="notificationSettingsSaving || !draft.desktopNotifications"
+          @update:model-value="saveNotifyDeviceStatus"
+        />
+        <Switch
+          :model-value="draft.notifySyncError"
+          label="同步异常提醒"
+          hint="连接、监听、剪贴板写入等异常时提醒"
+          :disabled="notificationSettingsSaving || !draft.desktopNotifications"
+          @update:model-value="saveNotifySyncError"
+        />
+        <Switch
+          :model-value="draft.notificationClipboardPreview"
+          label="通知中显示剪贴板预览"
+          hint="仅显示前 60 个字符"
+          :disabled="notificationSettingsSaving || !draft.desktopNotifications || !draft.notifyClipboard"
+          @update:model-value="saveNotificationClipboardPreview"
+        />
       </div>
     </Card>
   </div>

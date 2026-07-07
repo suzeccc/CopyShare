@@ -53,7 +53,7 @@ const restoreMainWindowSource =
 
 assert.match(
   restoreMainWindowSource,
-  /await moveMainWindowToCenter\(window\);[\s\S]*await window\.setSize\(/,
+  /await window\.setSize\([\s\S]*MAIN_WINDOW_BOUNDS\.height[\s\S]*\);[\s\S]*await moveMainWindowToCenter\(\);/,
 );
 
 assert.doesNotMatch(

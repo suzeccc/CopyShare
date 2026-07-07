@@ -19,6 +19,10 @@ assert.match(app, /startup-logo-link/);
 assert.match(app, /startup-progress/);
 
 assert.match(style, /\.startup-overlay \{/);
+assert.match(
+  style,
+  /\.startup-overlay \{[^}]*border-radius: 18px;[^}]*overflow: hidden;[^}]*\}/,
+);
 assert.match(style, /\.startup-card \{/);
 assert.match(style, /\.startup-logo::before/);
 assert.match(style, /\.startup-logo::after/);

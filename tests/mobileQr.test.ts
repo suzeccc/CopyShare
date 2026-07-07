@@ -12,7 +12,7 @@ assert.match(router, /name: "mobile"/);
 
 assert.match(sidebar, /Smartphone/);
 assert.match(sidebar, /path: "\/mobile"/);
-assert.match(sidebar, /手机扫码/);
+assert.match(sidebar, /手机连接/);
 
 assert.match(tauri, /createMobileSession/);
 assert.match(tauri, /invoke<MobileSessionView>\("create_mobile_session"/);

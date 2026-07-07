@@ -20,17 +20,17 @@ import {
   getDeviceRejectedNotice,
   historicalDevices,
   markDeviceDisconnected,
+  markDeviceRejected,
   markDeviceTrusted,
   mergeRefreshedDevices,
   pendingTrustDevices,
-  removeDeviceByKey,
   shouldSkipManualConnect,
   upsertDevice,
 } from "@/lib/deviceList";
 import { connectionSuccessMessage, shouldShowConnectionSuccess } from "@/lib/deviceToast";
 import { useStatusStore } from "@/stores/status";
 import { useToastStore } from "@/stores/toasts";
-import type { DeviceInfo } from "@/types/device";
+import type { DeviceInfo, LanDiscoveryProgress } from "@/types/device";
 
 export const useDevicesStore = defineStore("devices", {
   state: () => ({
@@ -39,6 +39,7 @@ export const useDevicesStore = defineStore("devices", {
     loading: false,
     error: null as string | null,
     disconnectNotice: null as string | null,
+    lanDiscoveryProgress: null as LanDiscoveryProgress | null,
   }),
   getters: {
     connected: (state) => connectedTrustedDevices(state.devices),
@@ -94,7 +95,7 @@ export const useDevicesStore = defineStore("devices", {
     async reject(deviceId: string) {
       this.error = null;
       await rejectDevice(deviceId);
-      this.devices = removeDeviceByKey(this.devices, deviceId);
+      this.devices = markDeviceRejected(this.devices, deviceId);
       await useStatusStore().refresh();
     },
     upsert(device: DeviceInfo) {
@@ -106,6 +107,9 @@ export const useDevicesStore = defineStore("devices", {
     async subscribe() {
       await Promise.all([
         onAppEvent<DeviceInfo>("device-discovered", (device) => this.upsert(device)),
+        onAppEvent<LanDiscoveryProgress>("lan-discovery-progress", (progress) => {
+          this.lanDiscoveryProgress = progress;
+        }),
         onAppEvent<DeviceInfo>("device-connected", (device) => {
           this.disconnectNotice = null;
           this.upsert(device);

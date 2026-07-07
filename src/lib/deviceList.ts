@@ -56,6 +56,7 @@ export function historicalDevices(devices: DeviceInfo[]): DeviceInfo[] {
       ...preferred,
       trusted: existing.trusted || device.trusted,
       remoteTrusted: existing.remoteTrusted || device.remoteTrusted,
+      hasConnectedBefore: existing.hasConnectedBefore || device.hasConnectedBefore,
       connected: existing.connected || device.connected,
       status: existing.connected || device.connected ? "online" : preferred.status,
       lastSeenAt: existing.lastSeenAt ?? device.lastSeenAt,
@@ -70,7 +71,13 @@ export function markDeviceTrusted(
   deviceKey: string,
 ): DeviceInfo[] {
   return devices.map((device) =>
-    deviceMatchesKey(device, deviceKey) ? { ...device, trusted: true } : device,
+    deviceMatchesKey(device, deviceKey)
+      ? {
+          ...device,
+          trusted: true,
+          hasConnectedBefore: device.hasConnectedBefore || device.remoteTrusted,
+        }
+      : device,
   );
 }
 
@@ -85,6 +92,32 @@ export function markDeviceDisconnected(
   );
 }
 
+export function markDeviceRejected(
+  devices: DeviceInfo[],
+  deviceKey: string,
+): DeviceInfo[] {
+  return devices.flatMap((device) => {
+    if (!deviceMatchesKey(device, deviceKey)) {
+      return [device];
+    }
+
+    if (!hasSuccessfulConnection(device)) {
+      return [];
+    }
+
+    return [
+      {
+        ...device,
+        connected: false,
+        trusted: false,
+        remoteTrusted: false,
+        hasConnectedBefore: true,
+        status: "offline",
+      },
+    ];
+  });
+}
+
 export function applyDeviceDisconnected(
   devices: DeviceInfo[],
   disconnectedDevice: DeviceInfo,
@@ -97,11 +130,16 @@ export function applyDeviceDisconnected(
   const deviceKey = existing?.id ?? disconnectedDevice.id;
   const trusted = existing?.trusted || disconnectedDevice.trusted;
   const remoteTrusted = existing?.remoteTrusted || disconnectedDevice.remoteTrusted;
+  const hasConnectedBefore =
+    existing?.hasConnectedBefore ||
+    disconnectedDevice.hasConnectedBefore ||
+    (trusted && remoteTrusted);
   const next = upsertDevice(devices, {
     ...disconnectedDevice,
     connected: false,
     trusted,
     remoteTrusted,
+    hasConnectedBefore,
     status: "offline",
   });
 
@@ -112,6 +150,7 @@ export function applyDeviceDisconnected(
           connected: false,
           trusted: device.trusted || trusted,
           remoteTrusted: device.remoteTrusted || remoteTrusted,
+          hasConnectedBefore: device.hasConnectedBefore || hasConnectedBefore,
           status: "offline",
           lastSeenAt: disconnectedDevice.lastSeenAt ?? device.lastSeenAt,
         }
@@ -208,6 +247,11 @@ function mergeDevice(existing: DeviceInfo, incoming: DeviceInfo): DeviceInfo {
       ...existing,
       trusted: existing.trusted || incoming.trusted,
       remoteTrusted: existing.remoteTrusted || incoming.remoteTrusted,
+      hasConnectedBefore:
+        hasSuccessfulConnection(existing) ||
+        hasSuccessfulConnection(incoming) ||
+        ((existing.trusted || incoming.trusted) &&
+          (existing.remoteTrusted || incoming.remoteTrusted)),
       lastSeenAt: incoming.lastSeenAt ?? existing.lastSeenAt,
     };
   }
@@ -217,22 +261,39 @@ function mergeDevice(existing: DeviceInfo, incoming: DeviceInfo): DeviceInfo {
       ...existing,
       connected: true,
       remoteTrusted: existing.remoteTrusted || incoming.remoteTrusted,
+      hasConnectedBefore:
+        hasSuccessfulConnection(existing) ||
+        hasSuccessfulConnection(incoming) ||
+        (existing.remoteTrusted || incoming.remoteTrusted),
       lastSeenAt: incoming.lastSeenAt ?? existing.lastSeenAt,
       status: "online",
     };
   }
 
+  const trusted = incoming.trusted || (existing.connected && existing.trusted);
+  const remoteTrusted =
+    incoming.remoteTrusted || (existing.connected && existing.remoteTrusted);
+  const connected = incoming.connected || existing.connected;
+
   return {
     ...incoming,
-    trusted: incoming.trusted || (existing.connected && existing.trusted),
-    remoteTrusted: incoming.remoteTrusted || (existing.connected && existing.remoteTrusted),
-    connected: incoming.connected || existing.connected,
-    status: incoming.connected || existing.connected ? "online" : incoming.status,
+    trusted,
+    remoteTrusted,
+    hasConnectedBefore:
+      hasSuccessfulConnection(existing) ||
+      hasSuccessfulConnection(incoming) ||
+      (connected && trusted && remoteTrusted),
+    connected,
+    status: connected ? "online" : incoming.status,
   };
 }
 
 function isMutuallyTrustedConnectedDevice(device: DeviceInfo): boolean {
   return device.connected && device.trusted && device.remoteTrusted;
+}
+
+function hasSuccessfulConnection(device: DeviceInfo): boolean {
+  return device.hasConnectedBefore || (device.trusted && device.remoteTrusted);
 }
 
 function preferHistoryDevice(existing: DeviceInfo, incoming: DeviceInfo): DeviceInfo {

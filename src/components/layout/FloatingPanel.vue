@@ -17,7 +17,7 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  (event: "restore", pointer: { clientX: number; clientY: number }): void;
+  (event: "restore", pointer: { clientX: number; clientY: number; screenX: number; screenY: number }): void;
   (event: "hide"): void;
   (event: "close"): void;
 }>();
@@ -38,6 +38,8 @@ function restoreMainPanel(event: MouseEvent) {
   emit("restore", {
     clientX: event.clientX,
     clientY: event.clientY,
+    screenX: event.screenX,
+    screenY: event.screenY,
   });
 }
 </script>

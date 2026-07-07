@@ -17,6 +17,7 @@ function trustedDevice(connected: boolean): DeviceInfo {
     connected,
     trusted: true,
     remoteTrusted: true,
+    hasConnectedBefore: true,
     lastSeenAt: connected ? "2026-06-23T18:51:11Z" : "2026-06-23T18:52:20Z",
     status: connected ? "online" : "offline",
   };

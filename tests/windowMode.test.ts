@@ -4,13 +4,14 @@ import {
   FLOATING_WINDOW_BOUNDS,
   FLOATING_WINDOW_MARGIN,
   MAIN_WINDOW_BACKGROUND,
+  getFloatingWindowPointerPosition,
   getFloatingWindowTopRightPosition,
 } from "../src/lib/windowMode.ts";
 
 assert.equal(FLOATING_WINDOW_BOUNDS.width, 340);
 assert.equal(FLOATING_WINDOW_BOUNDS.height, 320);
 assert.equal(FLOATING_WINDOW_MARGIN, 16);
-assert.equal(MAIN_WINDOW_BACKGROUND, "#10203a");
+assert.equal(MAIN_WINDOW_BACKGROUND, "#0b100e");
 
 assert.deepEqual(
   getFloatingWindowTopRightPosition({
@@ -28,4 +29,28 @@ assert.deepEqual(
     scaleFactor: 2,
   }),
   { x: 3768, y: 32 },
+);
+
+assert.deepEqual(
+  getFloatingWindowPointerPosition(
+    {
+      position: { x: 0, y: 0 },
+      size: { width: 1920, height: 1080 },
+      scaleFactor: 1,
+    },
+    { screenX: 960, screenY: 540 },
+  ),
+  { x: 790, y: 380 },
+);
+
+assert.deepEqual(
+  getFloatingWindowPointerPosition(
+    {
+      position: { x: 0, y: 0 },
+      size: { width: 1920, height: 1080 },
+      scaleFactor: 1,
+    },
+    { screenX: 5, screenY: 5 },
+  ),
+  { x: 16, y: 16 },
 );

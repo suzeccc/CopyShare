@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { ShieldCheck, ShieldQuestion, ShieldX, WifiOff, X } from "lucide-vue-next";
 
 import Button from "@/components/ui/Button.vue";
+import FileTransferOfferDialog from "@/components/fileTransfer/FileTransferOfferDialog.vue";
 import FloatingPanel from "@/components/layout/FloatingPanel.vue";
 import Sidebar from "@/components/layout/Sidebar.vue";
 import TitleBar from "@/components/layout/TitleBar.vue";
@@ -142,7 +143,7 @@ function setWindowTransitionOrigin(pointer?: WindowTransitionPointer) {
 
 async function switchWindowMode(
   nextMode: AppWindowMode,
-  resizeWindow: () => Promise<void>,
+  resizeWindow: (pointer?: WindowTransitionPointer) => Promise<void>,
   pointer?: WindowTransitionPointer,
 ) {
   if (isSwitchingWindowMode.value) {
@@ -160,7 +161,7 @@ async function switchWindowMode(
 
   try {
     await wait(WINDOW_MODE_EXIT_MS);
-    await resizeWindow();
+    await resizeWindow(pointer);
     windowMode.value = nextMode;
     transitionPhase.value = transition.enterPhase;
     await waitForPaint();
@@ -174,8 +175,12 @@ async function switchWindowMode(
   }
 }
 
+async function enterFloatingWindowAtPointer(pointer?: WindowTransitionPointer) {
+  await enterFloatingWindow();
+}
+
 async function switchToFloatingMode(pointer: WindowTransitionPointer) {
-  await switchWindowMode("floating", enterFloatingWindow, pointer);
+  await switchWindowMode("floating", enterFloatingWindowAtPointer, pointer);
 }
 
 async function switchToMainMode(pointer: WindowTransitionPointer) {
@@ -317,5 +322,8 @@ async function rejectPromptDevice() {
         </section>
       </div>
     </Transition>
+
+    <FileTransferOfferDialog v-if="!isFloating" />
+
   </div>
 </template>

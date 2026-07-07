@@ -3,12 +3,14 @@ use std::{fs, path::PathBuf};
 use tauri::{AppHandle, Manager};
 
 use crate::{
+    discovery,
     error::AppResult,
     models::{new_device_id, AppConfig},
+    security,
 };
 
 const CONFIG_FILE: &str = "config.json";
-const CURRENT_CONFIG_VERSION: u16 = 1;
+const CURRENT_CONFIG_VERSION: u16 = 3;
 
 pub fn load_config(app: &AppHandle) -> AppResult<AppConfig> {
     let path = config_path(app)?;
@@ -22,6 +24,7 @@ pub fn load_config(app: &AppHandle) -> AppResult<AppConfig> {
     let mut config: AppConfig = serde_json::from_str(&text)?;
     let mut changed = ensure_config_device_id(&mut config);
     changed |= migrate_config(&mut config);
+    changed |= normalize_config(&mut config);
     if changed {
         save_config(app, &config)?;
     }
@@ -30,7 +33,9 @@ pub fn load_config(app: &AppHandle) -> AppResult<AppConfig> {
 
 pub fn save_config(app: &AppHandle, config: &AppConfig) -> AppResult<()> {
     let path = config_path(app)?;
-    let text = serde_json::to_string_pretty(config)?;
+    let mut normalized = config.clone();
+    normalize_config(&mut normalized);
+    let text = serde_json::to_string_pretty(&normalized)?;
     fs::write(path, text)?;
     Ok(())
 }
@@ -56,8 +61,20 @@ fn migrate_config(config: &mut AppConfig) -> bool {
     }
 
     config.sync_image = true;
+    config.notification_clipboard_preview = true;
+    config.notify_device_status = true;
     config.config_version = CURRENT_CONFIG_VERSION;
     true
+}
+
+pub(crate) fn normalize_config(config: &mut AppConfig) -> bool {
+    let mut changed = security::normalize_trusted_devices(config);
+    let normalized_ranges = discovery::merge_scan_ranges(&config.discovery_scan_ranges, &[]);
+    if config.discovery_scan_ranges != normalized_ranges {
+        config.discovery_scan_ranges = normalized_ranges;
+        changed = true;
+    }
+    changed
 }
 
 #[cfg(test)]
@@ -78,6 +95,14 @@ mod tests {
         assert!(config.sync_image);
         assert!(!config.sync_files);
         assert!(config.trusted_devices.is_empty());
+        assert!(config.discovery_scan_ranges.is_empty());
+        assert!(config.desktop_notifications);
+        assert!(config.notify_clipboard);
+        assert!(config.notify_trust_required);
+        assert!(config.notify_file_transfer);
+        assert!(config.notify_device_status);
+        assert!(config.notify_sync_error);
+        assert!(config.notification_clipboard_preview);
     }
 
     #[test]
@@ -117,13 +142,48 @@ mod tests {
         let mut config: AppConfig = serde_json::from_value(json).unwrap();
 
         assert!(super::migrate_config(&mut config));
-        assert_eq!(config.config_version, 1);
+        assert_eq!(config.config_version, 3);
         assert!(config.sync_image);
+        assert!(config.notification_clipboard_preview);
+        assert!(config.notify_device_status);
 
         config.sync_image = false;
+        config.notification_clipboard_preview = false;
+        config.notify_device_status = false;
         assert!(!super::migrate_config(&mut config));
-        assert_eq!(config.config_version, 1);
+        assert_eq!(config.config_version, 3);
         assert!(!config.sync_image);
+        assert!(!config.notification_clipboard_preview);
+        assert!(!config.notify_device_status);
+    }
+
+    #[test]
+    fn normalize_config_removes_endpoint_trust_aliases_and_duplicates() {
+        let mut config = AppConfig {
+            trusted_devices: vec![
+                "device-a".to_string(),
+                "10.194.33.156:8765".to_string(),
+                "ws://10.194.33.156:8765/".to_string(),
+                "device-a".to_string(),
+                "device-b".to_string(),
+            ],
+            discovery_scan_ranges: vec![
+                "192.168.1.23/24".to_string(),
+                "192.168.1.0/24".to_string(),
+                "10.0.0.1/24".to_string(),
+                "8.8.8.0/24".to_string(),
+                "bad".to_string(),
+            ],
+            ..AppConfig::default()
+        };
+
+        assert!(super::normalize_config(&mut config));
+        assert_eq!(config.trusted_devices, vec!["device-a", "device-b"]);
+        assert_eq!(
+            config.discovery_scan_ranges,
+            vec!["192.168.1.0/24", "10.0.0.0/24"]
+        );
+        assert!(!super::normalize_config(&mut config));
     }
 
     #[test]

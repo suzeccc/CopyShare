@@ -6,7 +6,7 @@ use futures_util::{SinkExt, StreamExt};
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter};
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio_tungstenite::{accept_async, connect_async, tungstenite::Message, WebSocketStream};
 use uuid::Uuid;
@@ -16,6 +16,7 @@ use crate::{
     config as app_config,
     device_store,
     error::{AppError, AppResult},
+    file_transfer,
     history,
     mobile,
     models::{
@@ -23,6 +24,7 @@ use crate::{
         SyncState, SyncStatus, WireMessage,
     },
     network,
+    notifications,
     security,
     state::AppState,
 };
@@ -165,6 +167,7 @@ pub async fn run_sync_runtime(app: AppHandle, state: AppState, mut stop_rx: watc
         Err(error) => {
             let message = format!("无法监听端口 {}：{}", config.port, error);
             state.set_error(message.clone()).await;
+            notifications::notify_sync_error(&app, &config, &message);
             let _ = app.emit("sync-error", message);
             return;
         }
@@ -189,18 +192,38 @@ pub async fn run_sync_runtime(app: AppHandle, state: AppState, mut stop_rx: watc
                         let app_for_task = app.clone();
                         let state_for_task = state.clone();
                         tauri::async_runtime::spawn(async move {
+                            if is_file_transfer_http_stream(&stream).await {
+                                if let Err(error) = file_transfer::manager()
+                                    .serve_download_connection(app_for_task.clone(), stream)
+                                    .await
+                                {
+                                    emit_sync_error(
+                                        &app_for_task,
+                                        &state_for_task,
+                                        format!("文件下载请求失败：{error}"),
+                                    )
+                                    .await;
+                                }
+                                return;
+                            }
+
                             match accept_async(stream).await {
                                 Ok(socket) => {
                                     let _ = spawn_socket(app_for_task, state_for_task, connection_id, socket).await;
                                 }
                                 Err(error) => {
-                                    let _ = app_for_task.emit("sync-error", format!("WebSocket 握手失败：{error}"));
+                                    emit_sync_error(
+                                        &app_for_task,
+                                        &state_for_task,
+                                        format!("WebSocket 握手失败：{error}"),
+                                    )
+                                    .await;
                                 }
                             }
                         });
                     }
                     Err(error) => {
-                        let _ = app.emit("sync-error", format!("设备连接失败：{error}"));
+                        emit_sync_error(&app, &state, format!("设备连接失败：{error}")).await;
                     }
                 }
             }
@@ -213,13 +236,28 @@ pub async fn run_sync_runtime(app: AppHandle, state: AppState, mut stop_rx: watc
     emit_status(&app, &state).await;
 }
 
+async fn is_file_transfer_http_stream(stream: &TcpStream) -> bool {
+    let mut buffer = [0_u8; 128];
+    match tokio::time::timeout(Duration::from_secs(2), stream.peek(&mut buffer)).await {
+        Ok(Ok(read)) => is_file_transfer_http_request_prefix(&buffer[..read]),
+        _ => false,
+    }
+}
+
+fn is_file_transfer_http_request_prefix(bytes: &[u8]) -> bool {
+    let Ok(text) = std::str::from_utf8(bytes) else {
+        return false;
+    };
+    text.starts_with("GET /file-transfer ") || text.starts_with("GET /file-transfer?")
+}
+
 pub fn start_clipboard_monitor(app: AppHandle, state: AppState) {
     tauri::async_runtime::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_millis(450));
         loop {
             interval.tick().await;
             if let Err(error) = poll_local_clipboard(&app, &state).await {
-                let _ = app.emit("sync-error", error.to_string());
+                emit_sync_error(&app, &state, error.to_string()).await;
             }
         }
     });
@@ -324,6 +362,7 @@ pub async fn connect_to_peer(
         connected: true,
         trusted: false,
         remote_trusted: false,
+        has_connected_before: false,
         last_seen_at: Some(Utc::now()),
         status: DeviceStatus::Online,
     };
@@ -394,7 +433,8 @@ where
                 _ = heartbeat.tick() => {
                     let now = tokio::time::Instant::now();
                     if heartbeat_timed_out(last_seen_at, now) {
-                        let _ = app_for_task.emit("sync-error", "设备连接超时，已标记离线".to_string());
+                        emit_sync_error(&app_for_task, &state_for_task, "设备连接超时，已标记离线")
+                            .await;
                         break;
                     }
                     if sink.send(Message::Ping(Vec::new().into())).await.is_err() {
@@ -412,7 +452,7 @@ where
                             }
                         }
                         Err(error) => {
-                            let _ = app_for_task.emit("sync-error", error.to_string());
+                            emit_sync_error(&app_for_task, &state_for_task, error.to_string()).await;
                         }
                     }
                 }
@@ -434,7 +474,12 @@ where
                         }
                         Some(Ok(_)) => {}
                         Some(Err(error)) => {
-                            let _ = app_for_task.emit("sync-error", format!("设备消息读取失败：{error}"));
+                            emit_sync_error(
+                                &app_for_task,
+                                &state_for_task,
+                                format!("设备消息读取失败：{error}"),
+                            )
+                            .await;
                             break;
                         }
                     }
@@ -466,7 +511,7 @@ async fn handle_wire_text(app: &AppHandle, state: &AppState, connection_id: &str
     let message = match network::decode_wire_message(text) {
         Ok(message) => message,
         Err(error) => {
-            let _ = app.emit("sync-error", format!("忽略无效消息：{error}"));
+            emit_sync_error(app, state, format!("忽略无效消息：{error}")).await;
             return;
         }
     };
@@ -495,13 +540,14 @@ async fn handle_wire_text(app: &AppHandle, state: &AppState, connection_id: &str
                 for key in [connection_id, &device_id, &endpoint] {
                     security::trust_device(&mut config, key);
                 }
+                app_config::normalize_config(&mut config);
                 match app_config::save_config(app, &config) {
                     Ok(()) => {
                         state.set_config(config.clone()).await;
                         let _ = app.emit("config-updated", config.clone());
                     }
                     Err(error) => {
-                        let _ = app.emit("sync-error", error.to_string());
+                        emit_sync_error(app, state, error.to_string()).await;
                     }
                 }
             }
@@ -522,11 +568,15 @@ async fn handle_wire_text(app: &AppHandle, state: &AppState, connection_id: &str
                 connected: true,
                 trusted,
                 remote_trusted: false,
+                has_connected_before: false,
                 last_seen_at: Some(Utc::now()),
                 status: DeviceStatus::Online,
             };
             let device = state.upsert_device(device).await;
             persist_devices(app, state).await;
+            if !device.trusted {
+                notifications::notify_trust_required(app, &config, &device);
+            }
             let _ = app.emit("device-connected", device);
             emit_status(app, state).await;
         }
@@ -537,6 +587,9 @@ async fn handle_wire_text(app: &AppHandle, state: &AppState, connection_id: &str
             trusted_device_ids,
         } => {
             let mut config = state.config().await;
+            let was_remote_trusted = state
+                .peer_remote_trusted(connection_id, &source_device_id)
+                .await;
             if let Some(device) = apply_peer_trust_grant(
                 state,
                 &mut config,
@@ -546,7 +599,18 @@ async fn handle_wire_text(app: &AppHandle, state: &AppState, connection_id: &str
             )
             .await
             {
+                send_reciprocal_trust_grant_if_needed(
+                    state,
+                    &config,
+                    connection_id,
+                    &source_device_id,
+                    was_remote_trusted,
+                )
+                .await;
                 persist_devices(app, state).await;
+                if !device.trusted {
+                    notifications::notify_trust_required(app, &config, &device);
+                }
                 let _ = app.emit("device-connected", device);
                 emit_status(app, state).await;
             }
@@ -566,11 +630,132 @@ async fn handle_wire_text(app: &AppHandle, state: &AppState, connection_id: &str
                 emit_status(app, state).await;
             }
         }
+        WireMessage::FileOffer {
+            transfer_id,
+            sender_device_id,
+            sender_device_name,
+            files,
+            total_size,
+            file_count,
+            download_host,
+            download_port,
+        } => {
+            file_transfer::handle_file_offer(
+                app,
+                state,
+                connection_id,
+                file_transfer::IncomingFileOffer {
+                    transfer_id,
+                    sender_device_id,
+                    sender_device_name,
+                    files,
+                    total_size,
+                    file_count,
+                    download_host,
+                    download_port,
+                },
+            )
+            .await;
+        }
+        WireMessage::FileAccept {
+            transfer_id,
+            receiver_device_id,
+            receiver_device_name: _,
+        } => {
+            file_transfer::handle_file_accept(
+                app,
+                state,
+                connection_id,
+                transfer_id,
+                receiver_device_id,
+            )
+            .await;
+        }
+        WireMessage::FileReject {
+            transfer_id,
+            receiver_device_id,
+            reason,
+        } => {
+            file_transfer::handle_file_reject(
+                app,
+                state,
+                connection_id,
+                transfer_id,
+                receiver_device_id,
+                reason,
+            )
+            .await;
+        }
+        WireMessage::FileProgress {
+            transfer_id,
+            device_id,
+            file_id,
+            file_transferred_bytes,
+            file_size: _,
+            total_transferred_bytes: _,
+            total_size: _,
+        } => {
+            file_transfer::handle_file_progress(
+                app,
+                state,
+                connection_id,
+                transfer_id,
+                device_id,
+                file_id,
+                file_transferred_bytes,
+            )
+            .await;
+        }
+        WireMessage::FileComplete {
+            transfer_id,
+            device_id,
+            files,
+        } => {
+            file_transfer::handle_file_complete(
+                app,
+                state,
+                connection_id,
+                transfer_id,
+                device_id,
+                files,
+            )
+            .await;
+        }
+        WireMessage::FileCancel {
+            transfer_id,
+            device_id,
+        } => {
+            file_transfer::handle_file_cancel(
+                app,
+                state,
+                connection_id,
+                transfer_id,
+                device_id,
+            )
+            .await;
+        }
+        WireMessage::FileError {
+            transfer_id,
+            file_id,
+            device_id,
+            message,
+        } => {
+            file_transfer::handle_file_error(
+                app,
+                state,
+                connection_id,
+                transfer_id,
+                file_id,
+                device_id,
+                message,
+            )
+            .await;
+        }
         WireMessage::Clipboard { .. } => {
             let clipboard = match ClipboardMessage::try_from(message) {
                 Ok(message) => message,
                 Err(error) => {
-                    let _ = app.emit("sync-error", error);
+                    emit_sync_error(app, state, error).await;
                     return;
                 }
             };
@@ -586,9 +771,10 @@ async fn handle_wire_text(app: &AppHandle, state: &AppState, connection_id: &str
             }
             if state.apply_remote_clipboard(&clipboard).await {
                 if let Err(error) = write_remote_clipboard(app, &clipboard) {
-                    let _ = app.emit("sync-error", error.to_string());
+                    emit_sync_error(app, state, error.to_string()).await;
                     return;
                 }
+                notifications::notify_clipboard_received(app, &config, &clipboard);
                 state.touch_last_sync().await;
                 if config.save_history {
                     let item = history::make_history_item(
@@ -797,6 +983,37 @@ async fn apply_peer_trust_grant(
         .await
 }
 
+async fn send_reciprocal_trust_grant_if_needed(
+    state: &AppState,
+    config: &AppConfig,
+    connection_id: &str,
+    source_device_id: &str,
+    was_remote_trusted: bool,
+) -> bool {
+    if was_remote_trusted
+        || !state
+            .peer_connection_matches_device(connection_id, source_device_id)
+            .await
+    {
+        return false;
+    }
+
+    let status = state.status().await;
+    let trusted_device_ids = state.trust_keys_for_device(source_device_id).await;
+    state
+        .send_trusted_to_device(
+            config,
+            source_device_id,
+            WireMessage::TrustGranted {
+                source_device_id: status.device_id,
+                source_device_name: status.device_name,
+                port: status.port,
+                trusted_device_ids,
+            },
+        )
+        .await
+}
+
 async fn build_hello(state: &AppState, connection_id: &str) -> WireMessage {
     let status = state.status().await;
     WireMessage::Hello {
@@ -824,9 +1041,16 @@ async fn emit_status(app: &AppHandle, state: &AppState) {
     let _ = app.emit("sync-status-changed", state.status().await);
 }
 
+async fn emit_sync_error(app: &AppHandle, state: &AppState, message: impl Into<String>) {
+    let message = message.into();
+    let config = state.config().await;
+    notifications::notify_sync_error(app, &config, &message);
+    let _ = app.emit("sync-error", message);
+}
+
 async fn persist_devices(app: &AppHandle, state: &AppState) {
     if let Err(error) = device_store::save_devices(app, &state.devices().await) {
-        let _ = app.emit("sync-error", error.to_string());
+        emit_sync_error(app, state, error.to_string()).await;
     }
 }
 
@@ -1343,6 +1567,106 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn trusted_peer_reciprocates_first_trust_grant_once() {
+        let state = AppState::new();
+        let mut config = crate::models::AppConfig::default();
+        config.device_id = "device-a".to_string();
+        config.device_name = "Laptop A".to_string();
+        config.port = 8766;
+        config.trusted_devices.push("device-b".to_string());
+        state.set_config(config.clone()).await;
+
+        let (sender, mut outbound) = mpsc::unbounded_channel();
+        let join = tauri::async_runtime::spawn(async {
+            futures_util::future::pending::<()>().await;
+        });
+        state
+            .register_peer("a-to-b".to_string(), sender, join)
+            .await;
+        state
+            .attach_peer_device(
+                "a-to-b",
+                "device-b".to_string(),
+                Some("ws://10.0.0.2:8765/".to_string()),
+            )
+            .await;
+
+        assert!(
+            send_reciprocal_trust_grant_if_needed(
+                &state,
+                &config,
+                "a-to-b",
+                "device-b",
+                false,
+            )
+            .await
+        );
+
+        let WireMessage::TrustGranted {
+            source_device_id,
+            source_device_name,
+            port,
+            trusted_device_ids,
+        } = outbound.try_recv().unwrap() else {
+            panic!("trusted peer should receive reciprocal trust grant");
+        };
+        assert_eq!(source_device_id, "device-a");
+        assert_eq!(source_device_name, "Laptop A");
+        assert_eq!(port, 8766);
+        assert!(trusted_device_ids.contains(&"device-b".to_string()));
+
+        assert!(
+            !send_reciprocal_trust_grant_if_needed(
+                &state,
+                &config,
+                "a-to-b",
+                "device-b",
+                true,
+            )
+            .await
+        );
+        assert!(outbound.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn pending_manual_confirmation_does_not_reciprocate_trust_grant() {
+        let state = AppState::new();
+        let mut config = crate::models::AppConfig::default();
+        config.device_id = "device-a".to_string();
+        config.device_name = "Laptop A".to_string();
+        config.trusted_devices.push("device-b".to_string());
+        state.set_config(config.clone()).await;
+
+        let (sender, mut outbound) = mpsc::unbounded_channel();
+        let join = tauri::async_runtime::spawn(async {
+            futures_util::future::pending::<()>().await;
+        });
+        state.mark_manual_trust_required("a-to-b").await;
+        state
+            .register_peer("a-to-b".to_string(), sender, join)
+            .await;
+        state
+            .attach_peer_device(
+                "a-to-b",
+                "device-b".to_string(),
+                Some("ws://10.0.0.2:8765/".to_string()),
+            )
+            .await;
+
+        assert!(
+            !send_reciprocal_trust_grant_if_needed(
+                &state,
+                &config,
+                "a-to-b",
+                "device-b",
+                false,
+            )
+            .await
+        );
+        assert!(outbound.try_recv().is_err());
+    }
+
+    #[tokio::test]
     async fn trust_grant_requires_local_user_confirmation_before_reverse_publish() {
         let state = AppState::new();
         let mut config = crate::models::AppConfig::default();
@@ -1422,6 +1746,7 @@ mod tests {
                 connected: true,
                 trusted: false,
                 remote_trusted: false,
+                has_connected_before: false,
                 last_seen_at: Some(Utc::now()),
                 status: DeviceStatus::Online,
             })
@@ -1659,6 +1984,19 @@ mod tests {
     fn manual_connect_starts_sync_runtime_when_stopped() {
         assert!(should_start_sync_for_manual_connect(false));
         assert!(!should_start_sync_for_manual_connect(true));
+    }
+
+    #[test]
+    fn sync_listener_routes_only_file_transfer_http_requests() {
+        assert!(is_file_transfer_http_request_prefix(
+            b"GET /file-transfer?transfer_id=t&file_id=f&token=x HTTP/1.1\r\nHost: 192.168.1.10:8765\r\n\r\n"
+        ));
+        assert!(is_file_transfer_http_request_prefix(
+            b"GET /file-transfer HTTP/1.1\r\nHost: 192.168.1.10:8765\r\n\r\n"
+        ));
+        assert!(!is_file_transfer_http_request_prefix(
+            b"GET / HTTP/1.1\r\nHost: 192.168.1.10:8765\r\nUpgrade: websocket\r\n\r\n"
+        ));
     }
 
     #[test]

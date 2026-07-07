@@ -5,14 +5,17 @@ mod config;
 mod device_store;
 mod discovery;
 mod error;
+mod file_transfer;
 mod history;
 mod mobile;
 mod models;
 mod network;
+mod notifications;
 mod security;
 mod state;
 mod sync;
 mod tray;
+mod window_position;
 
 use state::AppState;
 use tauri::Manager;
@@ -39,6 +42,8 @@ pub fn run() {
     builder
         .manage(state.clone())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .setup(move |app| {
             #[cfg(desktop)]
             app.handle().plugin(tauri_plugin_autostart::init(
@@ -49,6 +54,7 @@ pub fn run() {
             tauri::async_runtime::block_on(state_for_setup.load_from_disk(app.handle()))?;
             tray::setup_tray(app, state_for_setup.clone())?;
             sync::start_clipboard_monitor(app.handle().clone(), state_for_setup.clone());
+            discovery::start_discovery_runtime(app.handle().clone(), state_for_setup.clone());
 
             let app_handle = app.handle().clone();
             let state_for_auto_sync = state_for_setup.clone();
@@ -60,7 +66,8 @@ pub fn run() {
             });
             if should_auto_sync {
                 tauri::async_runtime::spawn(async move {
-                    let _ = sync::start_sync_runtime(app_handle, state_for_auto_sync).await;
+                    let _ = sync::start_sync_runtime(app_handle.clone(), state_for_auto_sync.clone()).await;
+                    tray::update_tray_status(&app_handle, &state_for_auto_sync).await;
                 });
             }
 
@@ -79,6 +86,15 @@ pub fn run() {
             commands::update_config,
             commands::get_history,
             commands::get_clipboard_history,
+            commands::select_file_for_transfer,
+            commands::select_files_for_transfer,
+            commands::send_file_to_device,
+            commands::send_files_to_device,
+            commands::accept_file_transfer,
+            commands::reject_file_transfer,
+            commands::cancel_file_transfer,
+            commands::get_file_transfers,
+            commands::open_transfer_folder,
             commands::create_mobile_session,
             commands::get_mobile_session_status,
             commands::close_mobile_session,
@@ -87,7 +103,10 @@ pub fn run() {
             commands::copy_history_item,
             commands::open_external_url,
             commands::show_main_window,
-            commands::hide_main_window
+            commands::hide_main_window,
+            commands::send_test_notification,
+            commands::move_floating_window_to_cursor,
+            commands::move_main_window_to_center
         ])
         .run(tauri::generate_context!())
         .expect("error while running CopyShare");

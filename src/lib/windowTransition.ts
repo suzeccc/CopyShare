@@ -13,6 +13,8 @@ export const WINDOW_MODE_ENTER_MS = 220;
 export type WindowTransitionPointer = {
   clientX: number;
   clientY: number;
+  screenX?: number;
+  screenY?: number;
 };
 
 type WindowTransitionRect = {

@@ -39,11 +39,12 @@ const syncContentItems = computed(() => [
     icon: ImageIcon,
   },
   {
-    label: "文件",
-    hint: "后续版本支持文件列表同步",
-    state: "暂未开放",
-    enabled: false,
+    label: "文件传输",
+    hint: "已支持已信任 PC 之间单文件局域网传输",
+    state: "已开放",
+    enabled: true,
     icon: FolderOpen,
+    route: "/files",
   },
 ]);
 
@@ -218,6 +219,13 @@ function syncStatusClass(item: SyncStatusPreviewItem) {
             </div>
             <p class="text-sm font-semibold text-white">{{ item.label }}</p>
             <p class="mt-2 text-xs leading-5 text-slate-500">{{ item.hint }}</p>
+            <RouterLink
+              v-if="item.route"
+              to="/files"
+              class="mt-3 inline-flex text-xs font-semibold text-[color:var(--accent-text)] transition hover:text-white"
+            >
+              进入文件传输
+            </RouterLink>
           </article>
         </div>
 

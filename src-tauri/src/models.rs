@@ -44,6 +44,8 @@ pub struct DeviceInfo {
     pub trusted: bool,
     #[serde(default)]
     pub remote_trusted: bool,
+    #[serde(default)]
+    pub has_connected_before: bool,
     pub last_seen_at: Option<DateTime<Utc>>,
     pub status: DeviceStatus,
 }
@@ -121,12 +123,32 @@ pub struct AppConfig {
     pub sync_text: bool,
     pub sync_image: bool,
     pub sync_files: bool,
+    #[serde(default)]
+    pub discovery_scan_ranges: Vec<String>,
+    #[serde(default = "default_true")]
+    pub desktop_notifications: bool,
+    #[serde(default = "default_true")]
+    pub notify_clipboard: bool,
+    #[serde(default = "default_true")]
+    pub notify_trust_required: bool,
+    #[serde(default = "default_true")]
+    pub notify_file_transfer: bool,
+    #[serde(default = "default_true")]
+    pub notify_device_status: bool,
+    #[serde(default = "default_true")]
+    pub notify_sync_error: bool,
+    #[serde(default)]
+    pub notification_clipboard_preview: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            config_version: 1,
+            config_version: 3,
             device_name: "CopyShare".to_string(),
             device_id: new_device_id(),
             theme: AppTheme::Win11Dark,
@@ -139,8 +161,39 @@ impl Default for AppConfig {
             sync_text: true,
             sync_image: true,
             sync_files: false,
+            discovery_scan_ranges: Vec::new(),
+            desktop_notifications: true,
+            notify_clipboard: true,
+            notify_trust_required: true,
+            notify_file_transfer: true,
+            notify_device_status: true,
+            notify_sync_error: true,
+            notification_clipboard_preview: true,
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum DiscoveryScanStatus {
+    Idle,
+    Running,
+    Done,
+    Empty,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscoveryScanProgress {
+    pub scan_id: u64,
+    pub status: DiscoveryScanStatus,
+    pub running: bool,
+    pub done: usize,
+    pub total: usize,
+    pub range_count: usize,
+    pub started_at: i64,
+    pub finished_at: Option<i64>,
 }
 
 pub fn new_device_id() -> String {
@@ -228,6 +281,102 @@ pub struct MobileSessionView {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum FileTransferStatus {
+    Pending,
+    Accepted,
+    Transferring,
+    Completed,
+    Failed,
+    Canceled,
+    Rejected,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum FileTransferDirection {
+    Send,
+    Receive,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct FileTransferFile {
+    pub id: String,
+    pub name: String,
+    pub size: u64,
+    pub sha256: String,
+    pub saved_path: Option<String>,
+    pub transferred_bytes: u64,
+    pub status: FileTransferFileStatus,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum FileTransferFileStatus {
+    Pending,
+    Transferring,
+    Completed,
+    Failed,
+    Canceled,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct FileTransferTask {
+    pub transfer_id: String,
+    pub direction: FileTransferDirection,
+    pub peer_device_id: String,
+    pub peer_device_name: String,
+    pub files: Vec<FileTransferFile>,
+    pub total_size: u64,
+    pub transferred_bytes: u64,
+    pub status: FileTransferStatus,
+    pub created_at: DateTime<Utc>,
+    pub completed_at: Option<DateTime<Utc>>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SelectedTransferFile {
+    pub path: String,
+    pub name: String,
+    pub size: u64,
+    pub sha256: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct FileTransferProgressEvent {
+    pub transfer_id: String,
+    pub file_id: String,
+    pub file_transferred_bytes: u64,
+    pub file_size: u64,
+    pub total_transferred_bytes: u64,
+    pub total_size: u64,
+    pub status: FileTransferStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct FileOfferFile {
+    pub file_id: String,
+    pub file_name: String,
+    pub file_size: u64,
+    pub sha256: String,
+    pub token: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct FileCompleteFile {
+    pub file_id: String,
+    pub sha256: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum WireMessage {
     Hello {
@@ -270,6 +419,50 @@ pub enum WireMessage {
         code: String,
         message: String,
     },
+    FileOffer {
+        transfer_id: String,
+        sender_device_id: String,
+        sender_device_name: String,
+        files: Vec<FileOfferFile>,
+        total_size: u64,
+        file_count: usize,
+        download_host: String,
+        download_port: u16,
+    },
+    FileAccept {
+        transfer_id: String,
+        receiver_device_id: String,
+        receiver_device_name: String,
+    },
+    FileReject {
+        transfer_id: String,
+        receiver_device_id: String,
+        reason: Option<String>,
+    },
+    FileProgress {
+        transfer_id: String,
+        device_id: String,
+        file_id: String,
+        file_transferred_bytes: u64,
+        file_size: u64,
+        total_transferred_bytes: u64,
+        total_size: u64,
+    },
+    FileComplete {
+        transfer_id: String,
+        device_id: String,
+        files: Vec<FileCompleteFile>,
+    },
+    FileCancel {
+        transfer_id: String,
+        device_id: String,
+    },
+    FileError {
+        transfer_id: String,
+        file_id: Option<String>,
+        device_id: String,
+        message: String,
+    },
 }
 
 impl From<ClipboardMessage> for WireMessage {
@@ -283,6 +476,86 @@ impl From<ClipboardMessage> for WireMessage {
             content_hash: value.content_hash,
             timestamp: value.timestamp,
         }
+    }
+}
+
+#[cfg(test)]
+mod file_transfer_wire_tests {
+    use super::{FileCompleteFile, FileOfferFile, WireMessage};
+
+    #[test]
+    fn multi_file_offer_round_trips_as_wire_json() {
+        let message = WireMessage::FileOffer {
+            transfer_id: "transfer-1".to_string(),
+            sender_device_id: "device-a".to_string(),
+            sender_device_name: "Laptop A".to_string(),
+            files: vec![
+                FileOfferFile {
+                    file_id: "file-1".to_string(),
+                    file_name: "a.txt".to_string(),
+                    file_size: 3,
+                    sha256: "hash-a".to_string(),
+                    token: "token-a".to_string(),
+                },
+                FileOfferFile {
+                    file_id: "file-2".to_string(),
+                    file_name: "b.txt".to_string(),
+                    file_size: 4,
+                    sha256: "hash-b".to_string(),
+                    token: "token-b".to_string(),
+                },
+            ],
+            total_size: 7,
+            file_count: 2,
+            download_host: "10.0.0.1".to_string(),
+            download_port: 49152,
+        };
+
+        let json = serde_json::to_string(&message).unwrap();
+        let decoded: WireMessage = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(decoded, message);
+    }
+
+    #[test]
+    fn multi_file_progress_round_trips_as_wire_json() {
+        let message = WireMessage::FileProgress {
+            transfer_id: "transfer-1".to_string(),
+            device_id: "device-b".to_string(),
+            file_id: "file-2".to_string(),
+            file_transferred_bytes: 2,
+            file_size: 4,
+            total_transferred_bytes: 5,
+            total_size: 7,
+        };
+
+        let json = serde_json::to_string(&message).unwrap();
+        let decoded: WireMessage = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(decoded, message);
+    }
+
+    #[test]
+    fn multi_file_complete_round_trips_as_wire_json() {
+        let message = WireMessage::FileComplete {
+            transfer_id: "transfer-1".to_string(),
+            device_id: "device-b".to_string(),
+            files: vec![
+                FileCompleteFile {
+                    file_id: "file-1".to_string(),
+                    sha256: "hash-a".to_string(),
+                },
+                FileCompleteFile {
+                    file_id: "file-2".to_string(),
+                    sha256: "hash-b".to_string(),
+                },
+            ],
+        };
+
+        let json = serde_json::to_string(&message).unwrap();
+        let decoded: WireMessage = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(decoded, message);
     }
 }
 

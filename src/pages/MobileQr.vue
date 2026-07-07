@@ -85,7 +85,7 @@ function stopPolling() {
 async function generateQr() {
   try {
     await mobileStore.createSession();
-    toastStore.success("已生成手机扫码二维码");
+    toastStore.success("已生成手机连接二维码");
     ensurePolling();
   } catch (error) {
     toastStore.error(errorMessage(error, "生成二维码失败"));
@@ -100,7 +100,7 @@ async function closeSession() {
   try {
     await mobileStore.closeSession();
     stopPolling();
-    toastStore.success("已结束手机扫码会话");
+    toastStore.success("已结束手机连接会话");
   } catch (error) {
     toastStore.error(errorMessage(error, "结束会话失败"));
   }
@@ -166,9 +166,9 @@ function errorMessage(error: unknown, fallback: string) {
     <section class="flex flex-wrap items-start justify-between gap-4">
       <div class="min-w-0 flex-1">
         <p class="text-xs font-semibold text-[color:var(--accent-text)]">局域网临时传输</p>
-        <h2 class="mt-2 text-2xl font-semibold text-white">手机扫码</h2>
+        <h2 class="mt-2 text-2xl font-semibold text-white">手机连接</h2>
         <p data-mobile-intro-copy class="mt-2 max-w-none whitespace-nowrap text-sm leading-6 text-[color:var(--muted-text)]">
-          手机扫码进入同一局域网页，在本次运行期内完成电脑到手机、手机到电脑的临时剪贴板传输。
+          扫码连接同一局域网页，在本次运行期内完成电脑到手机、手机到电脑的临时剪贴板传输。
         </p>
       </div>
       <div class="flex flex-wrap justify-end gap-2">
@@ -200,11 +200,11 @@ function errorMessage(error: unknown, fallback: string) {
             </span>
           </div>
 
-          <div data-mobile-qr-zone class="mx-auto grid aspect-square w-full max-w-[320px] place-items-center rounded-[22px] border border-white/70 bg-white p-3 shadow-[0_18px_46px_rgba(0,0,0,0.28)]">
-            <img v-if="qr" :src="qr" alt="手机扫码二维码" class="h-[232px] w-[232px]" />
-            <div v-else class="grid place-items-center gap-3 text-center text-slate-400">
+          <div data-mobile-qr-zone class="mx-auto grid aspect-square w-full max-w-[320px] place-items-center rounded-[22px] border border-[color:var(--accent-line)] bg-[color:var(--panel-bg-soft)] p-3 shadow-[0_18px_46px_rgba(0,0,0,0.28),0_0_0_1px_var(--accent-soft)_inset]">
+            <img v-if="qr" :src="qr" alt="手机连接二维码" class="h-[232px] w-[232px] rounded-[14px]" />
+            <div v-else data-mobile-qr-placeholder class="grid place-items-center gap-3 text-center text-[color:var(--accent-text)]">
               <QrCode class="h-14 w-14" />
-              <p class="text-sm font-medium text-slate-500">等待生成二维码</p>
+              <p class="text-sm font-medium text-[color:var(--muted-text)]">等待生成二维码</p>
             </div>
           </div>
 
@@ -235,7 +235,7 @@ function errorMessage(error: unknown, fallback: string) {
                 <div class="min-w-0">
                   <p class="text-base font-semibold text-white">本次临时传输</p>
                   <p class="mt-1 text-sm leading-6 text-[color:var(--muted-text)]">
-                    生成二维码后，用手机扫码打开局域网页，无需安装 App。
+                    生成二维码后，用手机扫描二维码打开局域网页，无需安装 App。
                   </p>
                 </div>
               </div>
@@ -246,11 +246,11 @@ function errorMessage(error: unknown, fallback: string) {
 
             <div
               data-mobile-session-lifetime-notice
-              class="mt-4 rounded-[22px] border border-[color:var(--main-line-soft)] bg-[color:var(--field-bg)] px-4 py-3"
+              class="mt-4 inline-flex rounded-full border border-[color:var(--main-line-soft)] bg-[color:var(--field-bg)] px-4 py-2"
             >
-              <div class="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2">
+              <div class="flex min-w-0 items-center">
                 <span class="text-sm font-semibold text-slate-100">保持到手动结束</span>
-                <span class="text-xs leading-5 text-[color:var(--muted-text)]">
+                <span class="hidden">
                   关闭 CopyShare 或点击结束会话后，手机页面会停止同步。
                 </span>
               </div>
@@ -275,8 +275,11 @@ function errorMessage(error: unknown, fallback: string) {
                   <p class="line-clamp-4 select-text break-all text-sm leading-6 text-slate-100">{{ item.text }}</p>
                 </article>
               </div>
-              <p v-else class="mt-3 min-h-[7.5rem] select-text break-all text-sm leading-6 text-slate-100">
-                点击生成二维码后，会读取电脑当前文本剪贴板和最近剪贴板历史；手机扫码后可逐条复制。
+              <p v-else class="mt-3 min-h-[7.5rem] text-sm leading-6 text-[color:var(--muted-text)]">
+                待连接
+              </p>
+              <p class="hidden">
+                点击生成二维码后，会读取电脑当前文本剪贴板和最近剪贴板历史；手机连接后可逐条复制。
               </p>
             </section>
 
@@ -297,13 +300,16 @@ function errorMessage(error: unknown, fallback: string) {
                   <p class="line-clamp-4 select-text break-all text-sm leading-6 text-slate-100">{{ item.text }}</p>
                 </article>
               </div>
-              <p v-else class="mt-3 min-h-[7.5rem] select-text break-all text-sm leading-6 text-slate-100">
+              <p v-else class="mt-3 min-h-[7.5rem] text-sm leading-6 text-[color:var(--muted-text)]">
+                待连接
+              </p>
+              <p class="hidden">
                 手机在同一个页面可连续粘贴并发送多条内容，这里会按顺序显示摘要。
               </p>
             </section>
           </div>
 
-          <section class="flex min-w-0 max-w-full flex-wrap items-center justify-between gap-3 overflow-hidden rounded-[22px] border border-emerald-300/20 bg-emerald-400/[0.08] px-4 py-3">
+          <section class="hidden">
             <div>
               <p class="text-sm font-semibold text-white">手机发送后自动写入电脑剪贴板</p>
               <p class="mt-1 text-xs text-[color:var(--subtle-text)]">手机端每发送一条，都会直接覆盖电脑当前剪贴板，并保留在本次会话列表里。</p>
