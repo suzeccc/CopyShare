@@ -1,0 +1,1009 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CopyShare 侧边栏展开/收起方案</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b100e;
+      --panel: #161e19;
+      --panel-2: #202a23;
+      --line: rgba(126, 148, 133, 0.26);
+      --line-strong: rgba(126, 148, 133, 0.48);
+      --text: #f2fff5;
+      --muted: #a8b9ad;
+      --subtle: #789083;
+      --green: #63e986;
+      --green-2: #35c85a;
+      --cyan: #60cdff;
+      --red: #ff8b8b;
+      --shadow: rgba(0, 0, 0, 0.44);
+      font-family: "Microsoft YaHei UI", "Microsoft YaHei", Inter, system-ui, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      min-height: 100vh;
+      margin: 0;
+      background:
+        radial-gradient(circle at 16% 7%, rgba(53, 200, 90, 0.16), transparent 28%),
+        radial-gradient(circle at 90% 16%, rgba(96, 205, 255, 0.10), transparent 32%),
+        linear-gradient(145deg, #171b18, #0a0e0c 60%, #161714);
+      color: var(--text);
+    }
+
+    button {
+      font: inherit;
+    }
+
+    .page {
+      width: min(1440px, calc(100vw - 36px));
+      margin: 0 auto;
+      padding: 28px 0 44px;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 340px;
+      gap: 20px;
+      align-items: end;
+      margin-bottom: 20px;
+    }
+
+    .eyebrow {
+      margin: 0 0 8px;
+      color: var(--green);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(30px, 4vw, 52px);
+      line-height: 1.05;
+      letter-spacing: -0.055em;
+    }
+
+    .intro {
+      max-width: 780px;
+      margin: 12px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.8;
+    }
+
+    .recommend {
+      border: 1px solid rgba(99, 233, 134, 0.24);
+      border-radius: 22px;
+      padding: 16px;
+      background:
+        linear-gradient(145deg, rgba(99, 233, 134, 0.10), rgba(255, 255, 255, 0.025)),
+        rgba(22, 30, 25, 0.74);
+      box-shadow: 18px 18px 44px rgba(0, 0, 0, 0.34), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    }
+
+    .recommend strong {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 14px;
+    }
+
+    .recommend p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.7;
+    }
+
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin: 0 0 18px;
+    }
+
+    .toolbar button {
+      border: 1px solid rgba(255, 255, 255, 0.11);
+      border-radius: 999px;
+      padding: 10px 14px;
+      background: rgba(255, 255, 255, 0.045);
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: 160ms ease;
+    }
+
+    .toolbar button:hover,
+    .toolbar button.active {
+      border-color: rgba(99, 233, 134, 0.5);
+      background: rgba(99, 233, 134, 0.13);
+      color: #effff3;
+      box-shadow: 0 0 0 4px rgba(99, 233, 134, 0.06);
+    }
+
+    .options {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    .option {
+      position: relative;
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: 30px;
+      padding: 14px;
+      background: rgba(18, 23, 20, 0.76);
+      box-shadow: 0 24px 72px rgba(0, 0, 0, 0.34);
+      overflow: hidden;
+    }
+
+    .option.is-pick {
+      border-color: rgba(99, 233, 134, 0.50);
+      box-shadow:
+        0 24px 72px rgba(0, 0, 0, 0.34),
+        0 0 0 4px rgba(99, 233, 134, 0.07);
+    }
+
+    .badge {
+      position: absolute;
+      right: 22px;
+      top: 22px;
+      z-index: 3;
+      border: 1px solid rgba(99, 233, 134, 0.34);
+      border-radius: 999px;
+      padding: 6px 10px;
+      background: rgba(42, 111, 58, 0.22);
+      color: #c8ffd4;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+    }
+
+    .mock-window {
+      display: grid;
+      grid-template-rows: 34px minmax(0, 1fr);
+      height: 612px;
+      border: 1px solid rgba(255, 255, 255, 0.10);
+      border-radius: 22px;
+      background: #111612;
+      overflow: hidden;
+    }
+
+    .titlebar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 13px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      color: #aab8ae;
+      font-size: 11px;
+    }
+
+    .traffic {
+      display: flex;
+      gap: 7px;
+    }
+
+    .traffic i {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: #3b443e;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    }
+
+    .app {
+      display: grid;
+      min-height: 0;
+      transition: grid-template-columns 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    }
+
+    .sidebar {
+      position: relative;
+      display: flex;
+      min-width: 0;
+      flex-direction: column;
+      overflow: hidden;
+      border-right: 1px solid var(--line);
+      background:
+        radial-gradient(circle at 22% 8%, rgba(53, 200, 90, 0.11), transparent 30%),
+        linear-gradient(180deg, rgba(27, 37, 30, 0.98), rgba(15, 21, 17, 0.98));
+      box-shadow: inset -18px 0 34px rgba(0, 0, 0, 0.22);
+    }
+
+    .sidebar.neu {
+      padding: 16px 13px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      min-height: 46px;
+      margin-bottom: 18px;
+      border-radius: 18px;
+      padding: 6px;
+      background: rgba(25, 35, 28, 0.72);
+      box-shadow:
+        8px 8px 16px rgba(0, 0, 0, 0.22),
+        -5px -5px 12px rgba(255, 255, 255, 0.025),
+        inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    }
+
+    .logo {
+      position: relative;
+      width: 34px;
+      height: 34px;
+      flex: 0 0 auto;
+      border-radius: 13px;
+      background: #1d271f;
+      box-shadow: 7px 7px 15px rgba(0, 0, 0, 0.34), -4px -4px 11px rgba(255, 255, 255, 0.04);
+    }
+
+    .logo::before,
+    .logo::after {
+      content: "";
+      position: absolute;
+      width: 20px;
+      height: 15px;
+      border: 1px solid rgba(99, 233, 134, 0.48);
+      border-radius: 6px;
+      background: #202a22;
+    }
+
+    .logo::before {
+      left: 5px;
+      bottom: 7px;
+    }
+
+    .logo::after {
+      right: 5px;
+      top: 7px;
+    }
+
+    .brand-copy,
+    .nav-text,
+    .foot-copy {
+      white-space: nowrap;
+      overflow: hidden;
+      transition: opacity 180ms ease, transform 220ms ease, width 220ms ease;
+    }
+
+    .brand-kicker {
+      margin: 0 0 2px;
+      color: #83958a;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .brand-title {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 820;
+      letter-spacing: -0.04em;
+    }
+
+    .rail-toggle {
+      display: grid;
+      place-items: center;
+      width: 30px;
+      height: 30px;
+      margin-left: auto;
+      flex: 0 0 auto;
+      border: 1px solid rgba(255, 255, 255, 0.10);
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--muted);
+      cursor: pointer;
+    }
+
+    .nav {
+      display: grid;
+      gap: 8px;
+    }
+
+    .nav-item {
+      position: relative;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      height: 40px;
+      border: 1px solid transparent;
+      border-radius: 13px;
+      padding: 0 10px;
+      color: #a8b8ad;
+      font-size: 13px;
+      font-weight: 700;
+      background: rgba(25, 34, 28, 0.86);
+      box-shadow: 7px 7px 14px rgba(0, 0, 0, 0.20), -5px -5px 12px rgba(255, 255, 255, 0.025);
+    }
+
+    .nav-item.active {
+      border-color: rgba(99, 233, 134, 0.24);
+      color: #eaffee;
+      background: rgba(20, 28, 23, 0.98);
+      box-shadow:
+        inset 6px 6px 11px rgba(0, 0, 0, 0.34),
+        inset -5px -5px 12px rgba(255, 255, 255, 0.04);
+    }
+
+    .nav-item.active::after {
+      content: "";
+      width: 7px;
+      height: 7px;
+      margin-left: auto;
+      border-radius: 999px;
+      background: var(--green);
+      box-shadow: 0 0 12px rgba(99, 233, 134, 0.52);
+    }
+
+    .icon {
+      display: grid;
+      width: 19px;
+      height: 19px;
+      flex: 0 0 auto;
+      place-items: center;
+      color: #b9c9bd;
+      font-size: 15px;
+    }
+
+    .side-note {
+      margin-top: auto;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 12px;
+      background: rgba(255, 255, 255, 0.04);
+    }
+
+    .side-note strong {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 12px;
+    }
+
+    .side-note span {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.6;
+    }
+
+    .main {
+      min-width: 0;
+      background: #1b1b1b;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 58px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+      padding: 0 22px;
+      background: #1c1d1c;
+    }
+
+    .topbar small {
+      display: block;
+      margin-bottom: 3px;
+      color: #768a7e;
+      font-size: 10px;
+    }
+
+    .topbar strong {
+      display: block;
+      font-size: 13px;
+    }
+
+    .pill {
+      border: 1px solid rgba(99, 233, 134, 0.38);
+      border-radius: 12px;
+      padding: 9px 12px;
+      background: rgba(42, 126, 61, 0.20);
+      color: #bfffcf;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .content {
+      display: grid;
+      gap: 14px;
+      padding: 18px;
+    }
+
+    .hero-card {
+      min-height: 172px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 18px;
+      padding: 18px;
+      background: #292a29;
+    }
+
+    .hero-card .kicker {
+      margin: 0 0 12px;
+      color: #d0e6d7;
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    .hero-card h3 {
+      margin: 0 0 12px;
+      font-size: 28px;
+      letter-spacing: -0.05em;
+    }
+
+    .hero-card p {
+      max-width: 560px;
+      margin: 0;
+      color: #a8b4ad;
+      font-size: 13px;
+      line-height: 1.7;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 18px;
+    }
+
+    .stat {
+      min-width: 0;
+      border: 1px solid rgba(255, 255, 255, 0.10);
+      border-radius: 13px;
+      padding: 12px;
+      background: #303130;
+    }
+
+    .stat span {
+      display: block;
+      color: #819288;
+      font-size: 11px;
+    }
+
+    .stat b {
+      display: block;
+      margin-top: 8px;
+      font-size: 22px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .mini-card {
+      min-height: 92px;
+      border: 1px solid rgba(255, 255, 255, 0.10);
+      border-radius: 16px;
+      padding: 14px;
+      background: #292a29;
+    }
+
+    .mini-card strong {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 14px;
+    }
+
+    .mini-card span {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    .option-body {
+      padding: 15px 6px 2px;
+    }
+
+    .option-body h2 {
+      margin: 0 0 8px;
+      font-size: 20px;
+      letter-spacing: -0.04em;
+    }
+
+    .option-body p {
+      margin: 0;
+      min-height: 68px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.7;
+    }
+
+    .meta {
+      display: grid;
+      gap: 8px;
+      margin-top: 12px;
+      color: var(--subtle);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .meta b {
+      color: #cfe8d5;
+    }
+
+    .pick {
+      width: 100%;
+      margin-top: 14px;
+      border: 1px solid rgba(99, 233, 134, 0.36);
+      border-radius: 14px;
+      padding: 11px 12px;
+      background: rgba(99, 233, 134, 0.12);
+      color: #effff2;
+      font-weight: 800;
+      cursor: pointer;
+    }
+
+    .pick:hover {
+      background: rgba(99, 233, 134, 0.18);
+    }
+
+    /* Option A: fixed rail */
+    .option-a .app {
+      grid-template-columns: 216px minmax(0, 1fr);
+    }
+
+    body.collapsed .option-a .app {
+      grid-template-columns: 74px minmax(0, 1fr);
+    }
+
+    body.collapsed .option-a .brand {
+      justify-content: center;
+      padding: 6px 0;
+    }
+
+    body.collapsed .option-a .brand-copy,
+    body.collapsed .option-a .nav-text,
+    body.collapsed .option-a .foot-copy,
+    body.collapsed .option-a .rail-toggle {
+      width: 0;
+      opacity: 0;
+      transform: translateX(-6px);
+      pointer-events: none;
+    }
+
+    body.collapsed .option-a .nav-item {
+      justify-content: center;
+      padding: 0;
+    }
+
+    body.collapsed .option-a .nav-item.active::after {
+      position: absolute;
+      right: 6px;
+      margin-left: 0;
+    }
+
+    body.collapsed .option-a .side-note {
+      display: none;
+    }
+
+    /* Option B: icon rail plus flyout */
+    .option-b .app {
+      grid-template-columns: 74px minmax(0, 1fr);
+    }
+
+    .option-b .sidebar {
+      padding: 16px 10px;
+      overflow: visible;
+    }
+
+    .option-b .brand {
+      justify-content: center;
+      padding: 6px 0;
+    }
+
+    .option-b .brand-copy,
+    .option-b .nav-text,
+    .option-b .side-note {
+      display: none;
+    }
+
+    .option-b .nav-item {
+      justify-content: center;
+      padding: 0;
+    }
+
+    .flyout {
+      position: absolute;
+      left: 68px;
+      top: 72px;
+      z-index: 5;
+      width: 202px;
+      border: 1px solid rgba(99, 233, 134, 0.26);
+      border-radius: 20px;
+      padding: 12px;
+      background: rgba(24, 32, 27, 0.96);
+      box-shadow: 22px 22px 48px rgba(0, 0, 0, 0.40), 0 0 0 1px rgba(255, 255, 255, 0.04) inset;
+      backdrop-filter: blur(18px);
+      transform-origin: left center;
+      transition: opacity 200ms ease, transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    }
+
+    body.collapsed .option-b .flyout {
+      opacity: 0;
+      transform: translateX(-10px) scale(0.96);
+      pointer-events: none;
+    }
+
+    .flyout h4 {
+      margin: 0 0 10px;
+      font-size: 13px;
+    }
+
+    .flyout-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      height: 36px;
+      border-radius: 11px;
+      padding: 0 10px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .flyout-row.active {
+      background: rgba(99, 233, 134, 0.12);
+      color: #ecfff0;
+    }
+
+    /* Option C: section drawer */
+    .option-c .app {
+      grid-template-columns: 236px minmax(0, 1fr);
+    }
+
+    body.collapsed .option-c .app {
+      grid-template-columns: 96px minmax(0, 1fr);
+    }
+
+    .option-c .sidebar {
+      padding: 14px 12px;
+      background:
+        linear-gradient(90deg, rgba(96, 205, 255, 0.08), transparent 55%),
+        linear-gradient(180deg, rgba(23, 29, 25, 0.98), rgba(12, 17, 14, 0.98));
+    }
+
+    .section-label {
+      margin: 14px 4px 7px;
+      color: #73867a;
+      font-size: 10px;
+      font-weight: 900;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      white-space: nowrap;
+      overflow: hidden;
+    }
+
+    .option-c .nav-item {
+      height: 38px;
+      box-shadow: none;
+      background: transparent;
+    }
+
+    .option-c .nav-item.active {
+      background: linear-gradient(90deg, rgba(99, 233, 134, 0.18), rgba(99, 233, 134, 0.05));
+      box-shadow: inset 3px 0 0 rgba(99, 233, 134, 0.86);
+    }
+
+    body.collapsed .option-c .brand-copy,
+    body.collapsed .option-c .nav-text,
+    body.collapsed .option-c .foot-copy,
+    body.collapsed .option-c .section-label {
+      width: 0;
+      opacity: 0;
+      transform: translateX(-6px);
+      pointer-events: none;
+    }
+
+    body.collapsed .option-c .brand {
+      justify-content: center;
+    }
+
+    body.collapsed .option-c .nav-item {
+      justify-content: center;
+      padding: 0;
+    }
+
+    body.collapsed .option-c .nav-item.active::after {
+      position: absolute;
+      right: 8px;
+      margin-left: 0;
+    }
+
+    body.collapsed .option-c .side-note {
+      padding: 8px;
+      text-align: center;
+    }
+
+    body.collapsed .option-c .side-note strong {
+      margin: 0;
+      font-size: 10px;
+    }
+
+    body.collapsed .option-c .side-note span {
+      display: none;
+    }
+
+    @media (max-width: 1180px) {
+      .hero,
+      .options {
+        grid-template-columns: 1fr;
+      }
+
+      .mock-window {
+        height: 560px;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .app,
+      .brand-copy,
+      .nav-text,
+      .foot-copy,
+      .flyout,
+      .toolbar button {
+        transition: none !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="hero">
+      <div>
+        <p class="eyebrow">CopyShare sidebar interaction</p>
+        <h1>侧边栏展开/收起：3 个可落地方案</h1>
+        <p class="intro">
+          基于当前项目的深色玻璃、绿色连接状态、桌面端固定窗口结构设计。点击上方按钮可以统一切换“展开 / 收起”状态；每个方案下方给出适用场景和实现成本。
+        </p>
+      </div>
+      <aside class="recommend">
+        <strong>推荐：方案 A「固定窄栏 Rail」</strong>
+        <p>
+          最符合现有 `AppShell + Sidebar` 结构，改动小、可测试、不会破坏主内容滚动和 Tauri 窗口布局。收起后保留图标入口，适合长期停靠。
+        </p>
+      </aside>
+    </section>
+
+    <div class="toolbar" aria-label="状态切换">
+      <button class="active" type="button" data-state="expanded">展开状态</button>
+      <button type="button" data-state="collapsed">收起状态</button>
+    </div>
+
+    <section class="options">
+      <article class="option option-a is-pick" data-choice="A">
+        <span class="badge">推荐</span>
+        <div class="mock-window">
+          <div class="titlebar">
+            <span>CopyShare</span>
+            <span class="traffic"><i></i><i></i><i></i></span>
+          </div>
+          <div class="app">
+            <aside class="sidebar neu">
+              <div class="brand">
+                <span class="logo"></span>
+                <div class="brand-copy">
+                  <p class="brand-kicker">CopyShare</p>
+                  <p class="brand-title">剪贴板共享</p>
+                </div>
+                <button class="rail-toggle" type="button" title="收起侧栏">‹</button>
+              </div>
+              <nav class="nav">
+                <div class="nav-item active"><span class="icon">⌂</span><span class="nav-text">总览</span></div>
+                <div class="nav-item"><span class="icon">▣</span><span class="nav-text">剪贴板</span></div>
+                <div class="nav-item"><span class="icon">⌁</span><span class="nav-text">设备连接</span></div>
+                <div class="nav-item"><span class="icon">⇧</span><span class="nav-text">文件传输</span></div>
+                <div class="nav-item"><span class="icon">▯</span><span class="nav-text">手机连接</span></div>
+                <div class="nav-item"><span class="icon">↺</span><span class="nav-text">连接与剪贴日志</span></div>
+              </nav>
+              <div class="nav" style="margin-top: auto;">
+                <div class="nav-item"><span class="icon">⚙</span><span class="nav-text">设置</span></div>
+                <div class="nav-item"><span class="icon">ⓘ</span><span class="nav-text">关于</span></div>
+              </div>
+              <div class="side-note">
+                <strong>局域网直连</strong>
+                <span class="foot-copy">收起后隐藏说明卡片，只保留主导航图标。</span>
+              </div>
+            </aside>
+            <section class="main">
+              <div class="topbar">
+                <div><small>桌面同步控制台</small><strong>Suzec · 10.194.34.119</strong></div>
+                <span class="pill">● 同步中</span>
+              </div>
+              <div class="content">
+                <div class="hero-card">
+                  <p class="kicker">局域网剪贴板同步</p>
+                  <h3>CopyShare</h3>
+                  <p>监听本机文本剪贴板，通过 WebSocket 同步给已信任的局域网设备。</p>
+                  <div class="stats">
+                    <div class="stat"><span>同步状态</span><b>同步中</b></div>
+                    <div class="stat"><span>已连接设备</span><b>0 台</b></div>
+                    <div class="stat"><span>最近同步</span><b>暂无</b></div>
+                  </div>
+                </div>
+                <div class="grid">
+                  <div class="mini-card"><strong>快速操作</strong><span>连接设备、日志、设置入口。</span></div>
+                  <div class="mini-card"><strong>本机状态</strong><span>端口、地址、运行状态。</span></div>
+                </div>
+              </div>
+            </section>
+          </div>
+        </div>
+        <div class="option-body">
+          <h2>A. 固定窄栏 Rail</h2>
+          <p>展开 256px，收起 72px；品牌文案、导航文字、底部说明淡出。主内容网格宽度跟随过渡，保留桌面工具稳定感。</p>
+          <div class="meta">
+            <span><b>优点：</b>最稳、改动最小、适合高频桌面 App。</span>
+            <span><b>代价：</b>收起后长导航名只能靠 tooltip 补充。</span>
+            <span><b>实现：</b>`Sidebar.vue` 增加 collapsed 状态和 class；`AppShell.vue` 接收宽度。</span>
+          </div>
+          <button class="pick" type="button">选择方案 A</button>
+        </div>
+      </article>
+
+      <article class="option option-b" data-choice="B">
+        <div class="mock-window">
+          <div class="titlebar">
+            <span>CopyShare</span>
+            <span class="traffic"><i></i><i></i><i></i></span>
+          </div>
+          <div class="app">
+            <aside class="sidebar">
+              <div class="brand"><span class="logo"></span></div>
+              <nav class="nav">
+                <div class="nav-item active"><span class="icon">⌂</span><span class="nav-text">总览</span></div>
+                <div class="nav-item"><span class="icon">▣</span><span class="nav-text">剪贴板</span></div>
+                <div class="nav-item"><span class="icon">⌁</span><span class="nav-text">设备连接</span></div>
+                <div class="nav-item"><span class="icon">⇧</span><span class="nav-text">文件传输</span></div>
+                <div class="nav-item"><span class="icon">⚙</span><span class="nav-text">设置</span></div>
+              </nav>
+              <div class="flyout">
+                <h4>导航菜单</h4>
+                <div class="flyout-row active"><span>⌂</span><span>总览</span></div>
+                <div class="flyout-row"><span>▣</span><span>剪贴板</span></div>
+                <div class="flyout-row"><span>⌁</span><span>设备连接</span></div>
+                <div class="flyout-row"><span>⇧</span><span>文件传输</span></div>
+              </div>
+            </aside>
+            <section class="main">
+              <div class="topbar">
+                <div><small>桌面同步控制台</small><strong>Suzec · 10.194.34.119</strong></div>
+                <span class="pill">● 同步中</span>
+              </div>
+              <div class="content">
+                <div class="hero-card">
+                  <p class="kicker">悬浮菜单展开</p>
+                  <h3>Icon Dock</h3>
+                  <p>常态保持极窄图标栏，鼠标悬停或点击菜单按钮时弹出浮层导航。</p>
+                  <div class="stats">
+                    <div class="stat"><span>可用宽度</span><b>最大</b></div>
+                    <div class="stat"><span>菜单方式</span><b>浮层</b></div>
+                    <div class="stat"><span>键盘支持</span><b>需加强</b></div>
+                  </div>
+                </div>
+                <div class="grid">
+                  <div class="mini-card"><strong>内容优先</strong><span>主区域几乎不被侧栏占用。</span></div>
+                  <div class="mini-card"><strong>短时展开</strong><span>适合小窗口或浮窗化场景。</span></div>
+                </div>
+              </div>
+            </section>
+          </div>
+        </div>
+        <div class="option-body">
+          <h2>B. 图标 Dock + 浮层菜单</h2>
+          <p>常态 72px 图标栏，展开不是推开内容，而是在侧栏右侧弹出菜单浮层。更轻，但交互和可访问性要补足。</p>
+          <div class="meta">
+            <span><b>优点：</b>内容区域最大；视觉上更现代。</span>
+            <span><b>代价：</b>悬浮层、焦点陷阱、点击外部关闭要写清楚。</span>
+            <span><b>实现：</b>需要菜单 overlay 状态，路由跳转后自动关闭。</span>
+          </div>
+          <button class="pick" type="button">选择方案 B</button>
+        </div>
+      </article>
+
+      <article class="option option-c" data-choice="C">
+        <div class="mock-window">
+          <div class="titlebar">
+            <span>CopyShare</span>
+            <span class="traffic"><i></i><i></i><i></i></span>
+          </div>
+          <div class="app">
+            <aside class="sidebar">
+              <div class="brand">
+                <span class="logo"></span>
+                <div class="brand-copy">
+                  <p class="brand-kicker">CopyShare</p>
+                  <p class="brand-title">剪贴板共享</p>
+                </div>
+              </div>
+              <div class="section-label">同步</div>
+              <nav class="nav">
+                <div class="nav-item active"><span class="icon">⌂</span><span class="nav-text">总览</span></div>
+                <div class="nav-item"><span class="icon">▣</span><span class="nav-text">剪贴板</span></div>
+              </nav>
+              <div class="section-label">连接</div>
+              <nav class="nav">
+                <div class="nav-item"><span class="icon">⌁</span><span class="nav-text">设备连接</span></div>
+                <div class="nav-item"><span class="icon">⇧</span><span class="nav-text">文件传输</span></div>
+                <div class="nav-item"><span class="icon">▯</span><span class="nav-text">手机连接</span></div>
+              </nav>
+              <div class="section-label">系统</div>
+              <nav class="nav">
+                <div class="nav-item"><span class="icon">↺</span><span class="nav-text">连接与剪贴日志</span></div>
+                <div class="nav-item"><span class="icon">⚙</span><span class="nav-text">设置</span></div>
+              </nav>
+              <div class="side-note">
+                <strong>LAN</strong>
+                <span class="foot-copy">用分组帮用户理解：同步、连接、系统。</span>
+              </div>
+            </aside>
+            <section class="main">
+              <div class="topbar">
+                <div><small>桌面同步控制台</small><strong>Suzec · 10.194.34.119</strong></div>
+                <span class="pill">● 同步中</span>
+              </div>
+              <div class="content">
+                <div class="hero-card">
+                  <p class="kicker">分组导航</p>
+                  <h3>Section Drawer</h3>
+                  <p>把功能按“同步 / 连接 / 系统”分组，展开时信息更清晰，收起时仍保留图标和活动态。</p>
+                  <div class="stats">
+                    <div class="stat"><span>信息架构</span><b>清晰</b></div>
+                    <div class="stat"><span>视觉密度</span><b>更高</b></div>
+                    <div class="stat"><span>适合</span><b>功能增长</b></div>
+                  </div>
+                </div>
+                <div class="grid">
+                  <div class="mini-card"><strong>长期扩展</strong><span>后续新增页面更容易归类。</span></div>
+                  <div class="mini-card"><strong>收起仍可识别</strong><span>活动态用左侧色条和小点。</span></div>
+                </div>
+              </div>
+            </section>
+          </div>
+        </div>
+        <div class="option-body">
+          <h2>C. 分组抽屉 Drawer</h2>
+          <p>不仅折叠宽度，也重组信息架构。适合后续页面继续增加时使用，但当前功能量下略重。</p>
+          <div class="meta">
+            <span><b>优点：</b>导航层级更清楚，扩展性最好。</span>
+            <span><b>代价：</b>当前 8 个入口可能显得过度设计。</span>
+            <span><b>实现：</b>重构 nav 数据结构为 group + items。</span>
+          </div>
+          <button class="pick" type="button">选择方案 C</button>
+        </div>
+      </article>
+    </section>
+  </main>
+
+  <script>
+    const buttons = [...document.querySelectorAll("[data-state]")];
+    buttons.forEach((button) => {
+      button.addEventListener("click", () => {
+        const collapsed = button.dataset.state === "collapsed";
+        document.body.classList.toggle("collapsed", collapsed);
+        buttons.forEach((item) => item.classList.toggle("active", item === button));
+      });
+    });
+
+    document.querySelectorAll(".pick").forEach((button) => {
+      button.addEventListener("click", () => {
+        document.querySelectorAll(".option").forEach((option) => option.classList.remove("is-pick"));
+        button.closest(".option").classList.add("is-pick");
+      });
+    });
+  </script>
+</body>
+</html>

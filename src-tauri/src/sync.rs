@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use chrono::Utc;
@@ -90,6 +91,13 @@ impl SyncEngine {
         image_base64: impl Into<String>,
     ) -> Option<ClipboardMessage> {
         self.observe_local_content(ClipboardContentType::Image, image_base64)
+    }
+
+    pub fn observe_local_file_list(
+        &mut self,
+        file_list: impl Into<String>,
+    ) -> Option<ClipboardMessage> {
+        self.observe_local_content(ClipboardContentType::FileList, file_list)
     }
 
     fn observe_local_content(
@@ -427,6 +435,7 @@ where
         let mut heartbeat = tokio::time::interval(HEARTBEAT_INTERVAL);
         heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut last_seen_at = tokio::time::Instant::now();
+        let mut last_ping_sent_at: Option<tokio::time::Instant> = None;
 
         loop {
             tokio::select! {
@@ -437,9 +446,11 @@ where
                             .await;
                         break;
                     }
+                    let ping_sent_at = tokio::time::Instant::now();
                     if sink.send(Message::Ping(Vec::new().into())).await.is_err() {
                         break;
                     }
+                    last_ping_sent_at = Some(ping_sent_at);
                 }
                 outbound = receiver.recv() => {
                     let Some(outbound) = outbound else {
@@ -470,7 +481,19 @@ where
                             }
                         }
                         Some(Ok(Message::Pong(_))) => {
-                            last_seen_at = tokio::time::Instant::now();
+                            let now = tokio::time::Instant::now();
+                            last_seen_at = now;
+                            if let Some(sent_at) = last_ping_sent_at.take() {
+                                let latency_ms = now
+                                    .duration_since(sent_at)
+                                    .as_millis()
+                                    .min(u128::from(u64::MAX))
+                                    as u64;
+                                state_for_task
+                                    .record_peer_latency(&connection_id_for_task, latency_ms)
+                                    .await;
+                                emit_status(&app_for_task, &state_for_task).await;
+                            }
                         }
                         Some(Ok(_)) => {}
                         Some(Err(error)) => {
@@ -634,6 +657,7 @@ async fn handle_wire_text(app: &AppHandle, state: &AppState, connection_id: &str
             transfer_id,
             sender_device_id,
             sender_device_name,
+            clipboard_sync,
             files,
             total_size,
             file_count,
@@ -648,6 +672,7 @@ async fn handle_wire_text(app: &AppHandle, state: &AppState, connection_id: &str
                     transfer_id,
                     sender_device_id,
                     sender_device_name,
+                    clipboard_sync,
                     files,
                     total_size,
                     file_count,
@@ -822,7 +847,20 @@ async fn poll_local_clipboard(app: &AppHandle, state: &AppState) -> AppResult<()
         }
     }
 
-    if config.sync_image {
+    let mut observed_file_list = false;
+    if config.sync_files && !clipboard::clipboard_has_image_data() {
+        let files = clipboard::read_clipboard_files()?;
+        if !files.is_empty() {
+            let content = clipboard::file_paths_to_clipboard_content(&files)?;
+            if let Some(message) = state.observe_local_file_list(content).await {
+                record_observed_local_file_list(app, state, &config, &message, files).await?;
+                changed = true;
+            }
+            observed_file_list = true;
+        }
+    }
+
+    if config.sync_image && !observed_file_list {
         if let Some(image_base64) = clipboard::read_clipboard_image_base64(app)? {
             if let Some(message) = state.observe_local_image(image_base64).await {
                 record_observed_local_history(app, state, &config, &message).await?;
@@ -838,7 +876,7 @@ async fn poll_local_clipboard(app: &AppHandle, state: &AppState) -> AppResult<()
 }
 
 fn should_read_local_clipboard(config: &AppConfig) -> bool {
-    config.sync_text || config.sync_image
+    config.sync_text || config.sync_image || config.sync_files
 }
 
 #[cfg(test)]
@@ -895,6 +933,38 @@ async fn record_observed_local_history(
     Ok(())
 }
 
+async fn record_observed_local_file_list(
+    app: &AppHandle,
+    state: &AppState,
+    config: &AppConfig,
+    message: &ClipboardMessage,
+    files: Vec<PathBuf>,
+) -> AppResult<()> {
+    let sent_count = if state.status().await.running {
+        file_transfer::send_clipboard_files_to_trusted_devices(app.clone(), state.clone(), files)
+            .await?
+    } else {
+        0
+    };
+    if sent_count > 0 {
+        state.touch_last_sync().await;
+    }
+
+    if let Some(item) = push_local_history_item(
+        state,
+        config,
+        message,
+        local_sync_status_from_sent_count(sent_count),
+    )
+    .await
+    {
+        history::save_history(app, &state.history().await)?;
+        let _ = app.emit("clipboard-synced", item);
+    }
+
+    Ok(())
+}
+
 async fn push_local_history_item(
     state: &AppState,
     config: &AppConfig,
@@ -925,7 +995,7 @@ fn should_accept_clipboard_type(config: &AppConfig, content_type: &ClipboardCont
     match content_type {
         ClipboardContentType::Text => config.sync_text,
         ClipboardContentType::Image => config.sync_image,
-        ClipboardContentType::FileList => false,
+        ClipboardContentType::FileList => config.sync_files,
     }
 }
 
@@ -935,9 +1005,10 @@ fn write_remote_clipboard(app: &AppHandle, message: &ClipboardMessage) -> AppRes
         ClipboardContentType::Image => {
             clipboard::write_clipboard_image_base64(app, &message.content)
         }
-        ClipboardContentType::FileList => Err(AppError::InvalidInput(
-            "暂不支持文件剪贴板同步".to_string(),
-        )),
+        ClipboardContentType::FileList => {
+            let paths = clipboard::clipboard_content_to_file_paths(&message.content)?;
+            clipboard::write_clipboard_files(app, &paths)
+        }
     }
 }
 
@@ -1016,14 +1087,14 @@ async fn send_reciprocal_trust_grant_if_needed(
 
 async fn build_hello(state: &AppState, connection_id: &str) -> WireMessage {
     let status = state.status().await;
+    let manual_trust_required = state.take_peer_confirmation_required(connection_id).await
+        && !state.connection_matches_trusted_device(connection_id).await;
     WireMessage::Hello {
         device_id: status.device_id,
         device_name: status.device_name,
         app_version: env!("CARGO_PKG_VERSION").to_string(),
         port: status.port,
-        manual_trust_required: state
-            .take_peer_confirmation_required(connection_id)
-            .await,
+        manual_trust_required,
     }
 }
 
@@ -1122,6 +1193,21 @@ mod tests {
         assert_eq!(first.source_device_name, "Laptop A");
         assert_eq!(first.content, "png-base64");
         assert_eq!(first.content_type, ClipboardContentType::Image);
+        assert!(duplicate.is_none());
+    }
+
+    #[test]
+    fn local_file_list_change_creates_file_list_message() {
+        let mut engine = SyncEngine::new("device-a", "Laptop A");
+
+        let first = engine.observe_local_file_list(r#"[{"path":"C:\\a.txt"}]"#);
+        let duplicate = engine.observe_local_file_list(r#"[{"path":"C:\\a.txt"}]"#);
+
+        let first = first.expect("first local file list should create a message");
+        assert_eq!(first.source_device_id, "device-a");
+        assert_eq!(first.source_device_name, "Laptop A");
+        assert_eq!(first.content, r#"[{"path":"C:\\a.txt"}]"#);
+        assert_eq!(first.content_type, ClipboardContentType::FileList);
         assert!(duplicate.is_none());
     }
 
@@ -1239,6 +1325,40 @@ mod tests {
         };
 
         assert!(manual_trust_required);
+    }
+
+    #[tokio::test]
+    async fn trusted_reconnect_hello_does_not_request_peer_confirmation() {
+        let state = AppState::new();
+        let mut config = AppConfig::default();
+        config.trusted_devices.push("device-remote".to_string());
+        state.set_config(config).await;
+        state
+            .upsert_device(DeviceInfo {
+                id: "device-remote".to_string(),
+                name: "Laptop B".to_string(),
+                ip: "10.194.33.156".to_string(),
+                port: 8765,
+                connected: false,
+                trusted: true,
+                remote_trusted: true,
+                has_connected_before: true,
+                last_seen_at: None,
+                status: DeviceStatus::Offline,
+            })
+            .await;
+        state
+            .mark_peer_confirmation_required("ws://10.194.33.156:8765/")
+            .await;
+
+        let WireMessage::Hello {
+            manual_trust_required,
+            ..
+        } = build_hello(&state, "ws://10.194.33.156:8765/").await else {
+            panic!("build_hello should produce a Hello message");
+        };
+
+        assert!(!manual_trust_required);
     }
 
     #[tokio::test]
@@ -1835,7 +1955,14 @@ mod tests {
         config.sync_image = false;
         assert!(!should_read_local_clipboard(&config));
 
+        config.sync_files = false;
+        assert!(!should_read_local_clipboard(&config));
+
         config.sync_image = true;
+        assert!(should_read_local_clipboard(&config));
+
+        config.sync_image = false;
+        config.sync_files = true;
         assert!(should_read_local_clipboard(&config));
     }
 

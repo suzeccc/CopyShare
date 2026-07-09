@@ -3,6 +3,7 @@ import { ArrowDownLeft, ArrowUpRight } from "lucide-vue-next";
 import { computed } from "vue";
 
 import { formatTime } from "@/lib/format";
+import { stripSizeSuffix } from "@/lib/historyPreview";
 import type { HistoryItem } from "@/types/history";
 
 import CopyTextButton from "../ui/CopyTextButton.vue";
@@ -12,6 +13,11 @@ const props = defineProps<{
 }>();
 
 const copyText = computed(() => props.item.content?.trim() || props.item.summary);
+const displaySummary = computed(() =>
+  props.item.contentType === "image"
+    ? stripSizeSuffix(props.item.summary)
+    : props.item.summary,
+);
 </script>
 
 <template>
@@ -30,9 +36,14 @@ const copyText = computed(() => props.item.content?.trim() || props.item.summary
             {{ item.sourceDevice }}
           </span>
         </div>
-        <CopyTextButton :text="copyText" label="复制内容" />
+        <CopyTextButton
+          :text="copyText"
+          :content-type="item.contentType"
+          :history-item-id="item.id"
+          label="复制内容"
+        />
       </div>
-      <p class="mt-2 break-words text-sm text-slate-300">{{ item.summary }}</p>
+      <p class="mt-2 break-words text-sm text-slate-300">{{ displaySummary }}</p>
       <p class="mt-2 text-xs text-slate-500">{{ formatTime(item.createdAt) }}</p>
     </div>
   </article>

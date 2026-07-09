@@ -272,6 +272,25 @@ assert.deepEqual(
   [connectedBeforeRefresh],
 );
 
+const offlineHistoryThenDiscoveredOnline = historicalDevices([
+  {
+    ...trustedDevice("device-remote", false),
+    remoteTrusted: false,
+    status: "offline",
+    lastSeenAt: "2026-07-07T21:45:38Z",
+  },
+  {
+    ...device("device-remote", false),
+    trusted: true,
+    status: "online",
+    lastSeenAt: "2026-07-08T06:20:00Z",
+  },
+]);
+
+assert.equal(offlineHistoryThenDiscoveredOnline.length, 1);
+assert.equal(offlineHistoryThenDiscoveredOnline[0].status, "online");
+assert.equal(offlineHistoryThenDiscoveredOnline[0].lastSeenAt, "2026-07-08T06:20:00Z");
+
 const discoveredDuringRefresh = {
   ...device("new-device", true),
   ip: "10.194.33.159",

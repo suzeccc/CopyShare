@@ -111,6 +111,14 @@ const showActionButtons = computed(() => {
   if (props.mode === "connected") return true;
   return props.mode === "status" && !props.device.connected;
 });
+
+const showCancelAwaitingTrustButton = computed(() =>
+  props.showActions &&
+  props.mode === "status" &&
+  props.device.connected &&
+  props.device.trusted &&
+  !props.device.remoteTrusted
+);
 </script>
 
 <template>
@@ -157,6 +165,18 @@ const showActionButtons = computed(() => {
       <Button v-else-if="mode === 'connected'" size="sm" variant="ghost" @click="$emit('disconnect', device.id)">
         <Unplug class="h-4 w-4" />
         断开
+      </Button>
+    </div>
+
+    <div v-if="showCancelAwaitingTrustButton" class="mt-4 flex">
+      <Button
+        data-device-cancel-awaiting-trust-button
+        size="sm"
+        variant="danger"
+        @click="$emit('reject', device.id)"
+      >
+        <ShieldX class="h-4 w-4" />
+        取消等待
       </Button>
     </div>
   </article>

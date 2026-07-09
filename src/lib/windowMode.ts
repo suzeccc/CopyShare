@@ -95,10 +95,17 @@ export function getClipboardPreview(summary: string | null | undefined): string 
 export function getLatencyLabel(status: {
   running: boolean;
   connectedCount: number;
+  latencyMs: number | null;
 }): string {
   if (!status.running || status.connectedCount === 0) {
     return "-- ms";
   }
+
+  if (status.latencyMs === null) {
+    return "检测中";
+  }
+
+  return `${Math.max(0, Math.round(status.latencyMs))} ms`;
 
   return "检测中";
 }

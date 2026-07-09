@@ -45,6 +45,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .setup(move |app| {
+            notifications::configure_process_app_id(app.handle());
+
             #[cfg(desktop)]
             app.handle().plugin(tauri_plugin_autostart::init(
                 MacosLauncher::LaunchAgent,
@@ -94,6 +96,9 @@ pub fn run() {
             commands::reject_file_transfer,
             commands::cancel_file_transfer,
             commands::get_file_transfers,
+            commands::get_transfer_save_dir,
+            commands::select_transfer_save_dir,
+            commands::reset_transfer_save_dir,
             commands::open_transfer_folder,
             commands::create_mobile_session,
             commands::get_mobile_session_status,
@@ -101,6 +106,7 @@ pub fn run() {
             commands::confirm_mobile_clipboard_write,
             commands::clear_history,
             commands::copy_history_item,
+            commands::get_history_image_thumbnail,
             commands::open_external_url,
             commands::show_main_window,
             commands::hide_main_window,

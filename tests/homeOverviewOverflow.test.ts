@@ -15,6 +15,6 @@ assert.match(home, /data-home-quick-device-row/);
 assert.match(home, /md:grid-cols-\[minmax\(0,1fr\)_minmax\(0,1fr\)\]/);
 assert.match(home, /data-home-quick-actions/);
 assert.match(home, /data-home-sync-content-grid/);
-assert.match(home, /data-home-recent-row/);
-assert.match(home, /break-all/);
+assert.doesNotMatch(home, /data-home-recent-row/);
+assert.doesNotMatch(home, /data-more-clipboard-button/);
 assert.doesNotMatch(home, /overflow-auto/);

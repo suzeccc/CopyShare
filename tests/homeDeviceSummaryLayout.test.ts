@@ -8,6 +8,7 @@ assert.match(home, /sm:grid-cols-\[0\.62fr_1\.38fr\]/);
 assert.match(home, /data-home-port-block/);
 assert.match(home, /data-home-address-block/);
 assert.match(home, /data-home-address-value/);
+assert.doesNotMatch(home, /statusStore\.status\.deviceId/);
 
 const addressValue = home.match(
   /<span[^>]*data-home-address-value[^>]*class="([^"]+)"/,

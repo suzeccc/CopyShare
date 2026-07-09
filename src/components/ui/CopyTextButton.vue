@@ -3,7 +3,7 @@ import { Check, Copy, TriangleAlert } from "lucide-vue-next";
 import { computed, onBeforeUnmount, ref } from "vue";
 
 import { copyTextToClipboard, getCopyableText, type CopyTextResult } from "@/lib/clipboard";
-import { copyHistoryItem } from "@/lib/tauri";
+import { copyHistoryItem, type CopyHistoryResult } from "@/lib/tauri";
 import { useToastStore } from "@/stores/toasts";
 import type { ClipboardContentType } from "@/types/history";
 
@@ -30,12 +30,15 @@ const props = withDefaults(
   },
 );
 
-const result = ref<CopyTextResult | null>(null);
+const result = ref<CopyTextResult | CopyHistoryResult | null>(null);
 const toastStore = useToastStore();
 let resetTimer: number | undefined;
+const requiresHistoryCopy = computed(
+  () => props.contentType === "image" || props.contentType === "fileList",
+);
 
 const canCopy = computed(() =>
-  props.contentType === "image"
+  requiresHistoryCopy.value
     ? Boolean(props.historyItemId)
     : Boolean(getCopyableText(props.text)),
 );
@@ -43,6 +46,14 @@ const hasError = computed(() => result.value === "failed" || result.value === "u
 const buttonLabel = computed(() => {
   if (result.value === "copied") {
     return props.copiedLabel;
+  }
+
+  if (result.value === "downloadStarted") {
+    return "开始下载";
+  }
+
+  if (result.value === "downloading") {
+    return "下载中";
   }
 
   if (hasError.value) {
@@ -53,13 +64,12 @@ const buttonLabel = computed(() => {
 });
 
 async function copyText() {
-  if (props.contentType === "image") {
+  if (requiresHistoryCopy.value) {
     if (!props.historyItemId) {
       result.value = "empty";
     } else {
       try {
-        await copyHistoryItem(props.historyItemId);
-        result.value = "copied";
+        result.value = await copyHistoryItem(props.historyItemId);
       } catch {
         result.value = "failed";
       }
@@ -68,8 +78,18 @@ async function copyText() {
     result.value = await copyTextToClipboard(props.text);
   }
 
-  if (result.value === "copied") {
-    toastStore.success(props.contentType === "image" ? "图片已复制" : "复制成功");
+  if (result.value === "downloadStarted") {
+    toastStore.success("开始下载，完成后会写入剪贴板");
+  } else if (result.value === "downloading") {
+    toastStore.success("文件正在下载");
+  } else if (result.value === "copied") {
+    toastStore.success(
+      props.contentType === "image"
+        ? "图片已复制"
+        : props.contentType === "fileList"
+          ? "文件已复制"
+          : "复制成功",
+    );
   } else if (result.value) {
     toastStore.error("复制失败");
   }

@@ -28,7 +28,7 @@ const DISCOVERY_ANNOUNCE_INTERVAL: Duration = Duration::from_secs(8);
 const ACTIVE_DISCOVERY_WAIT: Duration = Duration::from_secs(2);
 const DISCOVERY_OFFLINE_AFTER: ChronoDuration = ChronoDuration::seconds(30);
 const DISCOVERY_SWEEP_INTERVAL: Duration = Duration::from_secs(5);
-const SUBNET_SCAN_DELAY: Duration = Duration::from_millis(6);
+const SUBNET_SCAN_DELAY: Duration = Duration::from_millis(4);
 
 static DISCOVERED_DEVICES: OnceLock<Mutex<HashMap<String, DeviceInfo>>> = OnceLock::new();
 static NOTIFIED_ONLINE_DEVICES: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
@@ -815,7 +815,7 @@ mod tests {
         discovery_scan_hosts_for_adapters, discovery_scan_hosts_for_config,
         discovered_device_from_payload,
         expire_stale_discovered_devices, merge_discovered_device, merge_scan_ranges,
-        normalize_scan_cidr, parse_discovery_payload,
+        normalize_scan_cidr, parse_discovery_payload, ACTIVE_DISCOVERY_WAIT, SUBNET_SCAN_DELAY,
     };
 
     #[test]
@@ -1082,6 +1082,33 @@ mod tests {
         assert!(plan.hosts.contains(&Ipv4Addr::new(10, 194, 33, 156)));
         assert!(plan.hosts.contains(&Ipv4Addr::new(10, 194, 35, 254)));
         assert!(!plan.hosts.contains(&Ipv4Addr::new(10, 194, 36, 1)));
+    }
+
+    #[test]
+    fn same_22_subnet_target_is_probed_before_active_wait_returns() {
+        let config = AppConfig::default();
+        let plan = discovery_scan_hosts_for_adapters(
+            &config,
+            &[(
+                "WLAN".to_string(),
+                Ipv4Addr::new(10, 194, 34, 119),
+                Ipv4Addr::new(255, 255, 252, 0),
+            )],
+        );
+        let target = Ipv4Addr::new(10, 194, 33, 156);
+        let target_index = plan
+            .hosts
+            .iter()
+            .position(|ip| *ip == target)
+            .expect("target should be included in the /22 scan plan");
+        let estimated_probe_time = Duration::from_millis(
+            SUBNET_SCAN_DELAY.as_millis() as u64 * target_index as u64,
+        );
+
+        assert!(
+            estimated_probe_time < ACTIVE_DISCOVERY_WAIT,
+            "{target} is queued at {estimated_probe_time:?}, after active discovery returns at {ACTIVE_DISCOVERY_WAIT:?}"
+        );
     }
 
     #[test]

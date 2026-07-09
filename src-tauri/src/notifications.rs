@@ -4,8 +4,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use tauri::{AppHandle, Manager};
 use tauri_plugin_notification::NotificationExt;
+use tauri::{AppHandle, Manager};
 
 use crate::{
     config as app_config,
@@ -24,6 +24,23 @@ const SETTINGS_ROUTE: &str = "/settings";
 
 static NOTIFICATION_COOLDOWNS: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
 
+pub fn configure_process_app_id(app: &AppHandle) {
+    #[cfg(target_os = "windows")]
+    {
+        use windows::core::PCWSTR;
+        use windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
+
+        let app_id = notification_app_id(&app.config().identifier);
+        let wide_app_id: Vec<u16> = app_id.encode_utf16().chain(std::iter::once(0)).collect();
+        let _ = unsafe {
+            SetCurrentProcessExplicitAppUserModelID(PCWSTR(wide_app_id.as_ptr()))
+        };
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    let _ = app;
+}
+
 pub fn show_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
@@ -41,10 +58,7 @@ pub fn notify_clipboard_received(
         app,
         config,
         config.notify_clipboard,
-        &format!(
-            "clipboard:{}:{}",
-            message.source_device_id, message.content_hash
-        ),
+        clipboard_notification_cooldown_key(message),
         Duration::from_secs(10),
         "收到剪贴板内容",
         &clipboard_notification_body(config, message),
@@ -61,7 +75,7 @@ pub fn notify_mobile_clipboard_received(
         app,
         config,
         config.notify_clipboard,
-        &format!("mobile-clipboard:{}", message.content_hash),
+        clipboard_notification_cooldown_key(message),
         Duration::from_secs(10),
         "手机内容已写入剪贴板",
         &mobile_clipboard_notification_body(config, message),
@@ -199,6 +213,10 @@ fn notify_if_enabled(
     notify(app, title, body, route);
 }
 
+fn clipboard_notification_cooldown_key(_message: &ClipboardMessage) -> &'static str {
+    "clipboard-sync"
+}
+
 fn claim_notification_slot(key: &str, cooldown: Duration) -> bool {
     let now = Instant::now();
     let mut cooldowns = NOTIFICATION_COOLDOWNS
@@ -225,12 +243,22 @@ fn load_notification_config(app: &AppHandle) -> AppConfig {
 
 fn notify(app: &AppHandle, title: &str, body: &str, route: &'static str) {
     let _ = (NAVIGATE_EVENT, route);
+
     let _ = app
         .notification()
         .builder()
         .title(title)
         .body(body)
         .show();
+}
+
+fn notification_app_id(identifier: &str) -> String {
+    let identifier = identifier.trim();
+    if identifier.is_empty() {
+        "com.copyshare.desktop".to_string()
+    } else {
+        identifier.to_string()
+    }
 }
 
 #[cfg(test)]
@@ -320,8 +348,9 @@ mod tests {
     };
 
     use super::{
-        clipboard_notification_body, compact_preview, file_summary,
-        mobile_clipboard_notification_body, notification_response_opens_window,
+        clipboard_notification_body, clipboard_notification_cooldown_key, compact_preview,
+        file_summary, mobile_clipboard_notification_body, notification_app_id,
+        notification_response_opens_window,
     };
 
     fn task(files: Vec<FileTransferFile>) -> FileTransferTask {
@@ -330,6 +359,7 @@ mod tests {
             direction: FileTransferDirection::Receive,
             peer_device_id: "device-a".to_string(),
             peer_device_name: "Peer".to_string(),
+            clipboard_sync: false,
             files,
             total_size: 1,
             transferred_bytes: 0,
@@ -390,6 +420,12 @@ mod tests {
     }
 
     #[test]
+    fn notification_app_id_uses_copyshare_identifier_instead_of_powershell_fallback() {
+        assert_eq!(notification_app_id("com.copyshare.desktop"), "com.copyshare.desktop");
+        assert_eq!(notification_app_id("  "), "com.copyshare.desktop");
+    }
+
+    #[test]
     fn clipboard_notification_hides_text_without_preview() {
         let mut config = AppConfig::default();
         config.notification_clipboard_preview = false;
@@ -418,6 +454,16 @@ mod tests {
 
         assert_eq!(body, "收到手机发送的文本内容");
         assert!(!body.contains("phone secret"));
+    }
+
+    #[test]
+    fn clipboard_notifications_share_one_ten_second_cooldown() {
+        let first = clipboard_message("first");
+        let mut second = clipboard_message("second");
+        second.content_hash = "hash-b".to_string();
+
+        assert_eq!(clipboard_notification_cooldown_key(&first), "clipboard-sync");
+        assert_eq!(clipboard_notification_cooldown_key(&second), "clipboard-sync");
     }
 
     #[test]

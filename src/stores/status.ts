@@ -16,6 +16,7 @@ const stoppedStatus: AppStatus = {
   localIp: null,
   port: 8765,
   connectedCount: 0,
+  latencyMs: null,
   lastSyncAt: null,
   state: "stopped",
   message: "等待启动同步",

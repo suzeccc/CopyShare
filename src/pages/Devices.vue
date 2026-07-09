@@ -12,6 +12,9 @@ import { useToastStore } from "@/stores/toasts";
 const devicesStore = useDevicesStore();
 const toastStore = useToastStore();
 const lanDiscoveryScanning = ref(false);
+const LAN_DISCOVERY_SETTLE_TIMEOUT_MS = 9000;
+const LAN_DISCOVERY_SETTLE_POLL_MS = 120;
+const LAN_DISCOVERY_RESPONSE_GRACE_MS = 600;
 const recentIps = computed(() =>
   Array.from(
     new Set(
@@ -21,6 +24,35 @@ const recentIps = computed(() =>
     ),
   ).slice(0, 8),
 );
+
+function delay(ms: number) {
+  return new Promise<void>((resolve) => window.setTimeout(resolve, ms));
+}
+
+function hasDiscoveredOnlineDevices() {
+  return devicesStore.history.some(
+    (device) => !device.connected && device.status === "online",
+  );
+}
+
+async function waitForLanDiscoveryToSettle(previousScanId: number | null) {
+  const deadline = Date.now() + LAN_DISCOVERY_SETTLE_TIMEOUT_MS;
+  let finishedAtSeenAt: number | null = null;
+  while (Date.now() < deadline) {
+    const progress = devicesStore.lanDiscoveryProgress;
+    if (hasDiscoveredOnlineDevices()) {
+      return;
+    }
+    if (progress && progress.scanId !== previousScanId && !progress.running) {
+      finishedAtSeenAt ??= Date.now();
+      if (Date.now() - finishedAtSeenAt >= LAN_DISCOVERY_RESPONSE_GRACE_MS) {
+        return;
+      }
+    }
+    await delay(LAN_DISCOVERY_SETTLE_POLL_MS);
+  }
+}
+
 async function scanLanDevices() {
   if (lanDiscoveryScanning.value) {
     return;
@@ -28,10 +60,12 @@ async function scanLanDevices() {
 
   lanDiscoveryScanning.value = true;
   const knownDeviceIds = new Set(devicesStore.history.map((device) => device.id));
+  const previousScanId = devicesStore.lanDiscoveryProgress?.scanId ?? null;
   toastStore.info("正在扫描局域网设备...");
 
   try {
     await devicesStore.refresh();
+    await waitForLanDiscoveryToSettle(previousScanId);
     const discoveredDevices = devicesStore.history.filter(
       (device) => !device.connected && device.status === "online",
     );
