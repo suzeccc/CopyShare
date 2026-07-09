@@ -2,11 +2,20 @@ use std::path::{Path, PathBuf};
 
 use base64::{engine::general_purpose::STANDARD, Engine};
 use image::{ColorType, ImageEncoder};
+use serde::{Deserialize, Serialize};
 use tauri::{image::Image, AppHandle};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
 use crate::error::{AppError, AppResult};
 use crate::models::ClipboardTextItem;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ClipboardFileEntry {
+    pub path: String,
+    pub name: String,
+    pub size: u64,
+}
 
 pub fn read_clipboard_text(app: &AppHandle) -> AppResult<String> {
     app.clipboard()
@@ -18,6 +27,144 @@ pub fn write_clipboard_text(app: &AppHandle, text: &str) -> AppResult<()> {
     app.clipboard()
         .write_text(text.to_string())
         .map_err(|error| AppError::Clipboard(error.to_string()))
+}
+
+pub fn read_clipboard_files() -> AppResult<Vec<PathBuf>> {
+    #[cfg(target_os = "windows")]
+    {
+        read_clipboard_file_paths()
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        Ok(Vec::new())
+    }
+}
+
+pub fn clipboard_has_image_data() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::System::DataExchange::{
+            IsClipboardFormatAvailable, RegisterClipboardFormatW,
+        };
+        use windows::core::PCWSTR;
+
+        const CF_DIB: u32 = 8;
+        const CF_DIBV5: u32 = 17;
+
+        if unsafe { IsClipboardFormatAvailable(CF_DIB) }.is_ok()
+            || unsafe { IsClipboardFormatAvailable(CF_DIBV5) }.is_ok()
+        {
+            return true;
+        }
+
+        let png_format: Vec<u16> = "PNG\0".encode_utf16().collect();
+        let cf_png = unsafe { RegisterClipboardFormatW(PCWSTR(png_format.as_ptr())) };
+        cf_png != 0 && unsafe { IsClipboardFormatAvailable(cf_png) }.is_ok()
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        false
+    }
+}
+
+pub fn write_clipboard_files(app: &AppHandle, paths: &[PathBuf]) -> AppResult<()> {
+    if paths.is_empty() {
+        return Err(AppError::InvalidInput("鏂囦欢鍒楄〃涓虹┖".to_string()));
+    }
+    if let Some(missing) = paths.iter().find(|path| std::fs::metadata(path).is_err()) {
+        return Err(AppError::InvalidInput(format!(
+            "鏂囦欢涓嶅瓨鍦細{}",
+            missing.to_string_lossy()
+        )));
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let _ = app;
+        write_windows_file_paths_to_clipboard(paths)
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let text = paths
+            .iter()
+            .map(|path| path.to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("\n");
+        write_clipboard_text(app, &text)
+    }
+}
+
+pub fn file_paths_to_clipboard_content(paths: &[PathBuf]) -> AppResult<String> {
+    let entries = paths
+        .iter()
+        .map(|path| {
+            let name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .filter(|name| !name.trim().is_empty())
+                .map(ToOwned::to_owned)
+                .unwrap_or_else(|| path.to_string_lossy().to_string());
+            let size = std::fs::metadata(path).map(|meta| meta.len()).unwrap_or(0);
+            ClipboardFileEntry {
+                path: path.to_string_lossy().to_string(),
+                name,
+                size,
+            }
+        })
+        .collect::<Vec<_>>();
+    serde_json::to_string(&entries).map_err(Into::into)
+}
+
+pub fn clipboard_content_to_file_entries(content: &str) -> AppResult<Vec<ClipboardFileEntry>> {
+    serde_json::from_str(content).map_err(Into::into)
+}
+
+pub fn clipboard_content_to_file_paths(content: &str) -> AppResult<Vec<PathBuf>> {
+    Ok(clipboard_content_to_file_entries(content)?
+        .into_iter()
+        .filter(|entry| !entry.path.trim().is_empty())
+        .map(|entry| PathBuf::from(entry.path))
+        .collect())
+}
+
+pub fn summarize_file_entries(entries: &[ClipboardFileEntry]) -> String {
+    match entries {
+        [] => "鏂囦欢鍒楄〃".to_string(),
+        [entry] => format!("{} {}", entry.name, format_file_size(entry.size)),
+        entries => format!(
+            "{} 涓枃浠?{}",
+            entries.len(),
+            format_file_size(entries.iter().map(|entry| entry.size).sum())
+        ),
+    }
+}
+
+fn format_file_size(size: u64) -> String {
+    if size < 1024 {
+        return format!("{size} B");
+    }
+
+    let units = ["KB", "MB", "GB", "TB"];
+    let mut value = size as f64 / 1024.0;
+    let mut unit = units[0];
+    for next_unit in units.iter().skip(1) {
+        if value < 1024.0 {
+            break;
+        }
+        value /= 1024.0;
+        unit = next_unit;
+    }
+    let precision = if value >= 10.0 { 1 } else { 2 };
+    format!("{value:.precision$} {unit}")
+}
+
+pub fn summarize_file_content(content: &str) -> String {
+    clipboard_content_to_file_entries(content)
+        .map(|entries| summarize_file_entries(&entries))
+        .unwrap_or_else(|_| "鏂囦欢鍒楄〃".to_string())
 }
 
 pub fn read_clipboard_image_base64(app: &AppHandle) -> AppResult<Option<String>> {
@@ -36,10 +183,19 @@ pub fn read_clipboard_image_base64(app: &AppHandle) -> AppResult<Option<String>>
 }
 
 pub fn write_clipboard_image_base64(app: &AppHandle, content: &str) -> AppResult<()> {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = app;
+        return write_clipboard_image_base64_windows(content);
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
     let image = png_base64_to_image(content)?;
     app.clipboard()
         .write_image(&image)
         .map_err(|error| AppError::Clipboard(error.to_string()))
+    }
 }
 
 pub fn image_to_png_base64(image: &Image<'_>) -> AppResult<String> {
@@ -65,6 +221,191 @@ pub fn png_base64_to_image(content: &str) -> AppResult<Image<'static>> {
         .to_rgba8();
     let (width, height) = image.dimensions();
     Ok(Image::new_owned(image.into_raw(), width, height))
+}
+
+#[cfg(target_os = "windows")]
+fn write_clipboard_image_base64_windows(content: &str) -> AppResult<()> {
+    let bytes = STANDARD
+        .decode(content)
+        .map_err(|error| AppError::Clipboard(error.to_string()))?;
+    let image = png_base64_to_image(content)?;
+    write_windows_image_to_clipboard(image.rgba(), image.width(), image.height(), &bytes)
+}
+
+#[cfg(target_os = "windows")]
+fn write_windows_file_paths_to_clipboard(paths: &[PathBuf]) -> AppResult<()> {
+    use windows::Win32::System::DataExchange::{EmptyClipboard, OpenClipboard};
+
+    const CF_HDROP_FORMAT: u32 = 15;
+
+    let hdrop = build_windows_hdrop_bytes_for_paths(paths);
+    unsafe {
+        OpenClipboard(None).map_err(|error| AppError::Clipboard(error.to_string()))?;
+        let _guard = ClipboardCloseGuard;
+        EmptyClipboard().map_err(|error| AppError::Clipboard(error.to_string()))?;
+        set_windows_clipboard_bytes(CF_HDROP_FORMAT, &hdrop)?;
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn write_windows_image_to_clipboard(
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    png_bytes: &[u8],
+) -> AppResult<()> {
+    use windows::Win32::System::DataExchange::{
+        EmptyClipboard, OpenClipboard, RegisterClipboardFormatW,
+    };
+    use windows::core::PCWSTR;
+
+    const CF_DIB_FORMAT: u32 = 8;
+    const CF_HDROP_FORMAT: u32 = 15;
+
+    let dib = build_windows_dib_bytes(rgba, width, height)?;
+    let html = build_windows_image_html(png_bytes);
+    let temp_png_path = write_temp_clipboard_png(png_bytes)?;
+    let hdrop = build_windows_hdrop_bytes(&temp_png_path);
+
+    unsafe {
+        OpenClipboard(None).map_err(|error| AppError::Clipboard(error.to_string()))?;
+        let _guard = ClipboardCloseGuard;
+        EmptyClipboard().map_err(|error| AppError::Clipboard(error.to_string()))?;
+
+        set_windows_clipboard_bytes(CF_DIB_FORMAT, &dib)?;
+
+        let png_format: Vec<u16> = "PNG\0".encode_utf16().collect();
+        let cf_png = RegisterClipboardFormatW(PCWSTR(png_format.as_ptr()));
+        if cf_png != 0 {
+            set_windows_clipboard_bytes(cf_png, png_bytes)?;
+        }
+
+        let html_format: Vec<u16> = "HTML Format\0".encode_utf16().collect();
+        let cf_html = RegisterClipboardFormatW(PCWSTR(html_format.as_ptr()));
+        if cf_html != 0 {
+            set_windows_clipboard_bytes(cf_html, &html)?;
+        }
+
+        set_windows_clipboard_bytes(CF_HDROP_FORMAT, &hdrop)?;
+    }
+
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+unsafe fn set_windows_clipboard_bytes(format: u32, bytes: &[u8]) -> AppResult<()> {
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::System::DataExchange::SetClipboardData;
+    use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
+
+    let hmem = GlobalAlloc(GMEM_MOVEABLE, bytes.len())
+        .map_err(|error| AppError::Clipboard(error.to_string()))?;
+    let ptr = GlobalLock(hmem);
+    if ptr.is_null() {
+        return Err(AppError::Clipboard("GlobalLock failed".to_string()));
+    }
+    std::ptr::copy_nonoverlapping(bytes.as_ptr(), ptr as *mut u8, bytes.len());
+    let _ = GlobalUnlock(hmem);
+    SetClipboardData(format, Some(HANDLE(hmem.0)))
+        .map_err(|error| AppError::Clipboard(error.to_string()))?;
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+struct ClipboardCloseGuard;
+
+#[cfg(target_os = "windows")]
+impl Drop for ClipboardCloseGuard {
+    fn drop(&mut self) {
+        let _ = unsafe { windows::Win32::System::DataExchange::CloseClipboard() };
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn build_windows_dib_bytes(rgba: &[u8], width: u32, height: u32) -> AppResult<Vec<u8>> {
+    let expected_len = width as usize * height as usize * 4;
+    if rgba.len() != expected_len {
+        return Err(AppError::Clipboard("Invalid RGBA image buffer".to_string()));
+    }
+
+    let mut dib = vec![0u8; 40 + expected_len];
+    dib[0..4].copy_from_slice(&40u32.to_le_bytes());
+    dib[4..8].copy_from_slice(&(width as i32).to_le_bytes());
+    dib[8..12].copy_from_slice(&(-(height as i32)).to_le_bytes());
+    dib[12..14].copy_from_slice(&1u16.to_le_bytes());
+    dib[14..16].copy_from_slice(&32u16.to_le_bytes());
+    dib[20..24].copy_from_slice(&(expected_len as u32).to_le_bytes());
+
+    for i in 0..(width as usize * height as usize) {
+        let src = i * 4;
+        let dst = 40 + src;
+        dib[dst] = rgba[src + 2];
+        dib[dst + 1] = rgba[src + 1];
+        dib[dst + 2] = rgba[src];
+        dib[dst + 3] = rgba[src + 3];
+    }
+
+    Ok(dib)
+}
+
+#[cfg(target_os = "windows")]
+fn build_windows_image_html(png_bytes: &[u8]) -> Vec<u8> {
+    let b64 = STANDARD.encode(png_bytes);
+    let img_tag = format!("<img src=\"data:image/png;base64,{b64}\"/>");
+    let fragment = format!("<!--StartFragment-->{img_tag}<!--EndFragment-->");
+    let html_body = format!("<html><body>{fragment}</body></html>");
+    let placeholder_header = "Version:0.9\r\nStartHTML:00000000\r\nEndHTML:00000000\r\nStartFragment:00000000\r\nEndFragment:00000000\r\n";
+    let header_len = placeholder_header.len();
+    let start_html = header_len;
+    let end_html = header_len + html_body.len();
+    let start_fragment = header_len + html_body.find(&fragment).unwrap_or(0);
+    let end_fragment =
+        header_len + html_body.find("<!--EndFragment-->").unwrap_or(0) + "<!--EndFragment-->".len();
+    let header = format!(
+        "Version:0.9\r\nStartHTML:{start_html:08}\r\nEndHTML:{end_html:08}\r\nStartFragment:{start_fragment:08}\r\nEndFragment:{end_fragment:08}\r\n",
+    );
+    let mut result = header.into_bytes();
+    result.extend_from_slice(html_body.as_bytes());
+    result
+}
+
+#[cfg(target_os = "windows")]
+fn write_temp_clipboard_png(png_bytes: &[u8]) -> AppResult<PathBuf> {
+    let mut dir = std::env::temp_dir();
+    dir.push("copyshare_paste");
+    std::fs::create_dir_all(&dir)?;
+    dir.push(format!("paste_{}.png", uuid::Uuid::new_v4()));
+    std::fs::write(&dir, png_bytes)?;
+    Ok(dir)
+}
+
+#[cfg(target_os = "windows")]
+fn build_windows_hdrop_bytes(path: &Path) -> Vec<u8> {
+    build_windows_hdrop_bytes_for_paths(&[path.to_path_buf()])
+}
+
+#[cfg(target_os = "windows")]
+fn build_windows_hdrop_bytes_for_paths(paths: &[PathBuf]) -> Vec<u8> {
+    let wide_paths = paths
+        .iter()
+        .flat_map(|path| {
+            path.to_string_lossy()
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect::<Vec<_>>()
+        })
+        .chain(std::iter::once(0))
+        .collect::<Vec<u16>>();
+    let dropfiles_size = 20usize;
+    let mut data = vec![0u8; dropfiles_size + wide_paths.len() * 2];
+    data[0..4].copy_from_slice(&(dropfiles_size as u32).to_le_bytes());
+    data[16..20].copy_from_slice(&1u32.to_le_bytes());
+    for (index, unit) in wide_paths.iter().enumerate() {
+        let offset = dropfiles_size + index * 2;
+        data[offset..offset + 2].copy_from_slice(&unit.to_le_bytes());
+    }
+    data
 }
 
 pub fn image_file_to_png_base64(path: &Path) -> AppResult<String> {
@@ -380,6 +721,42 @@ mod tests {
     use super::*;
 
     #[test]
+    fn file_list_json_round_trips_paths() {
+        let paths = vec![
+            PathBuf::from(r"C:\Users\SuZe\Desktop\a.txt"),
+            PathBuf::from(r"D:\QiLin\demo image.png"),
+        ];
+
+        let json = file_paths_to_clipboard_content(&paths).expect("file list json");
+        let restored = clipboard_content_to_file_paths(&json).expect("file list paths");
+
+        assert_eq!(restored, paths);
+    }
+
+    #[test]
+    fn file_summary_appends_size_suffix() {
+        let files = vec![
+            ClipboardFileEntry {
+                path: r"C:\a.txt".to_string(),
+                name: "a.txt".to_string(),
+                size: 1024,
+            },
+            ClipboardFileEntry {
+                path: r"C:\b.bin".to_string(),
+                name: "b.bin".to_string(),
+                size: 2048,
+            },
+        ];
+
+        assert_eq!(
+            summarize_file_entries(&files[..1]),
+            "a.txt 1.00 KB",
+            "single file history should append bytes"
+        );
+        assert!(summarize_file_entries(&files).ends_with("3.00 KB"));
+    }
+
+    #[test]
     fn image_payload_round_trips_as_png_base64() {
         let image = tauri::image::Image::new_owned(
             vec![
@@ -468,5 +845,40 @@ mod tests {
                 255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255,
             ]
         );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_clipboard_dib_builder_converts_rgba_to_bgra() {
+        let dib = build_windows_dib_bytes(&[10, 20, 30, 255], 1, 1)
+            .expect("DIB bytes should build");
+
+        assert_eq!(&dib[0..4], &40u32.to_le_bytes());
+        assert_eq!(&dib[4..8], &1i32.to_le_bytes());
+        assert_eq!(&dib[8..12], &(-1i32).to_le_bytes());
+        assert_eq!(&dib[40..44], &[30, 20, 10, 255]);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_clipboard_html_builder_has_valid_offsets() {
+        let html = String::from_utf8(build_windows_image_html(b"png")).expect("HTML is utf8");
+
+        assert!(html.contains("Version:0.9"));
+        assert!(html.contains("StartFragment:"));
+        assert!(html.contains("<img src=\"data:image/png;base64,"));
+        assert!(html.contains("<!--StartFragment-->"));
+        assert!(html.contains("<!--EndFragment-->"));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_hdrop_builder_writes_wide_path() {
+        let path = PathBuf::from(r"C:\Temp\copyshare.png");
+        let hdrop = build_windows_hdrop_bytes(&path);
+
+        assert_eq!(&hdrop[0..4], &20u32.to_le_bytes());
+        assert_eq!(&hdrop[16..20], &1u32.to_le_bytes());
+        assert!(hdrop.ends_with(&[0, 0, 0, 0]));
     }
 }

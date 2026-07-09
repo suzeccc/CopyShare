@@ -17,11 +17,13 @@ use tokio::{
 use uuid::Uuid;
 
 use crate::{
+    clipboard, history,
     error::{AppError, AppResult},
     models::{
-        DeviceInfo, FileCompleteFile, FileOfferFile, FileTransferDirection, FileTransferFile,
-        FileTransferFileStatus, FileTransferProgressEvent, FileTransferStatus, FileTransferTask,
-        SelectedTransferFile, WireMessage,
+        AppConfig, ClipboardContentType, ClipboardMessage, CopyHistoryResult, DeviceInfo,
+        FileCompleteFile, FileOfferFile, FileTransferDirection, FileTransferFile, FileTransferFileStatus,
+        FileTransferProgressEvent, FileTransferStatus, FileTransferTask, HistoryDirection,
+        HistoryItem, SelectedTransferFile, WireMessage,
     },
     network,
     notifications,
@@ -40,6 +42,7 @@ pub struct IncomingFileOffer {
     pub transfer_id: String,
     pub sender_device_id: String,
     pub sender_device_name: String,
+    pub clipboard_sync: bool,
     pub files: Vec<FileOfferFile>,
     pub total_size: u64,
     pub file_count: usize,
@@ -53,6 +56,7 @@ struct ManagedTransfer {
     files: HashMap<String, ManagedTransferFile>,
     download_host: Option<String>,
     download_port: Option<u16>,
+    clipboard_sync: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -120,6 +124,14 @@ impl FileTransferManager {
         tasks
     }
 
+    pub async fn task(&self, transfer_id: &str) -> Option<FileTransferTask> {
+        self.tasks
+            .lock()
+            .await
+            .get(transfer_id)
+            .map(|entry| entry.task.clone())
+    }
+
     pub async fn selected_file_from_path(&self, path: PathBuf) -> AppResult<SelectedTransferFile> {
         selected_file_from_path(path).await
     }
@@ -148,6 +160,29 @@ impl FileTransferManager {
         state: &AppState,
         target_device_id: String,
         file_paths: Vec<PathBuf>,
+    ) -> AppResult<FileTransferTask> {
+        self.create_send_offer_files_with_mode(app, state, target_device_id, file_paths, false)
+            .await
+    }
+
+    pub async fn create_clipboard_send_offer_files(
+        self: &Arc<Self>,
+        app: &AppHandle,
+        state: &AppState,
+        target_device_id: String,
+        file_paths: Vec<PathBuf>,
+    ) -> AppResult<FileTransferTask> {
+        self.create_send_offer_files_with_mode(app, state, target_device_id, file_paths, true)
+            .await
+    }
+
+    async fn create_send_offer_files_with_mode(
+        self: &Arc<Self>,
+        app: &AppHandle,
+        state: &AppState,
+        target_device_id: String,
+        file_paths: Vec<PathBuf>,
+        clipboard_sync: bool,
     ) -> AppResult<FileTransferTask> {
         let devices = state.devices().await;
         let peer = trusted_transfer_peer(&devices, &target_device_id)?;
@@ -202,6 +237,7 @@ impl FileTransferManager {
             direction: FileTransferDirection::Send,
             peer_device_id: peer.id.clone(),
             peer_device_name: peer.name.clone(),
+            clipboard_sync,
             files: task_files,
             total_size,
             transferred_bytes: 0,
@@ -218,6 +254,7 @@ impl FileTransferManager {
                 files: managed_files,
                 download_host: Some(server.advertised_host.clone()),
                 download_port: Some(server.port),
+                clipboard_sync,
             },
         );
         emit_task_updated(app, &task);
@@ -230,6 +267,7 @@ impl FileTransferManager {
                     transfer_id: transfer_id.clone(),
                     sender_device_id: status.device_id,
                     sender_device_name: status.device_name,
+                    clipboard_sync,
                     files: offer_files,
                     total_size,
                     file_count: task.files.len(),
@@ -448,6 +486,10 @@ impl FileTransferManager {
                 }
                 if let Ok(task) = manager.mark_failed(&transfer_id, &error.to_string()).await {
                     manager.cleanup_temp(&transfer_id).await;
+                    if task.clipboard_sync {
+                        let _ = update_clipboard_file_history_status(&app, &state, &task, None)
+                            .await;
+                    }
                     let _ = state
                         .send_trusted_to_device(
                             &state.config().await,
@@ -475,7 +517,7 @@ impl FileTransferManager {
         transfer_id: String,
     ) -> AppResult<()> {
         let (host, port, peer_device_id, plans) = self.receive_plan(&transfer_id).await?;
-        let save_dir = default_save_dir()?;
+        let save_dir = transfer_save_dir(&state.config().await)?;
         fs::create_dir_all(&save_dir).await?;
 
         let mut completed_files = Vec::with_capacity(plans.len());
@@ -517,6 +559,11 @@ impl FileTransferManager {
         }
 
         let completed = self.mark_completed(&transfer_id).await?;
+        if self.is_clipboard_sync(&transfer_id).await {
+            if let Err(error) = apply_completed_clipboard_file_sync(&app, &state, &completed).await {
+                tracing::warn!("clipboard file sync apply failed: {error}");
+            }
+        }
         let _ = state
             .send_trusted_to_device(
                 &state.config().await,
@@ -530,6 +577,15 @@ impl FileTransferManager {
             .await;
         emit_task_completed(&app, &completed);
         Ok(())
+    }
+
+    async fn is_clipboard_sync(&self, transfer_id: &str) -> bool {
+        self.tasks
+            .lock()
+            .await
+            .get(transfer_id)
+            .map(|entry| entry.clipboard_sync)
+            .unwrap_or(false)
     }
 
     async fn receive_plan(
@@ -825,6 +881,7 @@ impl FileTransferManager {
             direction: FileTransferDirection::Receive,
             peer_device_id: offer.sender_device_id,
             peer_device_name: offer.sender_device_name,
+            clipboard_sync: offer.clipboard_sync,
             files: task_files,
             total_size: offer.total_size,
             transferred_bytes: 0,
@@ -840,9 +897,12 @@ impl FileTransferManager {
                 files: managed_files,
                 download_host: Some(offer.download_host),
                 download_port: Some(offer.download_port),
+                clipboard_sync: offer.clipboard_sync,
             },
         );
-        notifications::notify_file_transfer_offer(app, &task);
+        if !task.clipboard_sync {
+            notifications::notify_file_transfer_offer(app, &task);
+        }
         let _ = app.emit("file-transfer-offer", task.clone());
         emit_task_updated(app, &task);
         Ok(task)
@@ -1176,6 +1236,7 @@ impl FileTransferManager {
             direction: FileTransferDirection::Send,
             peer_device_id: peer_device_id.to_string(),
             peer_device_name: peer_device_id.to_string(),
+            clipboard_sync: false,
             files: task_files,
             total_size,
             transferred_bytes: 0,
@@ -1191,6 +1252,7 @@ impl FileTransferManager {
                 files: managed_files,
                 download_host: None,
                 download_port: None,
+                clipboard_sync: false,
             },
         );
         transfer_id
@@ -1217,6 +1279,7 @@ impl FileTransferManager {
             direction: FileTransferDirection::Receive,
             peer_device_id: peer_device_id.to_string(),
             peer_device_name: peer_device_id.to_string(),
+            clipboard_sync: false,
             files: vec![file],
             total_size: size,
             transferred_bytes: 0,
@@ -1241,6 +1304,7 @@ impl FileTransferManager {
                 )]),
                 download_host: None,
                 download_port: None,
+                clipboard_sync: false,
             },
         );
         transfer_id
@@ -1342,6 +1406,44 @@ pub async fn send_files_to_device(
         .await
 }
 
+pub async fn send_clipboard_files_to_trusted_devices(
+    app: AppHandle,
+    state: AppState,
+    file_paths: Vec<PathBuf>,
+) -> AppResult<usize> {
+    let devices = state
+        .devices()
+        .await
+        .into_iter()
+        .filter(|device| device.connected && device.trusted && device.remote_trusted)
+        .collect::<Vec<_>>();
+    let mut sent_count = 0usize;
+    let mut first_error = None;
+
+    for device in devices {
+        match manager()
+            .create_clipboard_send_offer_files(
+                &app,
+                &state,
+                device.id.clone(),
+                file_paths.clone(),
+            )
+            .await
+        {
+            Ok(_) => sent_count += 1,
+            Err(error) if first_error.is_none() => first_error = Some(error),
+            Err(_) => {}
+        }
+    }
+
+    if sent_count == 0 {
+        if let Some(error) = first_error {
+            return Err(error);
+        }
+    }
+    Ok(sent_count)
+}
+
 pub async fn accept_file_transfer(
     app: AppHandle,
     state: AppState,
@@ -1370,10 +1472,188 @@ pub async fn get_file_transfers() -> AppResult<Vec<FileTransferTask>> {
     Ok(manager().tasks().await)
 }
 
-pub fn open_transfer_folder() -> AppResult<()> {
-    let folder = default_save_dir()?;
+async fn apply_completed_clipboard_file_sync(
+    app: &AppHandle,
+    state: &AppState,
+    task: &FileTransferTask,
+) -> AppResult<()> {
+    let paths = task
+        .files
+        .iter()
+        .filter_map(|file| file.saved_path.as_deref())
+        .map(PathBuf::from)
+        .collect::<Vec<_>>();
+    if paths.is_empty() {
+        return Ok(());
+    }
+
+    clipboard::write_clipboard_files(app, &paths)?;
+    let content = clipboard::file_paths_to_clipboard_content(&paths)?;
+    let message = ClipboardMessage {
+        message_id: task.transfer_id.clone(),
+        source_device_id: task.peer_device_id.clone(),
+        source_device_name: task.peer_device_name.clone(),
+        content_type: ClipboardContentType::FileList,
+        content_hash: clipboard_file_list_hash(&content),
+        content: content.clone(),
+        timestamp: Utc::now().timestamp(),
+    };
+    let _ = state.apply_remote_clipboard(&message).await;
+
+    let config = state.config().await;
+    if config.save_history {
+        let item = if let Some(item) = state
+            .update_file_transfer_history(
+                &task.transfer_id,
+                FileTransferStatus::Completed,
+                Some(content.clone()),
+            )
+            .await
+        {
+            item
+        } else {
+            let mut item = history::make_history_item(
+                HistoryDirection::Remote,
+                task.peer_device_name.clone(),
+                &message,
+            );
+            item.file_transfer_id = Some(task.transfer_id.clone());
+            item.file_transfer_status = Some(FileTransferStatus::Completed);
+            state.push_history(item.clone()).await;
+            item
+        };
+        history::save_history(app, &state.history().await)?;
+        let _ = app.emit("clipboard-synced", item);
+    }
+    Ok(())
+}
+
+async fn push_pending_clipboard_file_history(
+    app: &AppHandle,
+    state: &AppState,
+    task: &FileTransferTask,
+) -> AppResult<()> {
+    let config = state.config().await;
+    if !config.save_history {
+        return Ok(());
+    }
+
+    let content = pending_clipboard_file_content(task)?;
+    let message = ClipboardMessage {
+        message_id: task.transfer_id.clone(),
+        source_device_id: task.peer_device_id.clone(),
+        source_device_name: task.peer_device_name.clone(),
+        content_type: ClipboardContentType::FileList,
+        content_hash: clipboard_file_list_hash(&content),
+        content,
+        timestamp: Utc::now().timestamp(),
+    };
+    let mut item = history::make_history_item(
+        HistoryDirection::Remote,
+        task.peer_device_name.clone(),
+        &message,
+    );
+    item.file_transfer_id = Some(task.transfer_id.clone());
+    item.file_transfer_status = Some(task.status.clone());
+    state.push_history(item.clone()).await;
+    history::save_history(app, &state.history().await)?;
+    let _ = app.emit("clipboard-synced", item);
+    Ok(())
+}
+
+fn pending_clipboard_file_content(task: &FileTransferTask) -> AppResult<String> {
+    let entries = task
+        .files
+        .iter()
+        .map(|file| clipboard::ClipboardFileEntry {
+            path: String::new(),
+            name: file.name.clone(),
+            size: file.size,
+        })
+        .collect::<Vec<_>>();
+    serde_json::to_string(&entries).map_err(Into::into)
+}
+
+async fn update_clipboard_file_history_status(
+    app: &AppHandle,
+    state: &AppState,
+    task: &FileTransferTask,
+    content: Option<String>,
+) -> AppResult<()> {
+    if let Some(item) = state
+        .update_file_transfer_history(&task.transfer_id, task.status.clone(), content)
+        .await
+    {
+        history::save_history(app, &state.history().await)?;
+        let _ = app.emit("clipboard-synced", item);
+    }
+    Ok(())
+}
+
+pub async fn copy_clipboard_file_history_item(
+    app: AppHandle,
+    state: AppState,
+    item: &HistoryItem,
+) -> AppResult<CopyHistoryResult> {
+    let transfer_id = item
+        .file_transfer_id
+        .as_deref()
+        .ok_or_else(|| AppError::InvalidInput("file transfer id is missing".to_string()))?;
+    let task = manager()
+        .task(transfer_id)
+        .await
+        .ok_or_else(|| AppError::InvalidInput("file sync session expired".to_string()))?;
+
+    match task.status {
+        FileTransferStatus::Pending => {
+            let task = manager()
+                .accept_receive(app.clone(), state.clone(), transfer_id.to_string())
+                .await?;
+            update_clipboard_file_history_status(&app, &state, &task, None).await?;
+            Ok(CopyHistoryResult::DownloadStarted)
+        }
+        FileTransferStatus::Accepted | FileTransferStatus::Transferring => {
+            Ok(CopyHistoryResult::Downloading)
+        }
+        FileTransferStatus::Completed => {
+            let paths = task
+                .files
+                .iter()
+                .filter_map(|file| file.saved_path.as_deref())
+                .map(PathBuf::from)
+                .collect::<Vec<_>>();
+            if paths.is_empty() {
+                return Err(AppError::InvalidInput(
+                    "downloaded file paths are missing".to_string(),
+                ));
+            }
+            clipboard::write_clipboard_files(&app, &paths)?;
+            Ok(CopyHistoryResult::Copied)
+        }
+        FileTransferStatus::Failed
+        | FileTransferStatus::Canceled
+        | FileTransferStatus::Rejected => Err(AppError::InvalidInput(
+            "file sync is not available anymore".to_string(),
+        )),
+    }
+}
+
+fn clipboard_file_list_hash(content: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(b"fileList");
+    hasher.update([0]);
+    hasher.update(content.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
+pub fn open_transfer_folder(config: &AppConfig) -> AppResult<()> {
+    let folder = transfer_save_dir(config)?;
     std::fs::create_dir_all(&folder)?;
     open_folder_with_system_file_manager(&folder)
+}
+
+pub fn current_transfer_save_dir(config: &AppConfig) -> AppResult<String> {
+    Ok(transfer_save_dir(config)?.to_string_lossy().to_string())
 }
 
 pub async fn handle_file_offer(
@@ -1385,8 +1665,17 @@ pub async fn handle_file_offer(
     if !file_control_sender_is_trusted(state, connection_id, &offer.sender_device_id).await {
         return;
     }
+    let config = state.config().await;
+    if offer.clipboard_sync && !config.sync_files {
+        return;
+    }
+    let clipboard_sync = offer.clipboard_sync;
     let manager = manager();
-    let _ = manager.handle_offer(app, offer).await;
+    if let Ok(task) = manager.handle_offer(app, offer).await {
+        if clipboard_sync {
+            let _ = push_pending_clipboard_file_history(app, state, &task).await;
+        }
+    }
 }
 
 pub async fn handle_file_accept(
@@ -1668,6 +1957,17 @@ fn default_save_dir() -> AppResult<PathBuf> {
     Ok(downloads.join("Copy-Sharer"))
 }
 
+fn transfer_save_dir(config: &AppConfig) -> AppResult<PathBuf> {
+    config
+        .file_save_dir
+        .as_deref()
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+        .map(Ok)
+        .unwrap_or_else(default_save_dir)
+}
+
 fn unique_save_path(save_dir: &Path, file_name: &str) -> PathBuf {
     let sanitized = sanitize_file_name(file_name);
     let candidate = save_dir.join(&sanitized);
@@ -1852,9 +2152,10 @@ mod tests {
     use crate::models::{DeviceInfo, DeviceStatus, FileTransferStatus};
 
     use super::{
-        sanitize_file_name, trusted_transfer_peer, unique_save_path, validate_transfer_limits,
-        advertised_download_endpoint, DownloadClaimError, FileTransferManager,
-        MAX_SINGLE_FILE_SIZE, MAX_TRANSFER_FILE_COUNT, MAX_TRANSFER_TOTAL_SIZE,
+        advertised_download_endpoint, current_transfer_save_dir, pending_clipboard_file_content,
+        sanitize_file_name, transfer_save_dir, trusted_transfer_peer, unique_save_path,
+        validate_transfer_limits, DownloadClaimError, FileTransferManager, MAX_SINGLE_FILE_SIZE, MAX_TRANSFER_FILE_COUNT,
+        MAX_TRANSFER_TOTAL_SIZE,
     };
 
     fn temp_path(name: &str) -> PathBuf {
@@ -2031,6 +2332,40 @@ mod tests {
 
         assert_eq!(endpoint.advertised_host, "192.168.1.10");
         assert_eq!(endpoint.port, 8765);
+    }
+
+    #[test]
+    fn transfer_save_dir_uses_custom_config_or_default() {
+        let custom = temp_path("receive-dir");
+        let config = crate::models::AppConfig {
+            file_save_dir: Some(custom.to_string_lossy().to_string()),
+            ..crate::models::AppConfig::default()
+        };
+
+        assert_eq!(transfer_save_dir(&config).unwrap(), custom);
+        assert!(current_transfer_save_dir(&crate::models::AppConfig::default())
+            .unwrap()
+            .ends_with("Copy-Sharer"));
+    }
+
+    #[tokio::test]
+    async fn clipboard_pending_history_content_uses_metadata_without_local_paths() {
+        let manager = FileTransferManager::new();
+        let source = temp_path("source.txt");
+        fs::write(&source, b"hello").unwrap();
+        let transfer_id = manager
+            .insert_test_send_task("device-b", source.clone(), "hello.txt", "token")
+            .await;
+        let task = manager.task(&transfer_id).await.expect("task should exist");
+
+        let content = pending_clipboard_file_content(&task).expect("pending content");
+        let entries: Vec<crate::clipboard::ClipboardFileEntry> =
+            serde_json::from_str(&content).expect("metadata should parse");
+
+        assert_eq!(entries[0].name, "hello.txt");
+        assert_eq!(entries[0].path, "");
+        assert_eq!(entries[0].size, 5);
+        let _ = fs::remove_file(source);
     }
 
     #[tokio::test]

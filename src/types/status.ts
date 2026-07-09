@@ -7,6 +7,7 @@ export interface AppStatus {
   localIp: string | null;
   port: number;
   connectedCount: number;
+  latencyMs: number | null;
   lastSyncAt: string | null;
   state: SyncState;
   message: string | null;

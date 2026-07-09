@@ -13,8 +13,8 @@ use crate::{
     mobile,
     notifications,
     models::{
-        AppConfig, AppStatus, ClipboardContentType, ClipboardTextItem, DeviceInfo, HistoryItem,
-        FileTransferTask, MobileSessionView, SelectedTransferFile,
+        AppConfig, AppStatus, ClipboardContentType, ClipboardTextItem, CopyHistoryResult,
+        DeviceInfo, FileTransferTask, HistoryItem, MobileSessionView, SelectedTransferFile,
     },
     security,
     state::AppState,
@@ -176,7 +176,6 @@ pub async fn update_config(
         next_config.device_id.trim().to_string()
     };
     next_config.sync_text = true;
-    next_config.sync_files = false;
     config::normalize_config(&mut next_config);
     let current_auto_start =
         autostart::is_autostart_enabled(&app).unwrap_or(current.auto_start);
@@ -266,8 +265,48 @@ pub async fn get_file_transfers() -> AppResult<Vec<FileTransferTask>> {
 }
 
 #[tauri::command]
-pub async fn open_transfer_folder() -> AppResult<()> {
-    file_transfer::open_transfer_folder()
+pub async fn get_transfer_save_dir(state: State<'_, AppState>) -> AppResult<String> {
+    file_transfer::current_transfer_save_dir(&state.config().await)
+}
+
+#[tauri::command]
+pub async fn select_transfer_save_dir(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<Option<AppConfig>> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let Some(path) = app.dialog().file().blocking_pick_folder() else {
+        return Ok(None);
+    };
+    let path = path
+        .into_path()
+        .map_err(|error| AppError::InvalidInput(error.to_string()))?;
+    let mut next_config = state.config().await;
+    next_config.file_save_dir = Some(path.to_string_lossy().to_string());
+    config::normalize_config(&mut next_config);
+    config::save_config(&app, &next_config)?;
+    state.set_config(next_config.clone()).await;
+    app.emit("config-updated", next_config.clone())?;
+    Ok(Some(next_config))
+}
+
+#[tauri::command]
+pub async fn reset_transfer_save_dir(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<AppConfig> {
+    let mut next_config = state.config().await;
+    next_config.file_save_dir = None;
+    config::save_config(&app, &next_config)?;
+    state.set_config(next_config.clone()).await;
+    app.emit("config-updated", next_config.clone())?;
+    Ok(next_config)
+}
+
+#[tauri::command]
+pub async fn open_transfer_folder(state: State<'_, AppState>) -> AppResult<()> {
+    file_transfer::open_transfer_folder(&state.config().await)
 }
 
 #[tauri::command]
@@ -332,7 +371,7 @@ pub async fn copy_history_item(
     app: AppHandle,
     state: State<'_, AppState>,
     history_id: String,
-) -> AppResult<()> {
+) -> AppResult<CopyHistoryResult> {
     let item = state
         .history()
         .await
@@ -347,7 +386,8 @@ pub async fn copy_history_item(
             } else {
                 item.content
             };
-            clipboard::write_clipboard_text(&app, &text)
+            clipboard::write_clipboard_text(&app, &text)?;
+            Ok(CopyHistoryResult::Copied)
         }
         ClipboardContentType::Image => {
             if item.content.trim().is_empty() {
@@ -355,12 +395,40 @@ pub async fn copy_history_item(
                     "这条图片历史没有可复制的图片内容，请重新复制或同步一次图片".to_string(),
                 ));
             }
-            clipboard::write_clipboard_image_base64(&app, &item.content)
+            clipboard::write_clipboard_image_base64(&app, &item.content)?;
+            Ok(CopyHistoryResult::Copied)
         }
-        ClipboardContentType::FileList => Err(AppError::InvalidInput(
-            "暂不支持复制文件列表历史".to_string(),
-        )),
+        ClipboardContentType::FileList => {
+            if item.file_transfer_id.is_some() {
+                return file_transfer::copy_clipboard_file_history_item(
+                    app,
+                    state.inner().clone(),
+                    &item,
+                )
+                .await;
+            }
+            let paths = clipboard::clipboard_content_to_file_paths(&item.content)?;
+            clipboard::write_clipboard_files(&app, &paths)?;
+            Ok(CopyHistoryResult::Copied)
+        }
     }
+}
+
+#[tauri::command]
+pub async fn get_history_image_thumbnail(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    history_id: String,
+    max_size: Option<u32>,
+) -> AppResult<String> {
+    let item = state
+        .history()
+        .await
+        .into_iter()
+        .find(|item| item.id == history_id)
+        .ok_or(AppError::InvalidInput("历史记录不存在".to_string()))?;
+
+    history::get_history_image_thumbnail(&app, &item, max_size)
 }
 
 #[tauri::command]

@@ -1,4 +1,4 @@
-export type AppTheme = "copyBlue" | "win11Dark";
+export type AppTheme = "copyBlue" | "win11Dark" | "macosLight" | "macosDark";
 export type CloseAction = "ask" | "minimize" | "exit";
 
 export interface AppConfig {
@@ -15,6 +15,7 @@ export interface AppConfig {
   syncText: boolean;
   syncImage: boolean;
   syncFiles: boolean;
+  fileSaveDir: string | null;
   discoveryScanRanges: string[];
   desktopNotifications: boolean;
   notifyClipboard: boolean;

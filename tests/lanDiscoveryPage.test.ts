@@ -11,9 +11,20 @@ assert.ok(
 );
 assert.match(devicesPage, /scanLanDevices/);
 assert.match(devicesPage, /lanDiscoveryScanning/);
+assert.match(devicesPage, /waitForLanDiscoveryToSettle/);
+assert.match(devicesPage, /LAN_DISCOVERY_RESPONSE_GRACE_MS/);
+assert.match(devicesPage, /finishedAtSeenAt/);
 assert.match(devicesPage, /toastStore\.info/);
 assert.match(devicesPage, /toastStore\.success/);
 assert.match(devicesPage, /devicesStore\.refresh\(\)/);
+assert.ok(
+  devicesPage.indexOf("await devicesStore.refresh()") <
+    devicesPage.indexOf("await waitForLanDiscoveryToSettle"),
+);
+assert.ok(
+  devicesPage.indexOf("await waitForLanDiscoveryToSettle") <
+    devicesPage.indexOf("const discoveredDevices"),
+);
 assert.doesNotMatch(devicesPage, /data-lan-discovery-progress/);
 assert.doesNotMatch(devicesPage, /scanProgressText/);
 assert.doesNotMatch(devicesPage, /扫描完成：/);

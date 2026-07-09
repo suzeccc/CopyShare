@@ -64,7 +64,10 @@ export function pendingOfferFromTasks(
 ): FileTransferTask | null {
   return (
     tasks.find(
-      (task) => task.direction === "receive" && task.status === "pending",
+      (task) =>
+        task.direction === "receive" &&
+        task.status === "pending" &&
+        !task.clipboardSync,
     ) ?? null
   );
 }

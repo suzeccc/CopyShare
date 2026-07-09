@@ -1,22 +1,17 @@
 <script setup lang="ts">
-import { FileText, FolderOpen, Image as ImageIcon, Monitor, Network, Settings, X } from "lucide-vue-next";
-import { computed, ref } from "vue";
+import { FileText, Image as ImageIcon, Monitor, Network, Settings } from "lucide-vue-next";
+import { computed } from "vue";
 import { RouterLink } from "vue-router";
 
 import SyncSwitch from "@/components/status/SyncSwitch.vue";
 import Button from "@/components/ui/Button.vue";
 import Card from "@/components/ui/Card.vue";
-import CopyTextButton from "@/components/ui/CopyTextButton.vue";
 import { formatTime } from "@/lib/format";
-import { CLIPBOARD_PREVIEW_LIMIT, getRecentClipboardItems } from "@/lib/historyPreview";
 import { useConfigStore } from "@/stores/config";
-import { useHistoryStore } from "@/stores/history";
 import { useStatusStore } from "@/stores/status";
 
 const statusStore = useStatusStore();
 const configStore = useConfigStore();
-const historyStore = useHistoryStore();
-const showClipboardHistoryModal = ref(false);
 
 const address = computed(() => {
   const ip = statusStore.status.localIp;
@@ -38,32 +33,7 @@ const syncContentItems = computed(() => [
     enabled: configStore.config.syncImage,
     icon: ImageIcon,
   },
-  {
-    label: "文件传输",
-    hint: "已支持已信任 PC 之间单文件局域网传输",
-    state: "已开放",
-    enabled: true,
-    icon: FolderOpen,
-    route: "/files",
-  },
 ]);
-
-const recentSyncItems = computed(() => getRecentClipboardItems(historyStore.items));
-const allClipboardItems = computed(() =>
-  getRecentClipboardItems(historyStore.items, historyStore.items.length),
-);
-
-type SyncStatusPreviewItem = { syncStatus: "synced" | "unsynced" };
-
-function syncStatusLabel(item: SyncStatusPreviewItem) {
-  return item.syncStatus === 'synced' ? "已同步" : "未同步";
-}
-
-function syncStatusClass(item: SyncStatusPreviewItem) {
-  return item.syncStatus === 'synced'
-    ? "border-emerald-300/25 bg-emerald-400/[0.10] text-emerald-100"
-    : "border-amber-300/25 bg-amber-400/[0.10] text-amber-100";
-}
 </script>
 
 <template>
@@ -162,7 +132,6 @@ function syncStatusClass(item: SyncStatusPreviewItem) {
             <div class="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-3">
               <div class="min-w-0">
                 <p class="truncate text-sm font-medium text-white">{{ statusStore.status.deviceName }}</p>
-                <p class="mt-1 truncate font-mono text-xs text-slate-500">{{ statusStore.status.deviceId }}</p>
               </div>
               <span class="rounded-md border border-[color:var(--main-line-soft)] bg-[color:var(--stat-bg)] px-3 py-1 text-sm font-semibold text-slate-200">
                 {{ statusStore.status.running ? "运行中" : "等待启动" }}
@@ -200,7 +169,7 @@ function syncStatusClass(item: SyncStatusPreviewItem) {
           </RouterLink>
         </div>
 
-        <div data-home-sync-content-grid class="grid min-w-0 grid-cols-1 gap-3 md:grid-cols-3">
+        <div data-home-sync-content-grid class="grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2">
           <article
             v-for="item in syncContentItems"
             :key="item.label"
@@ -219,150 +188,9 @@ function syncStatusClass(item: SyncStatusPreviewItem) {
             </div>
             <p class="text-sm font-semibold text-white">{{ item.label }}</p>
             <p class="mt-2 text-xs leading-5 text-slate-500">{{ item.hint }}</p>
-            <RouterLink
-              v-if="item.route"
-              to="/files"
-              class="mt-3 inline-flex text-xs font-semibold text-[color:var(--accent-text)] transition hover:text-white"
-            >
-              进入文件传输
-            </RouterLink>
           </article>
-        </div>
-
-        <div class="mt-4 rounded-lg border border-[color:var(--main-line-soft)] bg-[color:var(--stat-bg)] p-4">
-          <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
-            <p class="text-sm font-semibold text-white">最近同步内容</p>
-            <div class="flex items-center gap-2">
-              <p class="text-xs text-slate-500">最近 {{ CLIPBOARD_PREVIEW_LIMIT }} 条历史记录</p>
-              <Button
-                data-more-clipboard-button
-                size="sm"
-                variant="ghost"
-                @click="showClipboardHistoryModal = true"
-              >
-                更多
-              </Button>
-            </div>
-          </div>
-
-          <div v-if="recentSyncItems.length" class="grid min-w-0 gap-2">
-            <div
-              v-for="item in recentSyncItems"
-              :key="item.id"
-              data-home-recent-row class="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-3 overflow-hidden rounded-md border border-[color:var(--main-line-soft)] bg-[color:var(--field-bg)] px-3 py-2"
-            >
-              <p data-home-recent-text class="line-clamp-2 min-w-0 break-all text-sm leading-5 text-slate-300">
-                {{ item.text }}
-              </p>
-              <div data-home-recent-actions class="flex shrink-0 flex-col items-end gap-2">
-                <div class="flex items-center justify-end gap-2">
-                  <span
-                    data-home-recent-sync-status
-                    class="shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-semibold leading-5"
-                    :class="syncStatusClass(item)"
-                  >
-                    {{ syncStatusLabel(item) }}
-                  </span>
-                  <CopyTextButton
-                    :text="item.text"
-                    :content-type="item.contentType"
-                    :history-item-id="item.id"
-                    icon-only
-                    label="复制内容"
-                  />
-                </div>
-                <span
-                  v-if="item.sourceDevice"
-                  data-home-recent-device
-                  class="max-w-28 truncate rounded-full border border-[color:var(--main-line-soft)] bg-[color:var(--stat-bg)] px-2 py-0.5 text-[11px] font-medium leading-5 text-[color:var(--muted-text)]"
-                  :title="item.sourceDevice"
-                >
-                  {{ item.sourceDevice }}
-                </span>
-              </div>
-            </div>
-          </div>
-          <p v-else class="rounded-md border border-dashed border-[color:var(--main-line-soft)] px-3 py-4 text-sm text-slate-500">
-            暂无同步内容，启动同步并复制文本后会显示在这里。
-          </p>
         </div>
       </Card>
     </section>
-
-    <Transition name="trust-prompt">
-      <div
-        v-if="showClipboardHistoryModal"
-        data-clipboard-history-modal
-        class="fixed inset-0 z-50 flex items-center justify-center bg-[color:var(--dialog-overlay-bg)] px-6 py-8 backdrop-blur-sm"
-        @click.self="showClipboardHistoryModal = false"
-      >
-        <section
-          class="flex max-h-full w-full max-w-3xl flex-col rounded-lg border border-[color:var(--main-line)] bg-[color:var(--dialog-bg)] shadow-[0_24px_80px_rgba(0,0,0,0.5)]"
-          role="dialog"
-          aria-modal="true"
-          aria-label="全部剪贴内容"
-        >
-          <div class="flex items-start justify-between gap-4 border-b border-[color:var(--main-line-soft)] px-5 py-4">
-            <div>
-              <p class="text-base font-semibold text-white">全部剪贴内容</p>
-              <p class="mt-1 text-xs text-[color:var(--muted-text)]">共 {{ allClipboardItems.length }} 条历史记录</p>
-            </div>
-            <button
-              class="grid h-8 w-8 shrink-0 place-items-center rounded-md text-slate-300 transition hover:bg-[color:var(--main-bg-muted)] hover:text-white"
-              type="button"
-              aria-label="关闭"
-              title="关闭"
-              @click="showClipboardHistoryModal = false"
-            >
-              <X class="h-4 w-4" />
-            </button>
-          </div>
-
-          <div v-if="allClipboardItems.length" class="min-h-0 overflow-x-hidden overflow-y-auto p-5">
-            <div class="grid gap-2">
-              <div
-                v-for="item in allClipboardItems"
-                :key="item.id"
-                data-clipboard-history-row
-                class="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 rounded-md border border-[color:var(--main-line-soft)] bg-[color:var(--field-bg)] px-3 py-2.5"
-              >
-                <p data-clipboard-history-text class="min-w-0 whitespace-pre-wrap break-all text-sm leading-6 text-slate-200">
-                  {{ item.text }}
-                </p>
-                <div data-clipboard-history-actions class="flex shrink-0 flex-col items-end gap-2">
-                  <div class="flex items-center justify-end gap-2">
-                    <span
-                      data-clipboard-history-sync-status
-                      class="shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-semibold leading-5"
-                      :class="syncStatusClass(item)"
-                    >
-                      {{ syncStatusLabel(item) }}
-                    </span>
-                    <CopyTextButton
-                      :text="item.text"
-                      :content-type="item.contentType"
-                      :history-item-id="item.id"
-                      icon-only
-                      label="复制内容"
-                    />
-                  </div>
-                  <span
-                    v-if="item.sourceDevice"
-                    data-clipboard-history-device
-                    class="max-w-28 truncate rounded-full border border-[color:var(--main-line-soft)] bg-[color:var(--stat-bg)] px-2 py-0.5 text-[11px] font-medium leading-5 text-[color:var(--muted-text)]"
-                    :title="item.sourceDevice"
-                  >
-                    {{ item.sourceDevice }}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-          <p v-else class="m-5 rounded-md border border-dashed border-[color:var(--main-line-soft)] px-3 py-8 text-center text-sm text-[color:var(--subtle-text)]">
-            暂无剪贴内容。
-          </p>
-        </section>
-      </div>
-    </Transition>
   </div>
 </template>

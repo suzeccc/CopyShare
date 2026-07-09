@@ -10,7 +10,6 @@ import { onAppEvent, openExternalUrl } from "@/lib/tauri";
 import router from "@/router";
 import { useConfigStore } from "@/stores/config";
 import { useDevicesStore } from "@/stores/devices";
-import { useFileTransferStore } from "@/stores/fileTransfer";
 import { useHistoryStore } from "@/stores/history";
 import { useStatusStore } from "@/stores/status";
 import { useToastStore } from "@/stores/toasts";
@@ -19,7 +18,6 @@ const statusStore = useStatusStore();
 const devicesStore = useDevicesStore();
 const configStore = useConfigStore();
 const historyStore = useHistoryStore();
-const fileTransferStore = useFileTransferStore();
 const toastStore = useToastStore();
 const STARTUP_OVERLAY_MIN_MS = 900;
 const startupVisible = ref(true);
@@ -32,7 +30,7 @@ function wait(ms: number) {
 }
 
 function handlePageNavigation(route: string) {
-  const allowedRoutes = new Set(["/", "/devices", "/files", "/mobile", "/logs", "/settings", "/about"]);
+  const allowedRoutes = new Set(["/", "/devices", "/mobile", "/logs", "/settings", "/about"]);
   if (!allowedRoutes.has(route)) {
     return;
   }
@@ -79,14 +77,12 @@ onMounted(async () => {
       devicesStore.refresh(),
       configStore.refresh(),
       historyStore.refresh(),
-      fileTransferStore.refresh(),
     ]);
     await Promise.all([
       statusStore.subscribe(),
       devicesStore.subscribe(),
       configStore.subscribe(),
       historyStore.subscribe(),
-      fileTransferStore.subscribe(),
       onAppEvent<string>("navigate-to-page", handlePageNavigation),
     ]);
     void checkForAppUpdateOnStartup((update) => {

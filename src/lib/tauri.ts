@@ -124,6 +124,18 @@ export function getFileTransfers(): Promise<FileTransferTask[]> {
   return invoke<FileTransferTask[]>("get_file_transfers");
 }
 
+export function getTransferSaveDir(): Promise<string> {
+  return invoke<string>("get_transfer_save_dir");
+}
+
+export function selectTransferSaveDir(): Promise<AppConfig | null> {
+  return invoke<AppConfig | null>("select_transfer_save_dir");
+}
+
+export function resetTransferSaveDir(): Promise<AppConfig> {
+  return invoke<AppConfig>("reset_transfer_save_dir");
+}
+
 export function openTransferFolder(): Promise<void> {
   return invoke<void>("open_transfer_folder");
 }
@@ -148,8 +160,17 @@ export function clearHistory(): Promise<void> {
   return invoke<void>("clear_history");
 }
 
-export function copyHistoryItem(historyId: string): Promise<void> {
-  return invoke<void>("copy_history_item", { historyId });
+export type CopyHistoryResult = "copied" | "downloadStarted" | "downloading";
+
+export function copyHistoryItem(historyId: string): Promise<CopyHistoryResult> {
+  return invoke<CopyHistoryResult>("copy_history_item", { historyId });
+}
+
+export function getHistoryImageThumbnail(
+  historyId: string,
+  maxSize = 200,
+): Promise<string> {
+  return invoke<string>("get_history_image_thumbnail", { historyId, maxSize });
 }
 
 export function openExternalUrl(url: string): Promise<void> {

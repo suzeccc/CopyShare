@@ -15,7 +15,8 @@ use crate::{
     error::{AppError, AppResult},
     history,
     models::{
-        AppConfig, AppStatus, DeviceInfo, DeviceStatus, HistoryItem, SyncState, WireMessage,
+        AppConfig, AppStatus, DeviceInfo, DeviceStatus, FileTransferStatus, HistoryItem, SyncState,
+        WireMessage,
     },
     network,
     security,
@@ -54,6 +55,7 @@ struct PeerHandle {
     device_id: Option<String>,
     endpoint: Option<String>,
     remote_trusted: bool,
+    latency_ms: Option<u64>,
 }
 
 struct PendingPeerIdentity {
@@ -74,6 +76,7 @@ impl AppState {
                     local_ip: None,
                     port: config.port,
                     connected_count: 0,
+                    latency_ms: None,
                     last_sync_at: None,
                     state: SyncState::Stopped,
                     message: Some("等待启动同步".to_string()),
@@ -123,6 +126,7 @@ impl AppState {
                 peer_is_mutually_trusted(&config, connection_id, peer, &manual_trust_required)
             })
             .count();
+        status.latency_ms = average_trusted_peer_latency_ms(&peers, &config, &manual_trust_required);
         if status.running && peers.is_empty() {
             status.message = Some("正在监听，等待设备连接".to_string());
         } else if status.running {
@@ -184,6 +188,16 @@ impl AppState {
     pub async fn upsert_history_by_content(&self, item: HistoryItem) -> HistoryItem {
         let mut items = self.inner.history.write().await;
         history::upsert_history_by_content(&mut items, item)
+    }
+
+    pub async fn update_file_transfer_history(
+        &self,
+        transfer_id: &str,
+        status: FileTransferStatus,
+        content: Option<String>,
+    ) -> Option<HistoryItem> {
+        let mut items = self.inner.history.write().await;
+        history::update_file_transfer_history(&mut items, transfer_id, status, content)
     }
 
     pub async fn replace_devices(&self, devices: Vec<DeviceInfo>) {
@@ -416,6 +430,15 @@ impl AppState {
             .remove(connection_id)
     }
 
+    pub async fn connection_matches_trusted_device(&self, connection_id: &str) -> bool {
+        let config = self.config().await;
+        let default_port = config.port;
+        let devices = self.inner.devices.read().await;
+        device_id_for_key(&devices, connection_id, default_port)
+            .map(|device_id| security::is_device_id_trusted(&config, &device_id))
+            .unwrap_or(false)
+    }
+
     pub async fn remove_device(&self, device_id: &str) -> Option<DeviceInfo> {
         let default_port = self.config().await.port;
         let mut devices = self.inner.devices.write().await;
@@ -440,6 +463,17 @@ impl AppState {
             .lock()
             .await
             .observe_local_image(image_base64)
+    }
+
+    pub async fn observe_local_file_list(
+        &self,
+        file_list: String,
+    ) -> Option<crate::models::ClipboardMessage> {
+        self.inner
+            .sync_engine
+            .lock()
+            .await
+            .observe_local_file_list(file_list)
     }
 
     pub async fn reset_local_clipboard_observation(&self) {
@@ -561,6 +595,7 @@ impl AppState {
                 device_id: device_id.clone(),
                 endpoint: endpoint.clone(),
                 remote_trusted: false,
+                latency_ms: None,
             },
         );
         if let Some(device_id) = device_id.as_deref() {
@@ -708,6 +743,12 @@ impl AppState {
             .unwrap_or(false)
     }
 
+    pub async fn record_peer_latency(&self, connection_id: &str, latency_ms: u64) {
+        if let Some(peer) = self.inner.peers.lock().await.get_mut(connection_id) {
+            peer.latency_ms = Some(latency_ms);
+        }
+    }
+
     pub async fn send_trusted_to_device(
         &self,
         config: &AppConfig,
@@ -848,6 +889,28 @@ fn peer_is_mutually_trusted(
     manual_trust_required: &HashSet<String>,
 ) -> bool {
     peer.remote_trusted && peer_is_trusted(config, connection_id, peer, manual_trust_required)
+}
+
+fn average_trusted_peer_latency_ms(
+    peers: &HashMap<String, PeerHandle>,
+    config: &AppConfig,
+    manual_trust_required: &HashSet<String>,
+) -> Option<u64> {
+    let latencies = peers
+        .iter()
+        .filter(|(connection_id, peer)| {
+            peer_is_mutually_trusted(config, connection_id, peer, manual_trust_required)
+        })
+        .filter_map(|(_, peer)| peer.latency_ms);
+    let (total, count) = latencies.fold((0_u64, 0_u64), |(total, count), latency| {
+        (total.saturating_add(latency), count + 1)
+    });
+
+    if count == 0 {
+        None
+    } else {
+        Some((total + count / 2) / count)
+    }
 }
 
 fn peer_is_trusted(
@@ -1218,6 +1281,53 @@ mod runtime_tests {
 
         assert!(device.is_none());
         assert_eq!(state.devices().await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn status_reports_real_peer_latency_after_pong_round_trip() {
+        let state = AppState::new();
+        let (sender, _receiver) = mpsc::unbounded_channel();
+        let join = tauri::async_runtime::spawn(async {
+            futures_util::future::pending::<()>().await;
+        });
+
+        let mut config = state.config().await;
+        config.trusted_devices.push("device-remote".to_string());
+        state.set_config(config).await;
+        state
+            .set_running(true, Some("127.0.0.1".to_string()), "listening".to_string())
+            .await;
+        state
+            .register_peer("10.0.0.2:51234".to_string(), sender, join)
+            .await;
+        state
+            .attach_peer_device("10.0.0.2:51234", "device-remote".to_string(), None)
+            .await;
+        state
+            .upsert_device(DeviceInfo {
+                id: "device-remote".to_string(),
+                name: "Laptop".to_string(),
+                ip: "10.0.0.2".to_string(),
+                port: 8765,
+                connected: true,
+                trusted: true,
+                remote_trusted: true,
+                has_connected_before: true,
+                last_seen_at: Some(Utc::now()),
+                status: DeviceStatus::Online,
+            })
+            .await;
+        state
+            .mark_peer_remote_trusted("10.0.0.2:51234", "device-remote")
+            .await;
+        state
+            .record_peer_latency("10.0.0.2:51234", 27)
+            .await;
+
+        let status = state.status().await;
+
+        assert_eq!(status.connected_count, 1);
+        assert_eq!(status.latency_ms, Some(27));
     }
 }
 

@@ -18,7 +18,7 @@ const item: HistoryItem = {
 
 assert.equal(getRecentClipboardItems([item], 1)[0]?.sourceDevice, "Office-PC");
 
-const home = readFileSync("src/pages/Home.vue", "utf8");
+const clipboardPage = readFileSync("src/pages/Clipboard.vue", "utf8");
 
-assert.match(home, /data-clipboard-history-device/);
-assert.match(home, /item\.sourceDevice/);
+assert.match(clipboardPage, /data-clipboard-history-device/);
+assert.match(clipboardPage, /item\.sourceDevice/);

@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 import { ShieldCheck, ShieldQuestion, ShieldX, WifiOff, X } from "lucide-vue-next";
 
 import Button from "@/components/ui/Button.vue";
-import FileTransferOfferDialog from "@/components/fileTransfer/FileTransferOfferDialog.vue";
 import FloatingPanel from "@/components/layout/FloatingPanel.vue";
 import Sidebar from "@/components/layout/Sidebar.vue";
 import TitleBar from "@/components/layout/TitleBar.vue";
@@ -35,11 +35,13 @@ const statusStore = useStatusStore();
 const configStore = useConfigStore();
 const historyStore = useHistoryStore();
 const devicesStore = useDevicesStore();
+const route = useRoute();
 const windowMode = ref<AppWindowMode>("main");
 const transitionPhase = ref<WindowTransitionPhase>("idle");
 const isSwitchingWindowMode = ref(false);
 const systemClipboardItems = ref<ClipboardPreviewItem[]>([]);
 const shellRef = ref<HTMLElement | null>(null);
+const mainScrollRef = ref<HTMLElement | null>(null);
 const windowTransitionOrigin = ref("center");
 let clipboardHistoryTimer: number | undefined;
 
@@ -57,6 +59,7 @@ const latencyLabel = computed(() =>
   getLatencyLabel({
     running: statusStore.status.running,
     connectedCount: statusStore.status.connectedCount,
+    latencyMs: statusStore.status.latencyMs,
   }),
 );
 const isFloating = computed(() => windowMode.value === "floating");
@@ -82,6 +85,20 @@ watch(
     document.body.dataset.appTheme = theme;
   },
   { immediate: true },
+);
+
+watch(
+  () => route.fullPath,
+  async () => {
+    await nextTick();
+    if (!mainScrollRef.value) {
+      return;
+    }
+
+    mainScrollRef.value.scrollTop = 0;
+    mainScrollRef.value.scrollLeft = 0;
+  },
+  { flush: "post" },
 );
 
 onBeforeUnmount(() => {
@@ -239,7 +256,11 @@ async function rejectPromptDevice() {
             :switching-window-mode="isSwitchingWindowMode"
             @switch-floating="switchToFloatingMode"
           />
-          <div class="min-h-0 flex-1 overflow-auto px-6 pb-6 pt-1.5">
+          <div
+            ref="mainScrollRef"
+            data-main-scroll-container
+            class="min-h-0 flex-1 overflow-auto px-6 pb-6 pt-1.5"
+          >
             <RouterView />
           </div>
         </main>
@@ -322,8 +343,6 @@ async function rejectPromptDevice() {
         </section>
       </div>
     </Transition>
-
-    <FileTransferOfferDialog v-if="!isFloating" />
 
   </div>
 </template>

@@ -32,6 +32,7 @@ export interface FileTransferTask {
   direction: FileTransferDirection;
   peerDeviceId: string;
   peerDeviceName: string;
+  clipboardSync: boolean;
   files: FileTransferFile[];
   totalSize: number;
   transferredBytes: number;

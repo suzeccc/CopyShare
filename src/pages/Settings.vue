@@ -7,7 +7,12 @@ import Card from "@/components/ui/Card.vue";
 import Switch from "@/components/ui/Switch.vue";
 import { clampPort } from "@/lib/format";
 import { getSaveFeedbackView, type SaveFeedbackState } from "@/lib/saveFeedback";
-import { sendTestNotification } from "@/lib/tauri";
+import {
+  openTransferFolder,
+  resetTransferSaveDir,
+  selectTransferSaveDir,
+  sendTestNotification,
+} from "@/lib/tauri";
 import { useConfigStore } from "@/stores/config";
 import { useToastStore } from "@/stores/toasts";
 import type { AppConfig, AppTheme, CloseAction } from "@/types/config";
@@ -18,7 +23,9 @@ const toastStore = useToastStore();
 const draft = reactive({ ...configStore.config });
 const themeOptions: Array<{ value: AppTheme; label: string; hint: string }> = [
   { value: "win11Dark", label: "Win11 深色", hint: "深灰卡片与系统设置风格" },
-  { value: "copyBlue", label: "茶话绿", hint: "茶话间深黑绿风格" },
+  { value: "macosDark", label: "午夜玻璃", hint: "深色半透明面板与 Apple 风格蓝色强调" },
+  { value: "macosLight", label: "石墨白雾", hint: "浅色毛玻璃与 Apple 风格蓝色强调" },
+  { value: "copyBlue", label: "清雅茶绿", hint: "茶话间深黑绿风格" },
 ];
 const closeActionOptions: Array<{ value: CloseAction; label: string; hint: string }> = [
   { value: "ask", label: "每次询问", hint: "点击关闭时弹出选择提示" },
@@ -28,13 +35,13 @@ const closeActionOptions: Array<{ value: CloseAction; label: string; hint: strin
 const basicSettingsSaving = ref(false);
 const syncContentSaving = ref(false);
 const notificationSettingsSaving = ref(false);
+const downloadLocationSaving = ref(false);
 const saveFeedbackState = ref<SaveFeedbackState>("idle");
 let saveFeedbackTimer: number | null = null;
 type NotificationSettingKey =
   | "desktopNotifications"
   | "notifyClipboard"
   | "notifyTrustRequired"
-  | "notifyFileTransfer"
   | "notifyDeviceStatus"
   | "notifySyncError"
   | "notificationClipboardPreview";
@@ -50,7 +57,6 @@ watch(
     if (syncContentSaving.value) {
       draft.syncText = next.syncText;
       draft.syncImage = next.syncImage;
-      draft.syncFiles = next.syncFiles;
       draft.trustedDevices = next.trustedDevices;
       return;
     }
@@ -59,7 +65,6 @@ watch(
       draft.desktopNotifications = next.desktopNotifications;
       draft.notifyClipboard = next.notifyClipboard;
       draft.notifyTrustRequired = next.notifyTrustRequired;
-      draft.notifyFileTransfer = next.notifyFileTransfer;
       draft.notifyDeviceStatus = next.notifyDeviceStatus;
       draft.notifySyncError = next.notifySyncError;
       draft.notificationClipboardPreview = next.notificationClipboardPreview;
@@ -165,6 +170,50 @@ async function saveSyncImage(syncImage: boolean) {
   await saveSyncSetting({ syncImage });
 }
 
+function applySavedConfig(config: AppConfig) {
+  configStore.config = config;
+  Object.assign(draft, config);
+}
+
+async function chooseDownloadLocation() {
+  if (downloadLocationSaving.value) return;
+
+  downloadLocationSaving.value = true;
+  try {
+    const config = await selectTransferSaveDir();
+    if (!config) return;
+    applySavedConfig(config);
+    toastStore.success("下载位置已更新");
+  } catch (error) {
+    toastStore.error(`设置下载位置失败：${String(error)}`);
+  } finally {
+    downloadLocationSaving.value = false;
+  }
+}
+
+async function resetDownloadLocation() {
+  if (downloadLocationSaving.value) return;
+
+  downloadLocationSaving.value = true;
+  try {
+    const config = await resetTransferSaveDir();
+    applySavedConfig(config);
+    toastStore.success("已恢复默认下载位置");
+  } catch (error) {
+    toastStore.error(`恢复默认下载位置失败：${String(error)}`);
+  } finally {
+    downloadLocationSaving.value = false;
+  }
+}
+
+async function openDownloadLocation() {
+  try {
+    await openTransferFolder();
+  } catch (error) {
+    toastStore.error(`打开下载位置失败：${String(error)}`);
+  }
+}
+
 async function saveNotificationSetting(patch: Partial<Pick<AppConfig, NotificationSettingKey>>) {
   if (configStore.saving || notificationSettingsSaving.value) return;
 
@@ -202,10 +251,6 @@ async function saveNotifyClipboard(notifyClipboard: boolean) {
 
 async function saveNotifyTrustRequired(notifyTrustRequired: boolean) {
   await saveNotificationSetting({ notifyTrustRequired });
-}
-
-async function saveNotifyFileTransfer(notifyFileTransfer: boolean) {
-  await saveNotificationSetting({ notifyFileTransfer });
 }
 
 async function saveNotifyDeviceStatus(notifyDeviceStatus: boolean) {
@@ -296,6 +341,48 @@ async function testDesktopNotification() {
         <Switch v-model="draft.autoStart" label="开机自启" hint="系统登录后自动启动 CopyShare" />
         <Switch v-model="draft.autoSync" label="启动后自动同步" hint="启动应用后自动开始监听剪贴板" />
         <Switch v-model="draft.saveHistory" label="保存同步摘要" hint="只保存摘要，不保存完整敏感剪贴板内容" />
+        <div
+          data-download-location-setting
+          class="rounded-lg border border-[color:var(--main-line-soft)] bg-[color:var(--panel-bg-soft)] p-4"
+        >
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div class="min-w-0">
+              <p class="text-xs font-medium text-slate-400">下载位置</p>
+              <p class="mt-2 truncate text-sm text-slate-200" :title="draft.fileSaveDir || '默认下载目录'">
+                {{ draft.fileSaveDir || "默认下载目录" }}
+              </p>
+              <p class="mt-1 text-xs text-slate-500">
+                接收文件或复制远端文件时保存到这里
+              </p>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant="secondary"
+                :disabled="downloadLocationSaving"
+                @click="chooseDownloadLocation"
+              >
+                更改位置
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                :disabled="downloadLocationSaving"
+                @click="openDownloadLocation"
+              >
+                打开文件夹
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                :disabled="downloadLocationSaving || !draft.fileSaveDir"
+                @click="resetDownloadLocation"
+              >
+                恢复默认
+              </Button>
+            </div>
+          </div>
+        </div>
       </div>
       <p v-if="configStore.error" class="mt-4 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-100">
         {{ configStore.error }}
@@ -329,7 +416,6 @@ async function testDesktopNotification() {
           :disabled="syncContentSaving"
           @update:model-value="saveSyncImage"
         />
-        <Switch v-model="draft.syncFiles" label="同步文件" hint="后续支持" disabled />
       </div>
       <div class="mt-6 rounded-lg border border-[color:var(--main-line-soft)] bg-[color:var(--panel-bg-soft)] p-4">
         <p class="text-xs font-medium text-slate-400">已信任设备</p>
@@ -374,13 +460,6 @@ async function testDesktopNotification() {
           hint="有新设备需要确认信任时提醒"
           :disabled="notificationSettingsSaving || !draft.desktopNotifications"
           @update:model-value="saveNotifyTrustRequired"
-        />
-        <Switch
-          :model-value="draft.notifyFileTransfer"
-          label="文件传输提醒"
-          hint="收到文件请求、传输完成或失败时提醒"
-          :disabled="notificationSettingsSaving || !draft.desktopNotifications"
-          @update:model-value="saveNotifyFileTransfer"
         />
         <Switch
           :model-value="draft.notifyDeviceStatus"

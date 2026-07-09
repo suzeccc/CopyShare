@@ -2,9 +2,11 @@
 import { Activity, Clipboard, Gauge, LayoutDashboard, Minus, MoreHorizontal, Wifi, X } from "lucide-vue-next";
 import { computed, ref } from "vue";
 
+import HistoryImageThumb from "@/components/history/HistoryImageThumb.vue";
 import CopyTextButton from "@/components/ui/CopyTextButton.vue";
 import type { ClipboardPreviewItem } from "@/lib/historyPreview";
-import { startWindowDrag } from "@/lib/tauri";
+import { copyHistoryItem, startWindowDrag } from "@/lib/tauri";
+import { useToastStore } from "@/stores/toasts";
 import { startWindowDragFromMouseEvent } from "@/lib/windowDrag";
 
 const props = defineProps<{
@@ -23,6 +25,7 @@ const emit = defineEmits<{
 }>();
 
 const showClipboardHistoryModal = ref(false);
+const toastStore = useToastStore();
 
 const statusClass = computed(() =>
   props.running
@@ -41,6 +44,25 @@ function restoreMainPanel(event: MouseEvent) {
     screenX: event.screenX,
     screenY: event.screenY,
   });
+}
+
+async function handleClipboardItemClick(item: ClipboardPreviewItem) {
+  if (item.contentType !== "fileList") {
+    return;
+  }
+
+  try {
+    const result = await copyHistoryItem(item.id);
+    if (result === "downloadStarted") {
+      toastStore.success("开始下载，完成后会写入剪贴板");
+    } else if (result === "downloading") {
+      toastStore.success("文件正在下载");
+    } else {
+      toastStore.success("文件已复制");
+    }
+  } catch {
+    toastStore.error("文件复制失败");
+  }
 }
 </script>
 
@@ -134,7 +156,15 @@ function restoreMainPanel(event: MouseEvent) {
           v-for="item in clipboardItems"
           :key="item.id"
           class="flex min-h-6 items-center gap-2 border-b border-[color:var(--main-line-soft)] py-0.5 last:border-b-0"
+          :class="{ 'cursor-pointer': item.contentType === 'fileList' }"
+          @click="handleClipboardItemClick(item)"
         >
+          <HistoryImageThumb
+            v-if="item.contentType === 'image'"
+            :history-id="item.id"
+            :max-size="96"
+            class="!h-8 !w-10"
+          />
           <p data-floating-clipboard-text class="line-clamp-1 min-w-0 flex-1 break-words text-xs font-semibold leading-4 text-[color:var(--floating-strong-text)]">
             {{ item.text }}
           </p>
@@ -182,10 +212,20 @@ function restoreMainPanel(event: MouseEvent) {
             :key="item.id"
             data-floating-clipboard-history-row
             class="grid grid-cols-[minmax(0,1fr)_auto] gap-2 border-b border-[color:var(--floating-stat-line)] py-2 last:border-b-0"
+            :class="{ 'cursor-pointer': item.contentType === 'fileList' }"
+            @click="handleClipboardItemClick(item)"
           >
-            <p data-floating-clipboard-history-text class="min-w-0 whitespace-pre-wrap break-all text-xs font-semibold leading-5 text-[color:var(--floating-strong-text)]">
-              {{ item.text }}
-            </p>
+            <div class="flex min-w-0 gap-2">
+              <HistoryImageThumb
+                v-if="item.contentType === 'image'"
+                :history-id="item.id"
+                :max-size="120"
+                class="!h-10 !w-14"
+              />
+              <p data-floating-clipboard-history-text class="min-w-0 whitespace-pre-wrap break-all text-xs font-semibold leading-5 text-[color:var(--floating-strong-text)]">
+                {{ item.text }}
+              </p>
+            </div>
             <div class="flex shrink-0 flex-col items-end gap-1.5">
               <CopyTextButton
                 :text="item.text"

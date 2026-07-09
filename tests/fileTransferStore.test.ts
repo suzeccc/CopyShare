@@ -15,6 +15,7 @@ function task(overrides: Partial<FileTransferTask> = {}): FileTransferTask {
     direction: overrides.direction ?? "receive",
     peerDeviceId: overrides.peerDeviceId ?? "device-a",
     peerDeviceName: overrides.peerDeviceName ?? "Laptop A",
+    clipboardSync: overrides.clipboardSync ?? false,
     files: overrides.files ?? [
       {
         id: "file-1",
@@ -55,6 +56,12 @@ assert.equal(
 const pending = task({ transferId: "pending-transfer", status: "pending" });
 const completed = task({ transferId: "completed-transfer", status: "completed" });
 assert.equal(pendingOfferFromTasks([completed, pending])?.transferId, "pending-transfer");
+assert.equal(
+  pendingOfferFromTasks([
+    task({ transferId: "clipboard-pending", status: "pending", clipboardSync: true }),
+  ]),
+  null,
+);
 
 const inserted = upsertFileTransferTask([], pending);
 assert.deepEqual(inserted.map((item) => item.transferId), ["pending-transfer"]);

@@ -19,6 +19,7 @@ pub struct AppStatus {
     pub local_ip: Option<String>,
     pub port: u16,
     pub connected_count: usize,
+    pub latency_ms: Option<u64>,
     pub last_sync_at: Option<DateTime<Utc>>,
     pub state: SyncState,
     pub message: Option<String>,
@@ -51,10 +52,11 @@ pub struct DeviceInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "camelCase")]
 pub enum ClipboardContentType {
     Text,
     Image,
+    #[serde(alias = "filelist")]
     FileList,
 }
 
@@ -81,6 +83,8 @@ pub struct ClipboardMessage {
 pub enum AppTheme {
     CopyBlue,
     Win11Dark,
+    MacosLight,
+    MacosDark,
 }
 
 impl Default for AppTheme {
@@ -124,6 +128,8 @@ pub struct AppConfig {
     pub sync_image: bool,
     pub sync_files: bool,
     #[serde(default)]
+    pub file_save_dir: Option<String>,
+    #[serde(default)]
     pub discovery_scan_ranges: Vec<String>,
     #[serde(default = "default_true")]
     pub desktop_notifications: bool,
@@ -148,7 +154,7 @@ fn default_true() -> bool {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            config_version: 3,
+            config_version: 4,
             device_name: "CopyShare".to_string(),
             device_id: new_device_id(),
             theme: AppTheme::Win11Dark,
@@ -161,11 +167,12 @@ impl Default for AppConfig {
             sync_text: true,
             sync_image: true,
             sync_files: false,
+            file_save_dir: None,
             discovery_scan_ranges: Vec::new(),
             desktop_notifications: true,
             notify_clipboard: true,
             notify_trust_required: true,
-            notify_file_transfer: true,
+            notify_file_transfer: false,
             notify_device_status: true,
             notify_sync_error: true,
             notification_clipboard_preview: true,
@@ -232,6 +239,10 @@ pub struct HistoryItem {
     pub content_type: ClipboardContentType,
     #[serde(default)]
     pub sync_status: SyncStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_transfer_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_transfer_status: Option<FileTransferStatus>,
     pub success: bool,
     pub created_at: DateTime<Utc>,
 }
@@ -329,6 +340,8 @@ pub struct FileTransferTask {
     pub direction: FileTransferDirection,
     pub peer_device_id: String,
     pub peer_device_name: String,
+    #[serde(default)]
+    pub clipboard_sync: bool,
     pub files: Vec<FileTransferFile>,
     pub total_size: u64,
     pub transferred_bytes: u64,
@@ -357,6 +370,14 @@ pub struct FileTransferProgressEvent {
     pub total_transferred_bytes: u64,
     pub total_size: u64,
     pub status: FileTransferStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum CopyHistoryResult {
+    Copied,
+    DownloadStarted,
+    Downloading,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -423,6 +444,8 @@ pub enum WireMessage {
         transfer_id: String,
         sender_device_id: String,
         sender_device_name: String,
+        #[serde(default)]
+        clipboard_sync: bool,
         files: Vec<FileOfferFile>,
         total_size: u64,
         file_count: usize,
@@ -481,7 +504,26 @@ impl From<ClipboardMessage> for WireMessage {
 
 #[cfg(test)]
 mod file_transfer_wire_tests {
-    use super::{FileCompleteFile, FileOfferFile, WireMessage};
+    use chrono::Utc;
+
+    use super::{
+        ClipboardContentType, ClipboardMessage, FileCompleteFile, FileOfferFile,
+        FileTransferDirection, FileTransferStatus, FileTransferTask, WireMessage,
+    };
+
+    #[test]
+    fn clipboard_content_type_file_list_serializes_as_frontend_file_list() {
+        let json = serde_json::to_string(&ClipboardContentType::FileList).unwrap();
+
+        assert_eq!(json, "\"fileList\"");
+    }
+
+    #[test]
+    fn clipboard_content_type_accepts_legacy_lowercase_filelist() {
+        let decoded: ClipboardContentType = serde_json::from_str("\"filelist\"").unwrap();
+
+        assert_eq!(decoded, ClipboardContentType::FileList);
+    }
 
     #[test]
     fn multi_file_offer_round_trips_as_wire_json() {
@@ -489,6 +531,7 @@ mod file_transfer_wire_tests {
             transfer_id: "transfer-1".to_string(),
             sender_device_id: "device-a".to_string(),
             sender_device_name: "Laptop A".to_string(),
+            clipboard_sync: true,
             files: vec![
                 FileOfferFile {
                     file_id: "file-1".to_string(),
@@ -515,6 +558,28 @@ mod file_transfer_wire_tests {
         let decoded: WireMessage = serde_json::from_str(&json).unwrap();
 
         assert_eq!(decoded, message);
+    }
+
+    #[test]
+    fn file_transfer_task_serializes_clipboard_sync_as_camel_case() {
+        let task = FileTransferTask {
+            transfer_id: "transfer-1".to_string(),
+            direction: FileTransferDirection::Receive,
+            peer_device_id: "device-a".to_string(),
+            peer_device_name: "Laptop A".to_string(),
+            clipboard_sync: true,
+            files: Vec::new(),
+            total_size: 0,
+            transferred_bytes: 0,
+            status: FileTransferStatus::Pending,
+            created_at: Utc::now(),
+            completed_at: None,
+            error: None,
+        };
+
+        let json = serde_json::to_string(&task).unwrap();
+
+        assert!(json.contains(r#""clipboardSync":true"#));
     }
 
     #[test]
@@ -556,6 +621,23 @@ mod file_transfer_wire_tests {
         let decoded: WireMessage = serde_json::from_str(&json).unwrap();
 
         assert_eq!(decoded, message);
+    }
+
+    #[test]
+    fn file_list_clipboard_message_uses_file_list_wire_value() {
+        let message = ClipboardMessage {
+            message_id: "message-1".to_string(),
+            source_device_id: "device-a".to_string(),
+            source_device_name: "Laptop A".to_string(),
+            content_type: ClipboardContentType::FileList,
+            content: "[]".to_string(),
+            content_hash: "hash-a".to_string(),
+            timestamp: 1,
+        };
+
+        let json = serde_json::to_string(&WireMessage::from(message)).unwrap();
+
+        assert!(json.contains(r#""fileList""#));
     }
 }
 
