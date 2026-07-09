@@ -213,33 +213,33 @@ html[data-app-theme="macosDark"] {
   --panel-bg-soft: rgba(58, 58, 60, 0.68);
   --field-bg: rgba(28, 28, 30, 0.88);
   --stat-bg: rgba(44, 44, 46, 0.76);
-  --theme-accent: #0a84ff;
+  --theme-accent: #a78bfa;
   --muted-text: #d1d1d6;
   --subtle-text: #a1a1a6;
-  --accent-bg: #0a84ff;
-  --accent-bg-hover: #409cff;
-  --accent-line: rgba(10, 132, 255, 0.5);
-  --accent-soft: rgba(10, 132, 255, 0.16);
-  --accent-text: #8ec7ff;
-  --accent-glow: rgba(10, 132, 255, 0.24);
-  --button-primary-bg: #0a84ff;
-  --button-primary-bg-hover: #409cff;
-  --button-primary-line: rgba(10, 132, 255, 0.5);
+  --accent-bg: #6d5bd0;
+  --accent-bg-hover: #7c6af0;
+  --accent-line: rgba(167, 139, 250, 0.46);
+  --accent-soft: rgba(167, 139, 250, 0.14);
+  --accent-text: #c9bcff;
+  --accent-glow: rgba(167, 139, 250, 0.24);
+  --button-primary-bg: #6d5bd0;
+  --button-primary-bg-hover: #7c6af0;
+  --button-primary-line: rgba(167, 139, 250, 0.5);
   --button-primary-text: #ffffff;
   --dialog-bg: rgba(44, 44, 46, 0.94);
   --dialog-overlay-bg: rgba(0, 0, 0, 0.5);
   --disconnect-notice-bg: rgba(44, 44, 46, 0.96);
-  --disconnect-notice-line: rgba(10, 132, 255, 0.52);
-  --disconnect-notice-ring: rgba(10, 132, 255, 0.18);
+  --disconnect-notice-line: rgba(167, 139, 250, 0.48);
+  --disconnect-notice-ring: rgba(167, 139, 250, 0.16);
   --disconnect-notice-text: #f5f5f7;
   --disconnect-notice-muted-text: #d1d1d6;
-  --disconnect-notice-icon-bg: rgba(10, 132, 255, 0.14);
-  --disconnect-notice-icon-line: rgba(10, 132, 255, 0.44);
-  --disconnect-notice-icon-text: #8ec7ff;
-  --disconnect-notice-close-hover: rgba(10, 132, 255, 0.14);
-  --disconnect-notice-shadow: 0 18px 52px rgba(0, 0, 0, 0.48), 0 0 28px rgba(10, 132, 255, 0.1);
+  --disconnect-notice-icon-bg: rgba(167, 139, 250, 0.12);
+  --disconnect-notice-icon-line: rgba(167, 139, 250, 0.4);
+  --disconnect-notice-icon-text: #c9bcff;
+  --disconnect-notice-close-hover: rgba(167, 139, 250, 0.12);
+  --disconnect-notice-shadow: 0 18px 52px rgba(0, 0, 0, 0.48), 0 0 28px rgba(167, 139, 250, 0.08);
   --floating-surface-line: rgba(255, 255, 255, 0.14);
-  --floating-surface-bg: linear-gradient(135deg, rgba(10, 132, 255, 0.1), transparent 48%),
+  --floating-surface-bg: linear-gradient(135deg, rgba(167, 139, 250, 0.08), transparent 48%),
     rgba(28, 28, 30, 0.74);
   --floating-stat-bg: rgba(58, 58, 60, 0.62);
   --floating-stat-line: rgba(255, 255, 255, 0.1);
@@ -255,11 +255,11 @@ html[data-app-theme="macosDark"] {
   --clipboard-card-bg: rgba(44, 44, 46, 0.86);
   --clipboard-card-bg-hover: rgba(58, 58, 60, 0.94);
   --clipboard-card-line: rgba(255, 255, 255, 0.1);
-  --clipboard-card-line-hover: rgba(10, 132, 255, 0.34);
+  --clipboard-card-line-hover: rgba(167, 139, 250, 0.3);
   --clipboard-card-shadow: 0 10px 28px rgba(0, 0, 0, 0.24);
   --clipboard-card-shadow-hover: 0 16px 34px rgba(0, 0, 0, 0.34);
   --clipboard-card-text: #f5f5f7;
-  --clipboard-card-link-text: #8ec7ff;
+  --clipboard-card-link-text: #c9bcff;
   --clipboard-card-meta-text: #a1a1a6;
   --clipboard-card-footer-text: #b7c6dc;
   --clipboard-card-soft-hover: rgba(255, 255, 255, 0.08);
@@ -402,14 +402,14 @@ button[data-window-control]:active {
   opacity: 0;
 }
 
-.window-phase-main-exit.app-window-shell,
-.window-phase-main-enter.app-window-shell {
+.is-window-mode-transitioning.window-phase-main-exit.app-window-shell,
+.is-window-mode-transitioning.window-phase-main-enter.app-window-shell {
   background-color: transparent !important;
   border-color: transparent !important;
   box-shadow: none;
 }
 
-.window-phase-floating-enter.app-window-shell::before {
+.is-window-mode-transitioning.window-phase-floating-enter.app-window-shell::before {
   inset: 8px;
   border: 1px solid var(--floating-surface-line);
   border-radius: 8px;
@@ -419,7 +419,7 @@ button[data-window-control]:active {
   animation: floating-shell-enter-bridge 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
-.window-phase-main-enter.app-window-shell::before {
+.is-window-mode-transitioning.window-phase-main-enter.app-window-shell::before {
   inset: 0;
   border: 1px solid var(--main-line);
   border-radius: 18px;
@@ -563,14 +563,14 @@ button[data-window-control]:active {
   transform-origin: top right;
 }
 
-.window-phase-main-enter .main-window-content,
-.window-phase-floating-enter .floating-window-surface {
+.is-window-mode-transitioning.window-phase-main-enter .main-window-content,
+.is-window-mode-transitioning.window-phase-floating-enter .floating-window-surface {
   position: relative;
   z-index: 1;
 }
 
-.window-phase-main-exit .main-window-content,
-.window-phase-main-enter .main-window-content {
+.is-window-mode-transitioning.window-phase-main-exit .main-window-content,
+.is-window-mode-transitioning.window-phase-main-enter .main-window-content {
   background: var(--main-bg);
   border: 1px solid var(--main-line);
   border-radius: 18px;
@@ -599,24 +599,24 @@ button[data-window-control]:active {
   transform: scale(1) translateY(0);
 }
 
-.window-phase-main-exit .main-window-content {
+.is-window-mode-transitioning.window-phase-main-exit .main-window-content {
   opacity: 0.22;
   filter: blur(4px) saturate(0.82);
   transform: translate(26px, -16px) scale(0.22) rotate(3deg);
 }
 
-.window-phase-floating-exit .floating-window-surface {
+.is-window-mode-transitioning.window-phase-floating-exit .floating-window-surface {
   opacity: 0.24;
   filter: blur(4px) saturate(0.82);
   transform: translate(18px, -14px) scale(0.36) rotate(-2deg);
 }
 
-.window-phase-main-enter .main-window-content {
+.is-window-mode-transitioning.window-phase-main-enter .main-window-content {
   transform-origin: top right;
   animation: main-window-enter 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
-.window-phase-floating-enter .floating-window-surface {
+.is-window-mode-transitioning.window-phase-floating-enter .floating-window-surface {
   animation: floating-window-enter 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 

@@ -450,6 +450,25 @@ impl AppState {
         self.inner.sync_engine.lock().await.apply_remote_message(message)
     }
 
+    pub async fn should_apply_remote_clipboard(
+        &self,
+        message: &crate::models::ClipboardMessage,
+    ) -> bool {
+        self.inner
+            .sync_engine
+            .lock()
+            .await
+            .should_apply_remote_message(message)
+    }
+
+    pub async fn mark_remote_clipboard_applied(&self, message: &crate::models::ClipboardMessage) {
+        self.inner
+            .sync_engine
+            .lock()
+            .await
+            .mark_remote_message_applied(message);
+    }
+
     pub async fn observe_local_text(&self, text: String) -> Option<crate::models::ClipboardMessage> {
         self.inner.sync_engine.lock().await.observe_local_text(text)
     }

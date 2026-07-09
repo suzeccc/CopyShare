@@ -15,9 +15,9 @@ assert.doesNotMatch(app, /useFileTransferStore/);
 assert.doesNotMatch(app, /fileTransferStore/);
 assert.doesNotMatch(appShell, /FileTransferOfferDialog/);
 
-assert.match(settings, /syncFiles:\s*false/);
-assert.doesNotMatch(settings, /draft\.syncFiles/);
-assert.doesNotMatch(settings, /saveSyncFiles/);
+assert.match(settings, /draft\.syncFiles/);
+assert.match(settings, /saveSyncFiles/);
+assert.doesNotMatch(settings, /syncFiles:\s*false/);
 assert.doesNotMatch(settings, /data-transfer-save-dir-setting/);
 assert.match(settings, /data-download-location-setting/);
 assert.doesNotMatch(settings, /notifyFileTransfer/);

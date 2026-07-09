@@ -135,7 +135,7 @@ impl SyncEngine {
         self.last_local_hash = None;
     }
 
-    pub fn apply_remote_message(&mut self, message: &ClipboardMessage) -> bool {
+    pub fn should_apply_remote_message(&self, message: &ClipboardMessage) -> bool {
         if message.source_device_id == self.device_id {
             return false;
         }
@@ -144,17 +144,24 @@ impl SyncEngine {
             return false;
         }
 
-        self.seen_message_ids.insert(message.message_id.clone());
-        if self.last_remote_hash.as_deref() == Some(&message.content_hash)
-            || self.last_local_hash.as_deref() == Some(&message.content_hash)
-        {
-            return false;
-        }
+        self.last_remote_hash.as_deref() != Some(&message.content_hash)
+            && self.last_local_hash.as_deref() != Some(&message.content_hash)
+    }
 
+    pub fn mark_remote_message_applied(&mut self, message: &ClipboardMessage) {
+        self.seen_message_ids.insert(message.message_id.clone());
         self.last_remote_hash = Some(message.content_hash.clone());
         self.last_local_hash = Some(message.content_hash.clone());
         self.pending_remote_echo_hashes
             .insert(message.content_hash.clone());
+    }
+
+    pub fn apply_remote_message(&mut self, message: &ClipboardMessage) -> bool {
+        if !self.should_apply_remote_message(message) {
+            return false;
+        }
+
+        self.mark_remote_message_applied(message);
         true
     }
 
@@ -794,11 +801,12 @@ async fn handle_wire_text(app: &AppHandle, state: &AppState, connection_id: &str
             {
                 return;
             }
-            if state.apply_remote_clipboard(&clipboard).await {
+            if state.should_apply_remote_clipboard(&clipboard).await {
                 if let Err(error) = write_remote_clipboard(app, &clipboard) {
                     emit_sync_error(app, state, error.to_string()).await;
                     return;
                 }
+                state.mark_remote_clipboard_applied(&clipboard).await;
                 notifications::notify_clipboard_received(app, &config, &clipboard);
                 state.touch_last_sync().await;
                 if config.save_history {
@@ -1230,6 +1238,23 @@ mod tests {
         assert!(engine.apply_remote_message(&remote));
         assert!(engine.observe_local_image("remote-image-base64").is_none());
         assert!(!engine.apply_remote_message(&remote));
+    }
+
+    #[test]
+    fn remote_message_is_marked_applied_only_after_clipboard_write_succeeds() {
+        let mut engine = SyncEngine::new("device-a", "Laptop A");
+        let remote = remote_message("remote-write-retry", "remote text");
+
+        assert!(engine.should_apply_remote_message(&remote));
+        assert!(
+            engine.should_apply_remote_message(&remote),
+            "a transient clipboard write failure must not consume the remote message"
+        );
+
+        engine.mark_remote_message_applied(&remote);
+
+        assert!(!engine.should_apply_remote_message(&remote));
+        assert!(engine.observe_local_text("remote text").is_none());
     }
 
     #[test]
@@ -1953,7 +1978,7 @@ mod tests {
         assert!(should_read_local_clipboard(&config));
 
         config.sync_image = false;
-        assert!(!should_read_local_clipboard(&config));
+        assert!(should_read_local_clipboard(&config));
 
         config.sync_files = false;
         assert!(!should_read_local_clipboard(&config));

@@ -4,7 +4,7 @@ import { getConfig, onAppEvent, updateConfig } from "@/lib/tauri";
 import type { AppConfig } from "@/types/config";
 
 const defaultConfig: AppConfig = {
-  configVersion: 4,
+  configVersion: 5,
   deviceName: "CopyShare",
   deviceId: "",
   theme: "win11Dark",
@@ -16,8 +16,9 @@ const defaultConfig: AppConfig = {
   trustedDevices: [],
   syncText: true,
   syncImage: true,
-  syncFiles: false,
+  syncFiles: true,
   fileSaveDir: null,
+  autoOpenFolderAfterSave: false,
   discoveryScanRanges: [],
   desktopNotifications: true,
   notifyClipboard: true,

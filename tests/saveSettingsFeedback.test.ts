@@ -20,7 +20,10 @@ assert.equal(failed.label, "保存失败");
 assert.equal(failed.disabled, false);
 
 const settings = readFileSync("src/pages/Settings.vue", "utf8");
-assert.match(settings, /saveFeedbackState/);
-assert.match(settings, /saveFeedbackView/);
-assert.match(settings, /saveFeedbackIcon/);
+assert.match(settings, /async function saveBasicSettings/);
+assert.doesNotMatch(settings, /saveFeedbackState/);
+assert.doesNotMatch(settings, /saveFeedbackView/);
+assert.doesNotMatch(settings, /saveFeedbackIcon/);
+assert.doesNotMatch(settings, /getSaveFeedbackView/);
+assert.doesNotMatch(settings, />\s*\{\{\s*saveFeedbackView\.label\s*\}\}\s*</);
 assert.doesNotMatch(settings, /设置已保存。/);

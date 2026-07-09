@@ -73,6 +73,9 @@ assert.doesNotMatch(
 
 assert.match(appShell, /<FloatingPanel[\s\S]*v-if="isFloating"/);
 assert.match(appShell, /<div v-else class="main-window-content/);
+assert.doesNotMatch(appShell, /window-phase-/);
+assert.doesNotMatch(appShell, /transitionPhase/);
+assert.doesNotMatch(appShell, /getWindowModeTransition/);
 
 assert.match(
   tauriBridge,
@@ -86,17 +89,17 @@ assert.doesNotMatch(
 
 assert.match(
   style,
-  /\.window-phase-main-exit\.app-window-shell,\s*\.window-phase-main-enter\.app-window-shell \{[\s\S]*background-color: transparent !important;[\s\S]*border-color: transparent !important;[\s\S]*box-shadow: none;[\s\S]*\}/,
+  /\.is-window-mode-transitioning\.window-phase-main-exit\.app-window-shell,\s*\.is-window-mode-transitioning\.window-phase-main-enter\.app-window-shell \{[\s\S]*background-color: transparent !important;[\s\S]*border-color: transparent !important;[\s\S]*box-shadow: none;[\s\S]*\}/,
 );
 
 assert.match(
   style,
-  /\.window-phase-floating-enter\.app-window-shell::before \{[\s\S]*background: var\(--floating-surface-bg\);[\s\S]*animation: floating-shell-enter-bridge 180ms cubic-bezier\(0\.16, 1, 0\.3, 1\) both;[\s\S]*\}/,
+  /\.is-window-mode-transitioning\.window-phase-floating-enter\.app-window-shell::before \{[\s\S]*background: var\(--floating-surface-bg\);[\s\S]*animation: floating-shell-enter-bridge 180ms cubic-bezier\(0\.16, 1, 0\.3, 1\) both;[\s\S]*\}/,
 );
 
 assert.match(
   style,
-  /\.window-phase-main-enter\.app-window-shell::before \{[\s\S]*background: var\(--main-bg\);[\s\S]*animation: main-shell-enter-bridge 180ms cubic-bezier\(0\.16, 1, 0\.3, 1\) both;[\s\S]*\}/,
+  /\.is-window-mode-transitioning\.window-phase-main-enter\.app-window-shell::before \{[\s\S]*background: var\(--main-bg\);[\s\S]*animation: main-shell-enter-bridge 180ms cubic-bezier\(0\.16, 1, 0\.3, 1\) both;[\s\S]*\}/,
 );
 
 assert.match(
@@ -106,12 +109,12 @@ assert.match(
 
 assert.match(
   style,
-  /\.window-phase-main-exit \.main-window-content,\s*\.window-phase-main-enter \.main-window-content \{[\s\S]*background: var\(--main-bg\);[\s\S]*border-radius: 18px;[\s\S]*\}/,
+  /\.is-window-mode-transitioning\.window-phase-main-exit \.main-window-content,\s*\.is-window-mode-transitioning\.window-phase-main-enter \.main-window-content \{[\s\S]*background: var\(--main-bg\);[\s\S]*border-radius: 18px;[\s\S]*\}/,
 );
 
 assert.match(
   style,
-  /\.window-phase-main-exit \.main-window-content \{[\s\S]*opacity: 0\.22;[\s\S]*filter: blur\(4px\) saturate\(0\.82\);[\s\S]*transform: translate\(26px, -16px\) scale\(0\.22\) rotate\(3deg\);[\s\S]*\}/,
+  /\.is-window-mode-transitioning\.window-phase-main-exit \.main-window-content \{[\s\S]*opacity: 0\.22;[\s\S]*filter: blur\(4px\) saturate\(0\.82\);[\s\S]*transform: translate\(26px, -16px\) scale\(0\.22\) rotate\(3deg\);[\s\S]*\}/,
 );
 
 assert.match(
@@ -121,17 +124,17 @@ assert.match(
 
 assert.match(
   style,
-  /\.window-phase-floating-exit \.floating-window-surface \{[\s\S]*opacity: 0\.24;[\s\S]*filter: blur\(4px\) saturate\(0\.82\);[\s\S]*transform: translate\(18px, -14px\) scale\(0\.36\) rotate\(-2deg\);[\s\S]*\}/,
+  /\.is-window-mode-transitioning\.window-phase-floating-exit \.floating-window-surface \{[\s\S]*opacity: 0\.24;[\s\S]*filter: blur\(4px\) saturate\(0\.82\);[\s\S]*transform: translate\(18px, -14px\) scale\(0\.36\) rotate\(-2deg\);[\s\S]*\}/,
 );
 
 assert.match(
   style,
-  /\.window-phase-main-enter \.main-window-content \{[\s\S]*transform-origin: top right;[\s\S]*animation: main-window-enter 220ms cubic-bezier\(0\.16, 1, 0\.3, 1\) both;[\s\S]*\}/,
+  /\.is-window-mode-transitioning\.window-phase-main-enter \.main-window-content \{[\s\S]*transform-origin: top right;[\s\S]*animation: main-window-enter 220ms cubic-bezier\(0\.16, 1, 0\.3, 1\) both;[\s\S]*\}/,
 );
 
 assert.match(
   style,
-  /\.window-phase-floating-enter \.floating-window-surface \{[\s\S]*animation: floating-window-enter 220ms cubic-bezier\(0\.16, 1, 0\.3, 1\) both;[\s\S]*\}/,
+  /\.is-window-mode-transitioning\.window-phase-floating-enter \.floating-window-surface \{[\s\S]*animation: floating-window-enter 220ms cubic-bezier\(0\.16, 1, 0\.3, 1\) both;[\s\S]*\}/,
 );
 
 assert.match(

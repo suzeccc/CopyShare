@@ -130,6 +130,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub file_save_dir: Option<String>,
     #[serde(default)]
+    pub auto_open_folder_after_save: bool,
+    #[serde(default)]
     pub discovery_scan_ranges: Vec<String>,
     #[serde(default = "default_true")]
     pub desktop_notifications: bool,
@@ -154,7 +156,7 @@ fn default_true() -> bool {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            config_version: 4,
+            config_version: 5,
             device_name: "CopyShare".to_string(),
             device_id: new_device_id(),
             theme: AppTheme::Win11Dark,
@@ -166,8 +168,9 @@ impl Default for AppConfig {
             trusted_devices: Vec::new(),
             sync_text: true,
             sync_image: true,
-            sync_files: false,
+            sync_files: true,
             file_save_dir: None,
+            auto_open_folder_after_save: false,
             discovery_scan_ranges: Vec::new(),
             desktop_notifications: true,
             notify_clipboard: true,

@@ -16,6 +16,7 @@ export interface AppConfig {
   syncImage: boolean;
   syncFiles: boolean;
   fileSaveDir: string | null;
+  autoOpenFolderAfterSave: boolean;
   discoveryScanRanges: string[];
   desktopNotifications: boolean;
   notifyClipboard: boolean;

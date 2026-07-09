@@ -24,8 +24,8 @@ const footerItems = [
 </script>
 
 <template>
-  <aside class="flex h-full w-56 shrink-0 flex-col border-r border-[color:var(--main-line)] bg-[color:var(--main-bg)] px-2.5 py-5">
-    <div class="mb-7">
+  <aside class="flex h-full w-48 shrink-0 flex-col border-r border-[color:var(--main-line)] bg-[color:var(--main-bg)] px-2 py-5">
+    <div class="mb-6">
       <p class="text-xs font-medium uppercase text-slate-500">CopyShare</p>
       <h1 class="mt-2 text-xl font-semibold text-white">剪贴板共享</h1>
     </div>
