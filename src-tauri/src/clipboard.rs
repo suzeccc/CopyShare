@@ -1,4 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use base64::{engine::general_purpose::STANDARD, Engine};
 use image::{ColorType, ImageEncoder};
@@ -8,6 +11,30 @@ use tauri_plugin_clipboard_manager::ClipboardExt;
 
 use crate::error::{AppError, AppResult};
 use crate::models::ClipboardTextItem;
+
+const CLIPBOARD_ACCESS_ATTEMPTS: usize = 12;
+const CLIPBOARD_ACCESS_RETRY_DELAY: Duration = Duration::from_millis(25);
+
+fn retry_clipboard_access_with_delay<T, F, S>(mut operation: F, mut sleep: S) -> AppResult<T>
+where
+    F: FnMut() -> AppResult<T>,
+    S: FnMut(Duration),
+{
+    let mut last_error = None;
+    for attempt in 0..CLIPBOARD_ACCESS_ATTEMPTS {
+        match operation() {
+            Ok(value) => return Ok(value),
+            Err(error) => {
+                last_error = Some(error);
+                if attempt + 1 < CLIPBOARD_ACCESS_ATTEMPTS {
+                    sleep(CLIPBOARD_ACCESS_RETRY_DELAY);
+                }
+            }
+        }
+    }
+
+    Err(last_error.unwrap_or_else(|| AppError::Clipboard("clipboard access failed".to_string())))
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -234,14 +261,13 @@ fn write_clipboard_image_base64_windows(content: &str) -> AppResult<()> {
 
 #[cfg(target_os = "windows")]
 fn write_windows_file_paths_to_clipboard(paths: &[PathBuf]) -> AppResult<()> {
-    use windows::Win32::System::DataExchange::{EmptyClipboard, OpenClipboard};
+    use windows::Win32::System::DataExchange::EmptyClipboard;
 
     const CF_HDROP_FORMAT: u32 = 15;
 
     let hdrop = build_windows_hdrop_bytes_for_paths(paths);
     unsafe {
-        OpenClipboard(None).map_err(|error| AppError::Clipboard(error.to_string()))?;
-        let _guard = ClipboardCloseGuard;
+        let _guard = open_windows_clipboard_with_retry()?;
         EmptyClipboard().map_err(|error| AppError::Clipboard(error.to_string()))?;
         set_windows_clipboard_bytes(CF_HDROP_FORMAT, &hdrop)?;
     }
@@ -256,7 +282,7 @@ fn write_windows_image_to_clipboard(
     png_bytes: &[u8],
 ) -> AppResult<()> {
     use windows::Win32::System::DataExchange::{
-        EmptyClipboard, OpenClipboard, RegisterClipboardFormatW,
+        EmptyClipboard, RegisterClipboardFormatW,
     };
     use windows::core::PCWSTR;
 
@@ -269,8 +295,7 @@ fn write_windows_image_to_clipboard(
     let hdrop = build_windows_hdrop_bytes(&temp_png_path);
 
     unsafe {
-        OpenClipboard(None).map_err(|error| AppError::Clipboard(error.to_string()))?;
-        let _guard = ClipboardCloseGuard;
+        let _guard = open_windows_clipboard_with_retry()?;
         EmptyClipboard().map_err(|error| AppError::Clipboard(error.to_string()))?;
 
         set_windows_clipboard_bytes(CF_DIB_FORMAT, &dib)?;
@@ -314,6 +339,17 @@ unsafe fn set_windows_clipboard_bytes(format: u32, bytes: &[u8]) -> AppResult<()
 
 #[cfg(target_os = "windows")]
 struct ClipboardCloseGuard;
+
+#[cfg(target_os = "windows")]
+fn open_windows_clipboard_with_retry() -> AppResult<ClipboardCloseGuard> {
+    use windows::Win32::System::DataExchange::OpenClipboard;
+
+    retry_clipboard_access_with_delay(
+        || unsafe { OpenClipboard(None) }.map_err(|error| AppError::Clipboard(error.to_string())),
+        std::thread::sleep,
+    )?;
+    Ok(ClipboardCloseGuard)
+}
 
 #[cfg(target_os = "windows")]
 impl Drop for ClipboardCloseGuard {
@@ -812,6 +848,42 @@ mod tests {
                 .expect("unsupported extension should not be an error")
                 .is_none()
         );
+    }
+
+    #[test]
+    fn clipboard_access_retry_survives_transient_busy_errors() {
+        let mut attempts = 0;
+        let result = retry_clipboard_access_with_delay(
+            || {
+                attempts += 1;
+                if attempts < 3 {
+                    Err(AppError::Clipboard("clipboard busy".to_string()))
+                } else {
+                    Ok("ok")
+                }
+            },
+            |_| {},
+        )
+        .expect("transient clipboard errors should be retried");
+
+        assert_eq!(result, "ok");
+        assert_eq!(attempts, 3);
+    }
+
+    #[test]
+    fn clipboard_access_retry_stops_after_attempt_limit() {
+        let mut attempts = 0;
+        let error = retry_clipboard_access_with_delay(
+            || {
+                attempts += 1;
+                Err::<(), _>(AppError::Clipboard("clipboard busy".to_string()))
+            },
+            |_| {},
+        )
+        .expect_err("persistent clipboard errors should still fail");
+
+        assert!(error.to_string().contains("clipboard busy"));
+        assert_eq!(attempts, CLIPBOARD_ACCESS_ATTEMPTS);
     }
 
     #[test]

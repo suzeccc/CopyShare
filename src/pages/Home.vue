@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { FileText, Image as ImageIcon, Monitor, Network, Settings } from "lucide-vue-next";
+import { FileText, Folder, Image as ImageIcon, Monitor, Network, Settings } from "lucide-vue-next";
 import { computed } from "vue";
 import { RouterLink } from "vue-router";
 
@@ -32,6 +32,13 @@ const syncContentItems = computed(() => [
     state: configStore.config.syncImage ? "已启用" : "已关闭",
     enabled: configStore.config.syncImage,
     icon: ImageIcon,
+  },
+  {
+    label: "文件传输",
+    hint: "复制文件后同步到对方历史，点击文件历史后开始下载",
+    state: configStore.config.syncFiles ? "已启用" : "已关闭",
+    enabled: configStore.config.syncFiles,
+    icon: Folder,
   },
 ]);
 </script>
@@ -169,7 +176,7 @@ const syncContentItems = computed(() => [
           </RouterLink>
         </div>
 
-        <div data-home-sync-content-grid class="grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2">
+        <div data-home-sync-content-grid class="grid min-w-0 grid-cols-1 gap-3 md:grid-cols-3">
           <article
             v-for="item in syncContentItems"
             :key="item.label"

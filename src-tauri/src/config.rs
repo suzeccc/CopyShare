@@ -10,7 +10,7 @@ use crate::{
 };
 
 const CONFIG_FILE: &str = "config.json";
-const CURRENT_CONFIG_VERSION: u16 = 4;
+const CURRENT_CONFIG_VERSION: u16 = 5;
 
 pub fn load_config(app: &AppHandle) -> AppResult<AppConfig> {
     let path = config_path(app)?;
@@ -61,7 +61,7 @@ fn migrate_config(config: &mut AppConfig) -> bool {
     }
 
     config.sync_image = true;
-    config.sync_files = false;
+    config.sync_files = true;
     config.notification_clipboard_preview = true;
     config.notify_device_status = true;
     config.config_version = CURRENT_CONFIG_VERSION;
@@ -74,10 +74,6 @@ fn parse_config_text(text: &str) -> AppResult<AppConfig> {
 
 pub(crate) fn normalize_config(config: &mut AppConfig) -> bool {
     let mut changed = security::normalize_trusted_devices(config);
-    if config.sync_files {
-        config.sync_files = false;
-        changed = true;
-    }
     if config.notify_file_transfer {
         config.notify_file_transfer = false;
         changed = true;
@@ -116,8 +112,9 @@ mod tests {
         assert!(config.save_history);
         assert!(config.sync_text);
         assert!(config.sync_image);
-        assert!(!config.sync_files);
+        assert!(config.sync_files);
         assert_eq!(config.file_save_dir, None);
+        assert!(!config.auto_open_folder_after_save);
         assert!(config.trusted_devices.is_empty());
         assert!(config.discovery_scan_ranges.is_empty());
         assert!(config.desktop_notifications);
@@ -162,6 +159,7 @@ mod tests {
     #[test]
     fn legacy_config_enables_image_sync_once() {
         let json = serde_json::json!({
+            "configVersion": 4,
             "deviceName": "CopyShare",
             "deviceId": "device-test",
             "port": 8765,
@@ -176,9 +174,9 @@ mod tests {
         let mut config: AppConfig = serde_json::from_value(json).unwrap();
 
         assert!(super::migrate_config(&mut config));
-        assert_eq!(config.config_version, 4);
+        assert_eq!(config.config_version, 5);
         assert!(config.sync_image);
-        assert!(!config.sync_files);
+        assert!(config.sync_files);
         assert!(config.notification_clipboard_preview);
         assert!(config.notify_device_status);
 
@@ -187,7 +185,7 @@ mod tests {
         config.notification_clipboard_preview = false;
         config.notify_device_status = false;
         assert!(!super::migrate_config(&mut config));
-        assert_eq!(config.config_version, 4);
+        assert_eq!(config.config_version, 5);
         assert!(!config.sync_image);
         assert!(!config.sync_files);
         assert!(!config.notification_clipboard_preview);

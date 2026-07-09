@@ -19,7 +19,7 @@ const props = withDefaults(
 const classes = computed(() => [
   "inline-flex items-center justify-center gap-2 rounded-md border font-medium transition duration-150 active:scale-[0.98]",
   "disabled:cursor-not-allowed disabled:opacity-50",
-  props.size === "sm" ? "h-8 px-3 text-xs" : "h-10 px-4 text-sm",
+  props.size === "sm" ? "h-8 px-3 text-[13px]" : "h-10 px-4 text-sm",
   props.variant === "primary" &&
     "border-[color:var(--button-primary-line)] bg-[color:var(--button-primary-bg)] text-[color:var(--button-primary-text)] hover:bg-[color:var(--button-primary-bg-hover)]",
   props.variant === "secondary" &&

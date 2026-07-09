@@ -18,14 +18,7 @@ import {
   restoreMainWindow,
 } from "@/lib/tauri";
 import { getLatencyLabel, type AppWindowMode } from "@/lib/windowMode";
-import {
-  getWindowTransitionOrigin,
-  getWindowModeTransition,
-  WINDOW_MODE_ENTER_MS,
-  WINDOW_MODE_EXIT_MS,
-  type WindowTransitionPointer,
-  type WindowTransitionPhase,
-} from "@/lib/windowTransition";
+import type { WindowTransitionPointer } from "@/lib/windowTransition";
 import { useHistoryStore } from "@/stores/history";
 import { useConfigStore } from "@/stores/config";
 import { useDevicesStore } from "@/stores/devices";
@@ -37,12 +30,9 @@ const historyStore = useHistoryStore();
 const devicesStore = useDevicesStore();
 const route = useRoute();
 const windowMode = ref<AppWindowMode>("main");
-const transitionPhase = ref<WindowTransitionPhase>("idle");
 const isSwitchingWindowMode = ref(false);
 const systemClipboardItems = ref<ClipboardPreviewItem[]>([]);
-const shellRef = ref<HTMLElement | null>(null);
 const mainScrollRef = ref<HTMLElement | null>(null);
-const windowTransitionOrigin = ref("center");
 let clipboardHistoryTimer: number | undefined;
 
 const clipboardItems = computed(() =>
@@ -109,18 +99,6 @@ onBeforeUnmount(() => {
   window.clearInterval(clipboardHistoryTimer);
 });
 
-function wait(ms: number) {
-  return new Promise((resolve) => {
-    window.setTimeout(resolve, ms);
-  });
-}
-
-function waitForPaint() {
-  return new Promise((resolve) => {
-    window.requestAnimationFrame(() => resolve(undefined));
-  });
-}
-
 async function refreshSystemClipboardHistory() {
   try {
     systemClipboardItems.value = (await getClipboardHistory()).map((item) => ({
@@ -151,13 +129,6 @@ watch(
   { immediate: true },
 );
 
-function setWindowTransitionOrigin(pointer?: WindowTransitionPointer) {
-  const rect = shellRef.value?.getBoundingClientRect();
-  windowTransitionOrigin.value = pointer && rect
-    ? getWindowTransitionOrigin(pointer, rect)
-    : "center";
-}
-
 async function switchWindowMode(
   nextMode: AppWindowMode,
   resizeWindow: (pointer?: WindowTransitionPointer) => Promise<void>,
@@ -167,28 +138,19 @@ async function switchWindowMode(
     return;
   }
 
-  const transition = getWindowModeTransition(windowMode.value, nextMode);
-  if (!transition) {
+  if (windowMode.value === nextMode) {
     return;
   }
 
   isSwitchingWindowMode.value = true;
-  setWindowTransitionOrigin(pointer);
-  transitionPhase.value = transition.exitPhase;
 
   try {
-    await wait(WINDOW_MODE_EXIT_MS);
     await resizeWindow(pointer);
     windowMode.value = nextMode;
-    transitionPhase.value = transition.enterPhase;
-    await waitForPaint();
-    await wait(WINDOW_MODE_ENTER_MS);
   } catch (error) {
     console.error(error);
   } finally {
-    transitionPhase.value = "idle";
     isSwitchingWindowMode.value = false;
-    windowTransitionOrigin.value = "center";
   }
 }
 
@@ -225,12 +187,9 @@ async function rejectPromptDevice() {
 
 <template>
   <div
-    ref="shellRef"
     class="app-window-shell relative flex h-screen flex-col overflow-hidden rounded-[18px] text-slate-100 transition-[background-color,border-color,padding] duration-200 ease-out"
-    :style="{ '--window-transition-origin': windowTransitionOrigin }"
     :class="[
       isFloating ? 'bg-transparent p-2' : 'border border-[color:var(--main-line)] bg-[color:var(--main-bg)]',
-      `window-phase-${transitionPhase}`,
       isSwitchingWindowMode ? 'pointer-events-none' : '',
     ]"
   >

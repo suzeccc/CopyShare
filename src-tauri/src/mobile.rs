@@ -838,10 +838,10 @@ async fn route_mobile_request(
                 }
             }
             let message = mobile_clipboard_message(content);
-            state.apply_remote_clipboard(&message).await;
             if let Err(error) = clipboard::write_clipboard_text(&app, &message.content) {
                 return http_error(500, &error.to_string());
             }
+            state.apply_remote_clipboard(&message).await;
             notifications::notify_mobile_clipboard_received(
                 &app,
                 &state.config().await,

@@ -27,7 +27,13 @@ assert.match(style, /html\[data-app-theme="macosLight"\]\s*\.text-slate-300/);
 assert.match(style, /html\[data-app-theme="macosLight"\]\s*\.clipboard-category-chip:hover/);
 assert.match(style, /html\[data-app-theme="macosDark"\]/);
 assert.match(style, /html\[data-app-theme="macosDark"\][\s\S]*--main-bg:\s*#1c1c1e;/);
-assert.match(style, /html\[data-app-theme="macosDark"\][\s\S]*--theme-accent:\s*#0a84ff;/);
+assert.match(style, /html\[data-app-theme="macosDark"\][\s\S]*--theme-accent:\s*#a78bfa;/);
+assert.match(style, /html\[data-app-theme="macosDark"\][\s\S]*--accent-bg:\s*#6d5bd0;/);
+assert.match(style, /html\[data-app-theme="macosDark"\][\s\S]*--accent-text:\s*#c9bcff;/);
+assert.match(style, /html\[data-app-theme="macosDark"\][\s\S]*--clipboard-card-link-text:\s*#c9bcff;/);
+assert.doesNotMatch(style, /html\[data-app-theme="macosDark"\][\s\S]*--theme-accent:\s*#0a84ff;/);
+assert.doesNotMatch(style, /html\[data-app-theme="macosDark"\][\s\S]*--theme-accent:\s*#6ee7c8;/);
+assert.doesNotMatch(style, /html\[data-app-theme="macosDark"\][\s\S]*--accent-bg:\s*#1f8f78;/);
 
 assert.match(models, /MacosLight/);
 assert.match(models, /MacosDark/);

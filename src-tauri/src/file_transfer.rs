@@ -517,7 +517,8 @@ impl FileTransferManager {
         transfer_id: String,
     ) -> AppResult<()> {
         let (host, port, peer_device_id, plans) = self.receive_plan(&transfer_id).await?;
-        let save_dir = transfer_save_dir(&state.config().await)?;
+        let config = state.config().await;
+        let save_dir = transfer_save_dir(&config)?;
         fs::create_dir_all(&save_dir).await?;
 
         let mut completed_files = Vec::with_capacity(plans.len());
@@ -576,6 +577,9 @@ impl FileTransferManager {
             )
             .await;
         emit_task_completed(&app, &completed);
+        if let Err(error) = maybe_open_folder_after_save(&state.config().await, &save_dir) {
+            tracing::warn!("auto open transfer folder failed: {error}");
+        }
         Ok(())
     }
 
@@ -1650,6 +1654,14 @@ pub fn open_transfer_folder(config: &AppConfig) -> AppResult<()> {
     let folder = transfer_save_dir(config)?;
     std::fs::create_dir_all(&folder)?;
     open_folder_with_system_file_manager(&folder)
+}
+
+fn maybe_open_folder_after_save(config: &AppConfig, save_dir: &Path) -> AppResult<()> {
+    if !config.auto_open_folder_after_save {
+        return Ok(());
+    }
+
+    open_folder_with_system_file_manager(save_dir)
 }
 
 pub fn current_transfer_save_dir(config: &AppConfig) -> AppResult<String> {

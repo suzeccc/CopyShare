@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 const appShell = readFileSync("src/components/layout/AppShell.vue", "utf8");
 const button = readFileSync("src/components/ui/Button.vue", "utf8");
 const copyTextButton = readFileSync("src/components/ui/CopyTextButton.vue", "utf8");
+const switchControl = readFileSync("src/components/ui/Switch.vue", "utf8");
 const floatingPanel = readFileSync("src/components/layout/FloatingPanel.vue", "utf8");
 const home = readFileSync("src/pages/Home.vue", "utf8");
 const devices = readFileSync("src/pages/Devices.vue", "utf8");
@@ -27,6 +28,10 @@ assert.match(style, /html\[data-app-theme="win11Dark"\][\s\S]*--floating-surface
 assert.match(button, /var\(--button-primary-bg\)/);
 assert.match(button, /var\(--button-primary-bg-hover\)/);
 assert.doesNotMatch(button, /border-blue-500|bg-blue-600|hover:bg-blue-500/);
+
+assert.match(switchControl, /peer-checked:border-\[#35d366\]/);
+assert.match(switchControl, /peer-checked:bg-\[#35d366\]/);
+assert.doesNotMatch(switchControl, /peer-checked:bg-\[color:var\(--accent-bg\)\]/);
 
 assert.match(floatingPanel, /var\(--floating-control-bg\)/);
 assert.match(floatingPanel, /var\(--floating-muted-text\)/);
