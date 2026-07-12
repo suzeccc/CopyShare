@@ -1,4 +1,10 @@
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+};
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 
 use base64::Engine;
 use chrono::Utc;
@@ -45,6 +51,14 @@ pub fn save_history(app: &AppHandle, items: &[HistoryItem]) -> AppResult<()> {
 
 pub fn clear_history(app: &AppHandle) -> AppResult<()> {
     save_history(app, &[])
+}
+
+pub fn cache_size(app: &AppHandle) -> AppResult<u64> {
+    cache_size_from_app_data_dir(&app.path().app_data_dir()?)
+}
+
+pub fn clear_cache(app: &AppHandle) -> AppResult<u64> {
+    clear_cache_from_app_data_dir(&app.path().app_data_dir()?)
 }
 
 pub fn make_history_item(
@@ -229,6 +243,43 @@ fn prune_history_images(image_dir: &PathBuf, items: &[HistoryItem]) -> AppResult
     Ok(())
 }
 
+fn cache_size_from_app_data_dir(app_data_dir: &Path) -> AppResult<u64> {
+    let mut total = 0;
+    for dir_name in [HISTORY_IMAGE_DIR, HISTORY_THUMBNAIL_DIR] {
+        total += directory_size(&app_data_dir.join(dir_name))?;
+    }
+    Ok(total)
+}
+
+fn clear_cache_from_app_data_dir(app_data_dir: &Path) -> AppResult<u64> {
+    for dir_name in [HISTORY_IMAGE_DIR, HISTORY_THUMBNAIL_DIR] {
+        let dir = app_data_dir.join(dir_name);
+        if dir.exists() {
+            fs::remove_dir_all(&dir)?;
+        }
+        fs::create_dir_all(&dir)?;
+    }
+    cache_size_from_app_data_dir(app_data_dir)
+}
+
+fn directory_size(path: &Path) -> AppResult<u64> {
+    if !path.exists() {
+        return Ok(0);
+    }
+
+    let mut total = 0;
+    for entry in fs::read_dir(path)? {
+        let entry = entry?;
+        let metadata = entry.metadata()?;
+        if metadata.is_file() {
+            total += metadata.len();
+        } else if metadata.is_dir() {
+            total += directory_size(&entry.path())?;
+        }
+    }
+    Ok(total)
+}
+
 pub fn get_history_image_thumbnail(
     app: &AppHandle,
     item: &HistoryItem,
@@ -241,6 +292,216 @@ pub fn get_history_image_thumbnail(
         max_size.unwrap_or(DEFAULT_THUMBNAIL_SIZE),
     )
 }
+
+pub fn get_history_file_thumbnail(
+    app: &AppHandle,
+    item: &HistoryItem,
+    max_size: Option<u32>,
+) -> AppResult<String> {
+    if item.content_type != ClipboardContentType::FileList {
+        return Err(crate::error::AppError::InvalidInput(
+            "历史记录不是文件".to_string(),
+        ));
+    }
+
+    let max_size = max_size.unwrap_or(DEFAULT_THUMBNAIL_SIZE).max(1);
+    let thumbnail_dir = history_thumbnails_dir(app)?;
+    fs::create_dir_all(&thumbnail_dir)?;
+    let thumbnail_path = video_thumbnail_path(&thumbnail_dir, &item.id, max_size);
+    if thumbnail_path.exists() {
+        return Ok(base64::engine::general_purpose::STANDARD.encode(fs::read(thumbnail_path)?));
+    }
+
+    if let Some(thumbnail) = embedded_video_thumbnail(item)? {
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(thumbnail.trim())
+            .map_err(|error| crate::error::AppError::Clipboard(error.to_string()))?;
+        fs::write(&thumbnail_path, &bytes)?;
+        return Ok(base64::engine::general_purpose::STANDARD.encode(bytes));
+    }
+
+    let path = crate::file_transfer::file_path_from_history_item(item)?;
+    let thumbnail = video_thumbnail_base64_for_path(&path, max_size)?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(thumbnail.trim())
+        .map_err(|error| crate::error::AppError::Clipboard(error.to_string()))?;
+    fs::write(&thumbnail_path, &bytes)?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
+}
+
+pub fn get_history_file_preview_path(item: &HistoryItem) -> AppResult<String> {
+    if item.content_type != ClipboardContentType::FileList {
+        return Err(crate::error::AppError::InvalidInput(
+            "历史记录不是文件".to_string(),
+        ));
+    }
+
+    for entry in crate::clipboard::clipboard_content_to_file_entries(&item.content)? {
+        let path = PathBuf::from(entry.path);
+        if (is_video_file_name(&entry.name) || is_video_file_path(&path)) && path.exists() {
+            return Ok(path.to_string_lossy().to_string());
+        }
+    }
+
+    Err(crate::error::AppError::InvalidInput(
+        "视频文件不存在或尚未下载".to_string(),
+    ))
+}
+
+pub fn video_thumbnail_base64_for_path(path: &Path, max_size: u32) -> AppResult<String> {
+    if !is_video_file_path(path) {
+        return Err(crate::error::AppError::InvalidInput(
+            "文件不是视频".to_string(),
+        ));
+    }
+    Ok(base64::engine::general_purpose::STANDARD.encode(
+        thumbnail_from_windows_shell(path, max_size.max(1))?,
+    ))
+}
+
+fn embedded_video_thumbnail(item: &HistoryItem) -> AppResult<Option<String>> {
+    let entries = crate::clipboard::clipboard_content_to_file_entries(&item.content)?;
+    Ok(entries
+        .into_iter()
+        .find(|entry| {
+            is_video_file_name(&entry.name) || is_video_file_path(Path::new(&entry.path))
+        })
+        .and_then(|entry| entry.thumbnail)
+        .filter(|thumbnail| !thumbnail.trim().is_empty()))
+}
+
+fn is_video_file_path(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(is_video_file_name)
+}
+
+fn is_video_file_name(name: &str) -> bool {
+    name.rsplit_once('.')
+        .map(|(_, extension)| {
+            matches!(
+                extension.to_ascii_lowercase().as_str(),
+                "mp4" | "mov" | "mkv" | "avi" | "webm" | "m4v" | "wmv"
+            )
+        })
+        .unwrap_or(false)
+}
+
+#[cfg(target_os = "windows")]
+fn thumbnail_from_windows_shell(path: &Path, max_size: u32) -> AppResult<Vec<u8>> {
+    let temp_dir = std::env::temp_dir();
+    let script_path = temp_dir.join(format!("copyshare-video-thumb-{}.ps1", Uuid::new_v4()));
+    let output_path = temp_dir.join(format!("copyshare-video-thumb-{}.png", Uuid::new_v4()));
+    fs::write(&script_path, WINDOWS_SHELL_THUMBNAIL_SCRIPT)?;
+
+    let mut command = Command::new("powershell.exe");
+    let status = command
+        .creation_flags(0x08000000)
+        .arg("-NoProfile")
+        .arg("-NonInteractive")
+        .arg("-ExecutionPolicy")
+        .arg("Bypass")
+        .arg("-File")
+        .arg(&script_path)
+        .arg(path)
+        .arg(&output_path)
+        .arg(max_size.to_string())
+        .status()
+        .map_err(|error| crate::error::AppError::Clipboard(error.to_string()))?;
+
+    let _ = fs::remove_file(&script_path);
+    if !status.success() || !output_path.exists() {
+        let _ = fs::remove_file(&output_path);
+        return Err(crate::error::AppError::Clipboard(
+            "视频缩略图生成失败".to_string(),
+        ));
+    }
+
+    let bytes = fs::read(&output_path)?;
+    let _ = fs::remove_file(&output_path);
+    Ok(bytes)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn thumbnail_from_windows_shell(_path: &Path, _max_size: u32) -> AppResult<Vec<u8>> {
+    Err(crate::error::AppError::Clipboard(
+        "当前系统不支持视频缩略图".to_string(),
+    ))
+}
+
+#[cfg(target_os = "windows")]
+const WINDOWS_SHELL_THUMBNAIL_SCRIPT: &str = r#"
+$ErrorActionPreference = "Stop"
+Add-Type -AssemblyName System.Drawing
+Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @"
+using System;
+using System.Drawing;
+using System.Drawing.Imaging;
+using System.Runtime.InteropServices;
+
+[ComImport]
+[Guid("bcc18b79-ba16-442f-80c4-8a59c30c463b")]
+[InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+interface IShellItemImageFactory
+{
+    void GetImage([In] SIZE size, [In] SIIGBF flags, out IntPtr phbm);
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public struct SIZE
+{
+    public int cx;
+    public int cy;
+    public SIZE(int x, int y) { cx = x; cy = y; }
+}
+
+[Flags]
+public enum SIIGBF
+{
+    ResizeToFit = 0,
+    BiggerSizeOk = 1,
+    MemoryOnly = 2,
+    IconOnly = 4,
+    ThumbnailOnly = 8,
+    InCacheOnly = 16
+}
+
+public static class CopyShareShellThumbnail
+{
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = false)]
+    static extern void SHCreateItemFromParsingName(
+        string pszPath,
+        IntPtr pbc,
+        [MarshalAs(UnmanagedType.LPStruct)] Guid riid,
+        out IShellItemImageFactory ppv
+    );
+
+    [DllImport("gdi32.dll")]
+    static extern bool DeleteObject(IntPtr hObject);
+
+    public static void Save(string input, string output, int size)
+    {
+        IShellItemImageFactory factory;
+        SHCreateItemFromParsingName(input, IntPtr.Zero, typeof(IShellItemImageFactory).GUID, out factory);
+        IntPtr bitmapHandle;
+        factory.GetImage(new SIZE(size, size), SIIGBF.BiggerSizeOk | SIIGBF.ThumbnailOnly, out bitmapHandle);
+        try
+        {
+            using (var bitmap = Image.FromHbitmap(bitmapHandle))
+            {
+                bitmap.Save(output, ImageFormat.Png);
+            }
+        }
+        finally
+        {
+            DeleteObject(bitmapHandle);
+        }
+    }
+}
+"@
+
+[CopyShareShellThumbnail]::Save($args[0], $args[1], [int]$args[2])
+"#;
 
 fn get_history_image_thumbnail_from_dirs(
     image_dir: &PathBuf,
@@ -302,7 +563,12 @@ fn prune_history_thumbnails(thumbnail_dir: &PathBuf, items: &[HistoryItem]) -> A
 
     let keep_ids: std::collections::HashSet<String> = items
         .iter()
-        .filter(|item| item.content_type == ClipboardContentType::Image)
+        .filter(|item| {
+            matches!(
+                item.content_type,
+                ClipboardContentType::Image | ClipboardContentType::FileList
+            )
+        })
         .map(|item| safe_history_id(&item.id))
         .collect();
 
@@ -336,6 +602,10 @@ fn history_image_file_name(id: &str) -> String {
 
 fn history_thumbnail_path(thumbnail_dir: &PathBuf, id: &str, max_size: u32) -> PathBuf {
     thumbnail_dir.join(history_thumbnail_file_name(id, max_size))
+}
+
+fn video_thumbnail_path(thumbnail_dir: &PathBuf, id: &str, max_size: u32) -> PathBuf {
+    history_thumbnail_path(thumbnail_dir, id, max_size)
 }
 
 fn history_thumbnail_file_name(id: &str, max_size: u32) -> String {
@@ -634,6 +904,49 @@ mod tests {
         assert!(!thumb_dir.join("stale.png").exists());
         assert!(thumb_dir.join("keep-200.png").exists());
         fs::remove_dir_all(thumb_dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn cache_size_counts_history_images_and_thumbnails_only() -> AppResult<()> {
+        let app_data_dir = std::env::temp_dir().join(format!(
+            "copyshare-cache-size-{}",
+            Uuid::new_v4()
+        ));
+        let image_dir = app_data_dir.join(HISTORY_IMAGE_DIR);
+        let thumbnail_dir = app_data_dir.join(HISTORY_THUMBNAIL_DIR);
+        fs::create_dir_all(&image_dir)?;
+        fs::create_dir_all(&thumbnail_dir)?;
+        fs::write(image_dir.join("image.b64"), vec![1; 12])?;
+        fs::write(thumbnail_dir.join("thumb.png"), vec![2; 34])?;
+        fs::write(app_data_dir.join(HISTORY_FILE), vec![3; 56])?;
+
+        assert_eq!(cache_size_from_app_data_dir(&app_data_dir)?, 46);
+
+        fs::remove_dir_all(app_data_dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn clear_cache_removes_images_and_thumbnails_but_keeps_history_file() -> AppResult<()> {
+        let app_data_dir = std::env::temp_dir().join(format!(
+            "copyshare-clear-cache-{}",
+            Uuid::new_v4()
+        ));
+        let image_dir = app_data_dir.join(HISTORY_IMAGE_DIR);
+        let thumbnail_dir = app_data_dir.join(HISTORY_THUMBNAIL_DIR);
+        fs::create_dir_all(&image_dir)?;
+        fs::create_dir_all(&thumbnail_dir)?;
+        fs::write(image_dir.join("image.b64"), vec![1; 12])?;
+        fs::write(thumbnail_dir.join("thumb.png"), vec![2; 34])?;
+        fs::write(app_data_dir.join(HISTORY_FILE), "[]")?;
+
+        assert_eq!(clear_cache_from_app_data_dir(&app_data_dir)?, 0);
+        assert!(app_data_dir.join(HISTORY_FILE).exists());
+        assert!(!image_dir.join("image.b64").exists());
+        assert!(!thumbnail_dir.join("thumb.png").exists());
+
+        fs::remove_dir_all(app_data_dir)?;
         Ok(())
     }
 

@@ -1,5 +1,6 @@
 export type AppTheme = "copyBlue" | "win11Dark" | "macosLight" | "macosDark";
 export type CloseAction = "ask" | "minimize" | "exit";
+export type TranslationEngine = "google" | "ai";
 
 export interface AppConfig {
   configVersion: number;
@@ -25,4 +26,9 @@ export interface AppConfig {
   notifyDeviceStatus: boolean;
   notifySyncError: boolean;
   notificationClipboardPreview: boolean;
+  translationEngine: TranslationEngine;
+  translationApiUrl: string;
+  translationApiKey: string;
+  translationModel: string;
+  translationProxy: string;
 }

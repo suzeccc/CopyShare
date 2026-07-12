@@ -40,6 +40,8 @@ const displaySummary = computed(() =>
           :text="copyText"
           :content-type="item.contentType"
           :history-item-id="item.id"
+          :file-transfer-id="item.fileTransferId"
+          :file-transfer-status="item.fileTransferStatus"
           label="复制内容"
         />
       </div>

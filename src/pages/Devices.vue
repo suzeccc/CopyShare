@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 
 import DeviceCard from "@/components/devices/DeviceCard.vue";
 import ManualConnectForm from "@/components/devices/ManualConnectForm.vue";
+import MobileConnectDialog from "@/components/mobile/MobileConnectDialog.vue";
 import Button from "@/components/ui/Button.vue";
 import Card from "@/components/ui/Card.vue";
 import RefreshButton from "@/components/ui/RefreshButton.vue";
@@ -12,6 +13,7 @@ import { useToastStore } from "@/stores/toasts";
 const devicesStore = useDevicesStore();
 const toastStore = useToastStore();
 const lanDiscoveryScanning = ref(false);
+const showMobileConnectDialog = ref(false);
 const LAN_DISCOVERY_SETTLE_TIMEOUT_MS = 9000;
 const LAN_DISCOVERY_SETTLE_POLL_MS = 120;
 const LAN_DISCOVERY_RESPONSE_GRACE_MS = 600;
@@ -105,19 +107,40 @@ async function scanLanDevices() {
         <p class="mt-2 text-sm leading-6 text-[color:var(--muted-text)]">
           CopyShare 会自动发现同一局域网内正在运行的设备；也可以手动输入对方 IPv4 地址和端口连接。要双向同步，两台电脑都需要在设备列表里信任对方。
         </p>
-        <div class="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[color:var(--main-line-soft)] bg-[color:var(--field-bg)] p-4">
-          <div>
-            <p class="text-sm font-semibold text-white">局域网自动发现</p>
-            <p class="mt-1 text-xs text-[color:var(--muted-text)]">点击后会广播扫描同网段 CopyShare 设备，发现后显示在下方设备列表。</p>
-          </div>
-          <Button
-            data-lan-discovery-scan-button
-            variant="secondary"
-            :disabled="devicesStore.loading || lanDiscoveryScanning"
-            @click="scanLanDevices"
+        <div data-device-action-grid class="mt-5 grid gap-3 lg:grid-cols-2">
+          <div
+            data-lan-discovery-card
+            class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[color:var(--main-line-soft)] bg-[color:var(--field-bg)] p-4"
           >
-            {{ lanDiscoveryScanning ? "正在扫描..." : "扫描局域网设备" }}
-          </Button>
+            <div class="min-w-0">
+              <p class="text-sm font-semibold text-white">局域网自动发现</p>
+              <p class="mt-1 text-xs leading-5 text-[color:var(--muted-text)]">扫描同网段 CopyShare 电脑设备。</p>
+            </div>
+            <Button
+              data-lan-discovery-scan-button
+              variant="secondary"
+              :disabled="devicesStore.loading || lanDiscoveryScanning"
+              @click="scanLanDevices"
+            >
+              {{ lanDiscoveryScanning ? "正在扫描..." : "扫描局域网设备" }}
+            </Button>
+          </div>
+          <div
+            data-mobile-connect-card
+            class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[color:var(--main-line-soft)] bg-[color:var(--field-bg)] p-4"
+          >
+            <div class="min-w-0">
+              <p class="text-sm font-semibold text-white">手机连接</p>
+              <p class="mt-1 text-xs leading-5 text-[color:var(--muted-text)]">手机扫码临时传输剪贴板，无需安装 App。</p>
+            </div>
+            <Button
+              data-mobile-connect-dialog-button
+              variant="secondary"
+              @click="showMobileConnectDialog = true"
+            >
+              打开二维码连接
+            </Button>
+          </div>
         </div>
         <div class="mt-4 rounded-lg border border-[color:var(--main-line-soft)] bg-[color:var(--panel-bg-soft)] p-4">
           <ManualConnectForm
@@ -180,5 +203,7 @@ async function scanLanDevices() {
         输入对方 IP 后点击“连接”，设备会作为历史记录显示在这里。
       </div>
     </Card>
+
+    <MobileConnectDialog v-model="showMobileConnectDialog" />
   </div>
 </template>

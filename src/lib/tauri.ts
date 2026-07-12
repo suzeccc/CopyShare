@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
   getCurrentWindow,
@@ -20,6 +20,7 @@ import type {
 import type { HistoryItem } from "@/types/history";
 import type { MobileSessionView } from "@/types/mobile";
 import type { AppStatus } from "@/types/status";
+import type { TranslateResponse } from "@/types/translation";
 
 export type AppEventName =
   | "sync-status-changed"
@@ -140,6 +141,10 @@ export function openTransferFolder(): Promise<void> {
   return invoke<void>("open_transfer_folder");
 }
 
+export function openHistoryFileLocation(historyId: string): Promise<void> {
+  return invoke<void>("open_history_file_location", { historyId });
+}
+
 export function createMobileSession(): Promise<MobileSessionView> {
   return invoke<MobileSessionView>("create_mobile_session");
 }
@@ -160,6 +165,14 @@ export function clearHistory(): Promise<void> {
   return invoke<void>("clear_history");
 }
 
+export function getCacheSize(): Promise<number> {
+  return invoke<number>("get_cache_size");
+}
+
+export function clearCache(): Promise<number> {
+  return invoke<number>("clear_cache");
+}
+
 export type CopyHistoryResult = "copied" | "downloadStarted" | "downloading";
 
 export function copyHistoryItem(historyId: string): Promise<CopyHistoryResult> {
@@ -173,8 +186,27 @@ export function getHistoryImageThumbnail(
   return invoke<string>("get_history_image_thumbnail", { historyId, maxSize });
 }
 
+export function getHistoryFileThumbnail(
+  historyId: string,
+  maxSize = 200,
+): Promise<string> {
+  return invoke<string>("get_history_file_thumbnail", { historyId, maxSize });
+}
+
+export function getHistoryFilePreviewPath(historyId: string): Promise<string> {
+  return invoke<string>("get_history_file_preview_path", { historyId });
+}
+
+export function convertLocalFileSrc(filePath: string): string {
+  return convertFileSrc(filePath);
+}
+
 export function openExternalUrl(url: string): Promise<void> {
   return invoke<void>("open_external_url", { url });
+}
+
+export function translateText(text: string, targetLang: string): Promise<TranslateResponse> {
+  return invoke<TranslateResponse>("translate_text", { text, targetLang });
 }
 
 export function showMainWindow(): Promise<void> {

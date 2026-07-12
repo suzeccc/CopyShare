@@ -16,3 +16,6 @@ assert.match(logsPage, /v-for="item in historyStore\.items"/);
 assert.match(deviceCard, /已离线/);
 assert.match(deviceCard, /设备已断开连接/);
 assert.match(deviceCard, /const status = computed/);
+assert.match(deviceCard, /Monitor/);
+assert.match(deviceCard, /data-device-status-detail/);
+assert.match(deviceCard, /data-device-status-detail[\s\S]*<Monitor class="h-4 w-4/);

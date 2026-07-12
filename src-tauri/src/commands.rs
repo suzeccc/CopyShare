@@ -15,11 +15,13 @@ use crate::{
     models::{
         AppConfig, AppStatus, ClipboardContentType, ClipboardTextItem, CopyHistoryResult,
         DeviceInfo, FileTransferTask, HistoryItem, MobileSessionView, SelectedTransferFile,
+        TranslateResponse,
     },
     security,
     state::AppState,
     sync,
     tray,
+    translator,
     window_position,
 };
 
@@ -199,6 +201,16 @@ pub async fn get_clipboard_history() -> AppResult<Vec<ClipboardTextItem>> {
 }
 
 #[tauri::command]
+pub async fn translate_text(
+    state: State<'_, AppState>,
+    text: String,
+    target_lang: String,
+) -> AppResult<TranslateResponse> {
+    let config = state.config().await;
+    translator::translate_text_with_config(&config, text, target_lang).await
+}
+
+#[tauri::command]
 pub async fn select_file_for_transfer(
     app: AppHandle,
 ) -> AppResult<Option<SelectedTransferFile>> {
@@ -310,6 +322,20 @@ pub async fn open_transfer_folder(state: State<'_, AppState>) -> AppResult<()> {
 }
 
 #[tauri::command]
+pub async fn open_history_file_location(
+    state: State<'_, AppState>,
+    history_id: String,
+) -> AppResult<()> {
+    let item = state
+        .history()
+        .await
+        .into_iter()
+        .find(|item| item.id == history_id)
+        .ok_or_else(|| AppError::InvalidInput("history item does not exist".to_string()))?;
+    file_transfer::open_history_file_location(&item)
+}
+
+#[tauri::command]
 pub async fn create_mobile_session(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -364,6 +390,16 @@ pub async fn clear_history(app: AppHandle, state: State<'_, AppState>) -> AppRes
     history::clear_history(&app)?;
     state.replace_history(Vec::new()).await;
     Ok(())
+}
+
+#[tauri::command]
+pub async fn get_cache_size(app: AppHandle) -> AppResult<u64> {
+    history::cache_size(&app)
+}
+
+#[tauri::command]
+pub async fn clear_cache(app: AppHandle) -> AppResult<u64> {
+    history::clear_cache(&app)
 }
 
 #[tauri::command]
@@ -429,6 +465,38 @@ pub async fn get_history_image_thumbnail(
         .ok_or(AppError::InvalidInput("历史记录不存在".to_string()))?;
 
     history::get_history_image_thumbnail(&app, &item, max_size)
+}
+
+#[tauri::command]
+pub async fn get_history_file_thumbnail(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    history_id: String,
+    max_size: Option<u32>,
+) -> AppResult<String> {
+    let item = state
+        .history()
+        .await
+        .into_iter()
+        .find(|item| item.id == history_id)
+        .ok_or(AppError::InvalidInput("历史记录不存在".to_string()))?;
+
+    history::get_history_file_thumbnail(&app, &item, max_size)
+}
+
+#[tauri::command]
+pub async fn get_history_file_preview_path(
+    state: State<'_, AppState>,
+    history_id: String,
+) -> AppResult<String> {
+    let item = state
+        .history()
+        .await
+        .into_iter()
+        .find(|item| item.id == history_id)
+        .ok_or(AppError::InvalidInput("历史记录不存在".to_string()))?;
+
+    history::get_history_file_preview_path(&item)
 }
 
 #[tauri::command]

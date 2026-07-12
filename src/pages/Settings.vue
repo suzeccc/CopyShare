@@ -1,10 +1,14 @@
 <script setup lang="ts">
-import { onBeforeUnmount, reactive, ref, watch } from "vue";
+import { CheckCircle2, Globe2, Sparkles } from "lucide-vue-next";
+import type { Component } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 
 import Button from "@/components/ui/Button.vue";
 import Switch from "@/components/ui/Switch.vue";
 import { clampPort } from "@/lib/format";
 import {
+  clearCache,
+  getCacheSize,
   openTransferFolder,
   resetTransferSaveDir,
   selectTransferSaveDir,
@@ -13,7 +17,7 @@ import {
 import { useConfigStore } from "@/stores/config";
 import { useStatusStore } from "@/stores/status";
 import { useToastStore } from "@/stores/toasts";
-import type { AppConfig, AppTheme, CloseAction } from "@/types/config";
+import type { AppConfig, AppTheme, CloseAction, TranslationEngine } from "@/types/config";
 
 const configStore = useConfigStore();
 const statusStore = useStatusStore();
@@ -31,10 +35,22 @@ const closeActionOptions: Array<{ value: CloseAction; label: string; hint: strin
   { value: "minimize", label: "最小化到托盘", hint: "关闭窗口后继续在后台同步" },
   { value: "exit", label: "直接退出", hint: "关闭窗口时结束应用进程" },
 ];
+const translationEngineOptions: Array<{
+  value: TranslationEngine;
+  label: string;
+  hint: string;
+  icon: Component;
+}> = [
+  { value: "google", label: "Google 翻译", hint: "免费 · 无需配置", icon: Globe2 },
+  { value: "ai", label: "AI 翻译", hint: "使用自有 API", icon: Sparkles },
+];
 const basicSettingsSaving = ref(false);
 const syncContentSaving = ref(false);
 const notificationSettingsSaving = ref(false);
 const downloadLocationSaving = ref(false);
+const cacheSizeBytes = ref<number | null>(null);
+const cacheSizeLoading = ref(false);
+const cacheClearing = ref(false);
 
 type BasicSettingKey =
   | "deviceName"
@@ -44,7 +60,11 @@ type BasicSettingKey =
   | "autoStart"
   | "autoSync"
   | "saveHistory"
-  | "autoOpenFolderAfterSave";
+  | "autoOpenFolderAfterSave"
+  | "translationEngine"
+  | "translationApiUrl"
+  | "translationApiKey"
+  | "translationModel";
 type NotificationSettingKey =
   | "desktopNotifications"
   | "notifyClipboard"
@@ -57,6 +77,29 @@ function applyThemePreview(theme: AppTheme) {
   document.documentElement.dataset.appTheme = theme;
   document.body.dataset.appTheme = theme;
 }
+
+function formatCacheSize(bytes: number) {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = bytes / 1024;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+
+  return `${value >= 10 ? value.toFixed(1) : value.toFixed(2)} ${units[unitIndex]}`;
+}
+
+const cacheSizeLabel = computed(() => {
+  if (cacheSizeBytes.value === null) {
+    return cacheSizeLoading.value ? "缓存大小计算中" : "未计算";
+  }
+  return formatCacheSize(cacheSizeBytes.value);
+});
 
 watch(
   () => configStore.config,
@@ -94,6 +137,10 @@ watch(
 
 onBeforeUnmount(() => {
   applyThemePreview(configStore.config.theme);
+});
+
+onMounted(() => {
+  void loadCacheSize();
 });
 
 async function saveBasicSettings(
@@ -194,6 +241,56 @@ async function saveCloseAction(closeAction: CloseAction) {
   if (closeAction === configStore.config.closeAction) return;
   draft.closeAction = closeAction;
   await saveBasicSettings({ closeAction });
+}
+
+async function saveTranslationSetting(
+  patch: Partial<Pick<
+    AppConfig,
+    | "translationEngine"
+    | "translationApiUrl"
+    | "translationApiKey"
+    | "translationModel"
+  >>,
+) {
+  const normalizedPatch = { ...patch };
+  if ("translationApiUrl" in normalizedPatch) {
+    normalizedPatch.translationApiUrl = normalizedPatch.translationApiUrl?.trim() ?? "";
+  }
+  if ("translationApiKey" in normalizedPatch) {
+    normalizedPatch.translationApiKey = normalizedPatch.translationApiKey?.trim() ?? "";
+  }
+  if ("translationModel" in normalizedPatch) {
+    normalizedPatch.translationModel = normalizedPatch.translationModel?.trim() || "gpt-4o-mini";
+  }
+
+  await saveBasicSettings(normalizedPatch, { silent: true });
+}
+
+async function saveTranslationEngine(engine: TranslationEngine) {
+  if (engine === configStore.config.translationEngine) return;
+  draft.translationEngine = engine;
+  await saveTranslationSetting({ translationEngine: engine });
+}
+
+async function saveTranslationApiUrl() {
+  const translationApiUrl = draft.translationApiUrl.trim();
+  draft.translationApiUrl = translationApiUrl;
+  if (translationApiUrl === configStore.config.translationApiUrl) return;
+  await saveTranslationSetting({ translationApiUrl });
+}
+
+async function saveTranslationApiKey() {
+  const translationApiKey = draft.translationApiKey.trim();
+  draft.translationApiKey = translationApiKey;
+  if (translationApiKey === configStore.config.translationApiKey) return;
+  await saveTranslationSetting({ translationApiKey });
+}
+
+async function saveTranslationModel() {
+  const translationModel = draft.translationModel.trim() || "gpt-4o-mini";
+  draft.translationModel = translationModel;
+  if (translationModel === configStore.config.translationModel) return;
+  await saveTranslationSetting({ translationModel });
 }
 
 async function saveAutoStart(autoStart: boolean) {
@@ -363,6 +460,33 @@ async function testDesktopNotification() {
     toastStore.success("测试通知已发送");
   } catch (error) {
     toastStore.error(`测试通知发送失败：${String(error)}`);
+  }
+}
+
+async function loadCacheSize() {
+  if (cacheSizeLoading.value) return;
+
+  cacheSizeLoading.value = true;
+  try {
+    cacheSizeBytes.value = await getCacheSize();
+  } catch (error) {
+    toastStore.error(`计算缓存大小失败：${String(error)}`);
+  } finally {
+    cacheSizeLoading.value = false;
+  }
+}
+
+async function clearLocalCache() {
+  if (cacheClearing.value) return;
+
+  cacheClearing.value = true;
+  try {
+    cacheSizeBytes.value = await clearCache();
+    toastStore.success("缓存已清除");
+  } catch (error) {
+    toastStore.error(`清除缓存失败：${String(error)}`);
+  } finally {
+    cacheClearing.value = false;
   }
 }
 </script>
@@ -591,16 +715,156 @@ async function testDesktopNotification() {
       >
         <div data-settings-image2-row class="flex min-h-[54px] items-center justify-between gap-4 px-3 py-3">
           <span class="grid min-w-0 gap-1">
-            <span class="text-[15px] font-bold text-white">保存同步摘要</span>
-            <span class="text-[13px] text-[color:var(--muted-text)]">只保存摘要，不保存完整敏感剪贴板内容</span>
+            <span class="text-[15px] font-bold text-white">保存同步历史</span>
+            <span class="text-[13px] text-[color:var(--muted-text)]">保存剪贴板同步记录，关闭后不再记录新的同步历史</span>
           </span>
           <Switch
             control-only
             :model-value="draft.saveHistory"
-            label="保存同步摘要"
+            label="保存同步历史"
             :disabled="basicSettingsSaving"
             @update:model-value="saveHistorySetting"
           />
+        </div>
+      </div>
+    </section>
+
+    <section data-translation-settings class="grid gap-2">
+      <p class="text-[13px] font-bold text-[color:var(--subtle-text)]">翻译</p>
+      <div
+        data-settings-image2-card
+        class="overflow-hidden rounded-[10px] border border-[color:var(--main-line)] bg-[color:var(--panel-bg)]"
+      >
+        <div
+          data-settings-image2-row
+          class="flex min-h-[76px] flex-col gap-3 px-3 py-3 lg:flex-row lg:items-center lg:justify-between"
+        >
+          <span class="grid min-w-0 gap-1">
+            <span class="text-[15px] font-bold text-white">翻译方式</span>
+            <span class="text-[13px] text-[color:var(--muted-text)]">选择默认使用的翻译服务</span>
+          </span>
+          <div
+            data-translation-engine-picker
+            role="radiogroup"
+            aria-label="翻译方式"
+            class="grid w-full shrink-0 grid-cols-2 gap-1.5 rounded-[14px] border border-[color:var(--main-line-soft)] bg-[color:var(--field-bg)] p-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] lg:w-[500px]"
+          >
+            <button
+              v-for="option in translationEngineOptions"
+              :key="option.value"
+              type="button"
+              class="flex min-h-[52px] min-w-0 items-center gap-2.5 rounded-[10px] px-3 text-left transition duration-200"
+              :class="draft.translationEngine === option.value
+                ? 'bg-[linear-gradient(135deg,rgba(79,167,203,0.24),rgba(79,167,203,0.10))] text-[color:var(--accent-text)] shadow-[0_10px_26px_rgba(0,0,0,0.24),inset_0_1px_0_rgba(255,255,255,0.08)] ring-1 ring-inset ring-[color:var(--accent-line)]'
+                : 'text-slate-300 hover:bg-[rgba(255,255,255,0.035)] hover:text-white'"
+              :title="option.hint"
+              :aria-pressed="draft.translationEngine === option.value"
+              :disabled="basicSettingsSaving"
+              @click="saveTranslationEngine(option.value)"
+            >
+              <component :is="option.icon" class="h-4 w-4 shrink-0" />
+              <span class="min-w-0">
+                <span class="block truncate text-[13px] font-bold">{{ option.label }}</span>
+                <span class="block truncate text-[12px] opacity-75">{{ option.hint }}</span>
+              </span>
+            </button>
+          </div>
+        </div>
+
+        <div
+          v-if="draft.translationEngine === 'google'"
+          data-translation-google-ready
+          class="flex min-h-[62px] items-center gap-3 border-t border-[color:var(--main-line-soft)] bg-[color:var(--main-bg-muted)] px-3 py-3"
+        >
+          <span
+            class="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-[color:var(--accent-line)] bg-[color:var(--accent-soft)] text-[color:var(--accent-text)]"
+          >
+            <CheckCircle2 class="h-4 w-4" />
+          </span>
+          <span class="grid min-w-0 gap-0.5">
+            <span class="text-[14px] font-bold text-white">Google 翻译已启用</span>
+            <span class="text-[13px] text-[color:var(--muted-text)]">无需 API Key 或额外设置</span>
+          </span>
+        </div>
+
+        <div
+          v-else
+          data-translation-ai-settings
+          class="border-t border-[color:var(--main-line-soft)]"
+        >
+          <div class="flex items-center gap-3 bg-[color:var(--main-bg-muted)] px-3 py-3">
+            <span
+              class="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-[color:var(--accent-line)] bg-[color:var(--accent-soft)] text-[color:var(--accent-text)]"
+            >
+              <Sparkles class="h-4 w-4" />
+            </span>
+            <span class="grid min-w-0 gap-0.5">
+              <span class="text-[14px] font-bold text-white">AI 服务配置</span>
+              <span class="text-[13px] text-[color:var(--muted-text)]">使用 OpenAI 兼容服务，需要填写以下信息</span>
+            </span>
+          </div>
+
+          <label
+            data-settings-image2-row
+            class="flex min-h-[64px] flex-col items-stretch justify-between gap-2 border-t border-[color:var(--main-line-soft)] px-3 py-3 lg:flex-row lg:items-center lg:gap-4"
+          >
+            <span class="grid min-w-0 flex-1 gap-1">
+              <span class="text-[14px] font-bold text-white">服务地址（必填）</span>
+              <span class="text-[13px] text-[color:var(--muted-text)]">OpenAI 兼容接口地址</span>
+            </span>
+            <input
+              v-model="draft.translationApiUrl"
+              data-settings-image2-field
+              class="h-9 w-full rounded-md border-0 bg-[color:var(--field-bg)] px-3 text-[13px] text-white outline-none ring-1 ring-transparent transition focus:ring-[color:var(--accent-line)] lg:w-[min(430px,50vw)]"
+              placeholder="https://api.openai.com"
+              inputmode="url"
+              spellcheck="false"
+              :disabled="basicSettingsSaving"
+              @blur="saveTranslationApiUrl"
+              @keydown.enter.prevent="saveTranslationApiUrl"
+            >
+          </label>
+
+          <label
+            data-settings-image2-row
+            class="flex min-h-[64px] flex-col items-stretch justify-between gap-2 border-t border-[color:var(--main-line-soft)] px-3 py-3 lg:flex-row lg:items-center lg:gap-4"
+          >
+            <span class="grid min-w-0 flex-1 gap-1">
+              <span class="text-[14px] font-bold text-white">API 密钥（必填）</span>
+              <span class="text-[13px] text-[color:var(--muted-text)]">仅保存在本机配置文件中</span>
+            </span>
+            <input
+              v-model="draft.translationApiKey"
+              data-settings-image2-field
+              class="h-9 w-full rounded-md border-0 bg-[color:var(--field-bg)] px-3 text-[13px] text-white outline-none ring-1 ring-transparent transition focus:ring-[color:var(--accent-line)] lg:w-[min(430px,50vw)]"
+              type="password"
+              placeholder="sk-..."
+              autocomplete="off"
+              :disabled="basicSettingsSaving"
+              @blur="saveTranslationApiKey"
+              @keydown.enter.prevent="saveTranslationApiKey"
+            >
+          </label>
+
+          <label
+            data-settings-image2-row
+            class="flex min-h-[64px] flex-col items-stretch justify-between gap-2 border-t border-[color:var(--main-line-soft)] px-3 py-3 lg:flex-row lg:items-center lg:gap-4"
+          >
+            <span class="grid min-w-0 flex-1 gap-1">
+              <span class="text-[14px] font-bold text-white">模型名称</span>
+              <span class="text-[13px] text-[color:var(--muted-text)]">使用服务支持的模型名称</span>
+            </span>
+            <input
+              v-model="draft.translationModel"
+              data-settings-image2-field
+              class="h-9 w-full rounded-md border-0 bg-[color:var(--field-bg)] px-3 text-[13px] text-white outline-none ring-1 ring-transparent transition focus:ring-[color:var(--accent-line)] lg:w-[min(300px,40vw)]"
+              placeholder="gpt-4o-mini"
+              spellcheck="false"
+              :disabled="basicSettingsSaving"
+              @blur="saveTranslationModel"
+              @keydown.enter.prevent="saveTranslationModel"
+            >
+          </label>
         </div>
       </div>
     </section>
@@ -737,6 +1001,49 @@ async function testDesktopNotification() {
             :disabled="basicSettingsSaving"
             @update:model-value="saveAutoSync"
           />
+        </div>
+      </div>
+    </section>
+
+    <section data-cache-management-settings class="grid gap-2">
+      <p class="text-[13px] font-bold text-[color:var(--subtle-text)]">缓存管理</p>
+      <div
+        data-settings-image2-card
+        class="overflow-hidden rounded-[10px] border border-[color:var(--main-line)] bg-[color:var(--panel-bg)]"
+      >
+        <div
+          data-settings-image2-row
+          class="flex min-h-[68px] flex-col gap-3 px-3 py-3 lg:flex-row lg:items-center lg:justify-between"
+        >
+          <span class="grid min-w-0 gap-1">
+            <span class="text-[15px] font-bold text-white">缓存占用</span>
+            <span class="text-[13px] text-[color:var(--muted-text)]">
+              包含图片历史、图片缩略图、视频缩略图等本地缓存
+            </span>
+          </span>
+          <div class="flex flex-wrap items-center justify-end gap-2">
+            <span
+              class="h-8 min-w-[104px] rounded-md bg-[color:var(--field-bg)] px-3 text-center font-mono text-[13px] font-bold leading-8 text-slate-200"
+            >
+              {{ cacheSizeLabel }}
+            </span>
+            <Button
+              size="sm"
+              variant="secondary"
+              :disabled="cacheSizeLoading || cacheClearing"
+              @click="loadCacheSize"
+            >
+              刷新大小
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              :disabled="cacheClearing || cacheSizeLoading || cacheSizeBytes === 0"
+              @click="clearLocalCache"
+            >
+              清除缓存
+            </Button>
+          </div>
         </div>
       </div>
     </section>

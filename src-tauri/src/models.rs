@@ -107,6 +107,31 @@ impl Default for CloseAction {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum TranslationEngine {
+    Google,
+    Ai,
+}
+
+impl Default for TranslationEngine {
+    fn default() -> Self {
+        Self::Google
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TranslateResponse {
+    pub source_text: String,
+    pub target_text: String,
+    pub engine: TranslationEngine,
+}
+
+fn default_translation_model() -> String {
+    "gpt-4o-mini".to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AppConfig {
@@ -147,6 +172,16 @@ pub struct AppConfig {
     pub notify_sync_error: bool,
     #[serde(default)]
     pub notification_clipboard_preview: bool,
+    #[serde(default)]
+    pub translation_engine: TranslationEngine,
+    #[serde(default)]
+    pub translation_api_url: String,
+    #[serde(default)]
+    pub translation_api_key: String,
+    #[serde(default = "default_translation_model")]
+    pub translation_model: String,
+    #[serde(default)]
+    pub translation_proxy: String,
 }
 
 fn default_true() -> bool {
@@ -156,7 +191,7 @@ fn default_true() -> bool {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            config_version: 5,
+            config_version: 6,
             device_name: "CopyShare".to_string(),
             device_id: new_device_id(),
             theme: AppTheme::Win11Dark,
@@ -179,6 +214,11 @@ impl Default for AppConfig {
             notify_device_status: true,
             notify_sync_error: true,
             notification_clipboard_preview: true,
+            translation_engine: TranslationEngine::Google,
+            translation_api_url: String::new(),
+            translation_api_key: String::new(),
+            translation_model: default_translation_model(),
+            translation_proxy: String::new(),
         }
     }
 }
@@ -320,6 +360,8 @@ pub struct FileTransferFile {
     pub name: String,
     pub size: u64,
     pub sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thumbnail: Option<String>,
     pub saved_path: Option<String>,
     pub transferred_bytes: u64,
     pub status: FileTransferFileStatus,
@@ -361,6 +403,8 @@ pub struct SelectedTransferFile {
     pub name: String,
     pub size: u64,
     pub sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thumbnail: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -390,6 +434,8 @@ pub struct FileOfferFile {
     pub file_name: String,
     pub file_size: u64,
     pub sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thumbnail: Option<String>,
     pub token: String,
 }
 
@@ -541,6 +587,7 @@ mod file_transfer_wire_tests {
                     file_name: "a.txt".to_string(),
                     file_size: 3,
                     sha256: "hash-a".to_string(),
+                    thumbnail: None,
                     token: "token-a".to_string(),
                 },
                 FileOfferFile {
@@ -548,6 +595,7 @@ mod file_transfer_wire_tests {
                     file_name: "b.txt".to_string(),
                     file_size: 4,
                     sha256: "hash-b".to_string(),
+                    thumbnail: None,
                     token: "token-b".to_string(),
                 },
             ],

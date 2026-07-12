@@ -4,9 +4,9 @@ import {
   ArrowLeftRight,
   Check,
   Copy,
+  Monitor,
   QrCode,
   RefreshCw,
-  ShieldCheck,
   Smartphone,
   X,
 } from "lucide-vue-next";
@@ -261,7 +261,7 @@ function errorMessage(error: unknown, fallback: string) {
             <section data-mobile-clipboard-card class="min-w-0 overflow-hidden rounded-[22px] border border-[color:var(--main-line-soft)] bg-[color:var(--field-bg)] p-4">
               <div class="flex items-center justify-between gap-3">
                 <p class="flex items-center gap-2 text-sm font-semibold text-white">
-                  <Smartphone class="h-4 w-4 text-[color:var(--accent-text)]" />
+                  <Monitor class="h-4 w-4 text-[color:var(--accent-text)]" />
                   电脑剪贴板
                 </p>
               </div>
@@ -286,7 +286,7 @@ function errorMessage(error: unknown, fallback: string) {
             <section data-mobile-submit-card class="min-w-0 overflow-hidden rounded-[22px] border border-[color:var(--main-line-soft)] bg-[color:var(--field-bg)] p-4">
               <div class="flex items-center justify-between gap-3">
                 <p class="flex items-center gap-2 text-sm font-semibold text-white">
-                  <ShieldCheck class="h-4 w-4 text-emerald-300" />
+                  <Smartphone class="h-4 w-4 text-[color:var(--accent-text)]" />
                   手机提交
                 </p>
               </div>

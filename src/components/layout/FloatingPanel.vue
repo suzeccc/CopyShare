@@ -2,10 +2,23 @@
 import { Activity, Clipboard, Gauge, LayoutDashboard, Minus, MoreHorizontal, Wifi, X } from "lucide-vue-next";
 import { computed, ref } from "vue";
 
+import ClipboardFileDownloadStatus from "@/components/history/ClipboardFileDownloadStatus.vue";
+import HistoryFileThumb from "@/components/history/HistoryFileThumb.vue";
 import HistoryImageThumb from "@/components/history/HistoryImageThumb.vue";
 import CopyTextButton from "@/components/ui/CopyTextButton.vue";
-import type { ClipboardPreviewItem } from "@/lib/historyPreview";
-import { copyHistoryItem, startWindowDrag } from "@/lib/tauri";
+import {
+  getClipboardFileCardAction,
+  isClipboardFileCardInteractive,
+} from "@/lib/clipboardFileDownload";
+import { getClipboardLinkUrl, splitClipboardFileSummary, type ClipboardPreviewItem } from "@/lib/historyPreview";
+import {
+  copyHistoryItem,
+  openExternalUrl,
+  openHistoryFileLocation,
+  openTransferFolder,
+  startWindowDrag,
+} from "@/lib/tauri";
+import { useHistoryStore } from "@/stores/history";
 import { useToastStore } from "@/stores/toasts";
 import { startWindowDragFromMouseEvent } from "@/lib/windowDrag";
 
@@ -26,6 +39,7 @@ const emit = defineEmits<{
 
 const showClipboardHistoryModal = ref(false);
 const toastStore = useToastStore();
+const historyStore = useHistoryStore();
 
 const statusClass = computed(() =>
   props.running
@@ -51,18 +65,76 @@ async function handleClipboardItemClick(item: ClipboardPreviewItem) {
     return;
   }
 
+  const action = getClipboardFileCardAction(
+    item,
+    historyStore.fileDownloadActivity(item.fileTransferId),
+  );
+  if (action === "none") {
+    return;
+  }
+  if (action === "openSourceLocation") {
+    try {
+      await openHistoryFileLocation(item.id);
+      toastStore.success("已打开文件位置");
+    } catch (error) {
+      toastStore.error(`打开文件位置失败：${String(error)}`);
+    }
+    return;
+  }
+  if (action === "downloading") {
+    toastStore.info("文件正在下载");
+    return;
+  }
+  if (action === "openDownloadFolder") {
+    try {
+      await openTransferFolder();
+      toastStore.success("已打开文件下载位置");
+    } catch (error) {
+      toastStore.error(`打开文件下载位置失败：${String(error)}`);
+    }
+    return;
+  }
+  if (action === "unavailable") {
+    toastStore.error("文件下载已失效");
+    return;
+  }
+
+  if (action === "download") {
+    historyStore.beginFileDownload(item.fileTransferId);
+  }
+
   try {
     const result = await copyHistoryItem(item.id);
     if (result === "downloadStarted") {
-      toastStore.success("开始下载，完成后会写入剪贴板");
+      historyStore.beginFileDownload(item.fileTransferId);
+      toastStore.success("开始下载");
     } else if (result === "downloading") {
-      toastStore.success("文件正在下载");
+      historyStore.beginFileDownload(item.fileTransferId);
+      toastStore.info("文件正在下载");
     } else {
       toastStore.success("文件已复制");
     }
-  } catch {
-    toastStore.error("文件复制失败");
+  } catch (error) {
+    historyStore.failFileDownload(item.fileTransferId, String(error));
+    toastStore.error("文件下载失败");
   }
+}
+
+async function openClipboardLink(item: ClipboardPreviewItem) {
+  const url = getClipboardLinkUrl(item.text);
+  if (!url) {
+    return;
+  }
+
+  try {
+    await openExternalUrl(url);
+  } catch (error) {
+    toastStore.error(`打开链接失败：${String(error)}`);
+  }
+}
+
+function clipboardFileSummary(item: ClipboardPreviewItem) {
+  return splitClipboardFileSummary(item.text);
 }
 </script>
 
@@ -156,7 +228,10 @@ async function handleClipboardItemClick(item: ClipboardPreviewItem) {
           v-for="item in clipboardItems"
           :key="item.id"
           class="flex min-h-6 items-center gap-2 border-b border-[color:var(--main-line-soft)] py-0.5 last:border-b-0"
-          :class="{ 'cursor-pointer': item.contentType === 'fileList' }"
+          :class="{
+            'cursor-pointer': isClipboardFileCardInteractive(item, historyStore.fileDownloadActivity(item.fileTransferId)),
+            'cursor-wait': isClipboardFileCardInteractive(item, historyStore.fileDownloadActivity(item.fileTransferId)) && historyStore.isFileDownloadActive(item.fileTransferId),
+          }"
           @click="handleClipboardItemClick(item)"
         >
           <HistoryImageThumb
@@ -165,13 +240,50 @@ async function handleClipboardItemClick(item: ClipboardPreviewItem) {
             :max-size="96"
             class="!h-8 !w-10"
           />
-          <p data-floating-clipboard-text class="line-clamp-1 min-w-0 flex-1 break-words text-xs font-semibold leading-4 text-[color:var(--floating-strong-text)]">
+          <div
+            v-if="item.contentType === 'fileList'"
+            data-floating-clipboard-file-summary
+            class="flex min-w-0 flex-1 select-none items-center gap-2.5 text-xs font-semibold leading-4 text-[color:var(--floating-strong-text)]"
+          >
+            <HistoryFileThumb
+              :history-id="item.id"
+              :file-name="clipboardFileSummary(item).name"
+              :max-size="96"
+              compact
+            />
+            <div class="flex min-w-0 items-baseline gap-2.5">
+              <span class="min-w-0 truncate">{{ clipboardFileSummary(item).name }}</span>
+              <span
+                v-if="clipboardFileSummary(item).size"
+                class="shrink-0 text-[10px] font-medium text-[color:var(--floating-muted-text)]"
+              >
+                {{ clipboardFileSummary(item).size }}
+              </span>
+            </div>
+          </div>
+          <button
+            v-else-if="getClipboardLinkUrl(item.text)"
+            data-floating-clipboard-link-button
+            class="line-clamp-1 w-fit max-w-full min-w-0 cursor-pointer select-none break-words text-left text-xs font-semibold leading-4 text-[color:var(--floating-strong-text)] underline-offset-2 transition-colors duration-150 hover:text-[color:var(--accent-text)] hover:underline"
+            type="button"
+            @click.stop="openClipboardLink(item)"
+          >
+            {{ item.text }}
+          </button>
+          <p v-else data-floating-clipboard-text class="line-clamp-1 min-w-0 flex-1 break-words text-xs font-semibold leading-4 text-[color:var(--floating-strong-text)]">
             {{ item.text }}
           </p>
+          <ClipboardFileDownloadStatus
+            v-if="item.contentType === 'fileList'"
+            :item="item"
+            compact
+          />
           <CopyTextButton
             :text="item.text"
             :content-type="item.contentType"
             :history-item-id="item.id"
+            :file-transfer-id="item.fileTransferId"
+            :file-transfer-status="item.fileTransferStatus"
             icon-only
             label="复制内容"
             copied-label="已复制"
@@ -212,7 +324,10 @@ async function handleClipboardItemClick(item: ClipboardPreviewItem) {
             :key="item.id"
             data-floating-clipboard-history-row
             class="grid grid-cols-[minmax(0,1fr)_auto] gap-2 border-b border-[color:var(--floating-stat-line)] py-2 last:border-b-0"
-            :class="{ 'cursor-pointer': item.contentType === 'fileList' }"
+            :class="{
+              'cursor-pointer': isClipboardFileCardInteractive(item, historyStore.fileDownloadActivity(item.fileTransferId)),
+              'cursor-wait': isClipboardFileCardInteractive(item, historyStore.fileDownloadActivity(item.fileTransferId)) && historyStore.isFileDownloadActive(item.fileTransferId),
+            }"
             @click="handleClipboardItemClick(item)"
           >
             <div class="flex min-w-0 gap-2">
@@ -222,15 +337,44 @@ async function handleClipboardItemClick(item: ClipboardPreviewItem) {
                 :max-size="120"
                 class="!h-10 !w-14"
               />
-              <p data-floating-clipboard-history-text class="min-w-0 whitespace-pre-wrap break-all text-xs font-semibold leading-5 text-[color:var(--floating-strong-text)]">
+              <div
+                v-if="item.contentType === 'fileList'"
+                data-floating-clipboard-file-summary
+                class="flex min-w-0 flex-1 select-none items-baseline gap-2.5 text-xs font-semibold leading-5 text-[color:var(--floating-strong-text)]"
+              >
+                <span class="min-w-0 truncate">{{ clipboardFileSummary(item).name }}</span>
+                <span
+                  v-if="clipboardFileSummary(item).size"
+                  class="shrink-0 text-[10px] font-medium text-[color:var(--floating-muted-text)]"
+                >
+                  {{ clipboardFileSummary(item).size }}
+                </span>
+              </div>
+              <button
+                v-else-if="getClipboardLinkUrl(item.text)"
+                data-floating-clipboard-link-button
+                class="w-fit max-w-full min-w-0 cursor-pointer select-none whitespace-pre-wrap break-all text-left text-xs font-semibold leading-5 text-[color:var(--floating-strong-text)] underline-offset-2 transition-colors duration-150 hover:text-[color:var(--accent-text)] hover:underline"
+                type="button"
+                @click.stop="openClipboardLink(item)"
+              >
+                {{ item.text }}
+              </button>
+              <p v-else data-floating-clipboard-history-text class="min-w-0 whitespace-pre-wrap break-all text-xs font-semibold leading-5 text-[color:var(--floating-strong-text)]">
                 {{ item.text }}
               </p>
             </div>
             <div class="flex shrink-0 flex-col items-end gap-1.5">
+              <ClipboardFileDownloadStatus
+                v-if="item.contentType === 'fileList'"
+                :item="item"
+                compact
+              />
               <CopyTextButton
                 :text="item.text"
                 :content-type="item.contentType"
                 :history-item-id="item.id"
+                :file-transfer-id="item.fileTransferId"
+                :file-transfer-status="item.fileTransferStatus"
                 icon-only
                 label="复制内容"
                 copied-label="已复制"

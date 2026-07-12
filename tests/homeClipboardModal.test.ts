@@ -47,6 +47,9 @@ assert.match(clipboardPage, /data-clipboard-history-actions/);
 assert.match(clipboardPage, /data-clipboard-history-text/);
 assert.match(clipboardPage, /\bbreak-all\b/);
 assert.match(clipboardPage, /data-clipboard-card-main/);
+assert.match(clipboardPage, /data-clipboard-card-header/);
+assert.match(clipboardPage, /data-clipboard-card-content/);
+assert.match(clipboardPage, /data-clipboard-card-footer-row/);
 assert.match(clipboardPage, /data-clipboard-card-meta/);
 assert.match(clipboardPage, /data-clipboard-card-time/);
 assert.match(clipboardPage, /data-clipboard-card-footer class="[^"]*text-\[color:var\(--clipboard-card-footer-text\)\]/);
@@ -71,6 +74,18 @@ assert.match(clipboardPage, /<CopyTextButton/);
 assert.match(clipboardPage, /:text="item\.text"/);
 assert.match(clipboardPage, /:content-type="item\.contentType"/);
 assert.match(clipboardPage, /:history-item-id="item\.id"/);
+
+const cardMainClasses = [...clipboardPage.matchAll(/data-clipboard-card-main class="([^"]*)"/g)].map(
+  (match) => match[1] ?? "",
+);
+const cardActionClasses = [...clipboardPage.matchAll(/data-clipboard-history-actions class="([^"]*)"/g)].map(
+  (match) => match[1] ?? "",
+);
+assert.equal(cardMainClasses.length, 2);
+assert.equal(cardMainClasses.every((className) => className.includes("pl-4")), true);
+assert.equal(cardMainClasses.every((className) => !className.includes("pr-32")), true);
+assert.equal(cardActionClasses.length, 2);
+assert.equal(cardActionClasses.every((className) => !className.includes("absolute")), true);
 
 for (const accentColor of ["#007aff", "#af52de", "#34a851", "#7b5520"]) {
   assert.match(clipboardPage, new RegExp(`bg-\\[\\${accentColor}\\]`));

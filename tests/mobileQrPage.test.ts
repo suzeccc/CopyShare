@@ -50,6 +50,11 @@ assert.match(page, /data-mobile-content-panel[^>]*w-full[^>]*max-w-full[^>]*over
 assert.match(page, /data-mobile-summary-grid[^>]*lg:grid-cols-\[minmax\(0,1fr\)_minmax\(0,1fr\)\]/);
 assert.match(page, /data-mobile-clipboard-card[^>]*min-w-0[^>]*overflow-hidden/);
 assert.match(page, /data-mobile-submit-card[^>]*min-w-0[^>]*overflow-hidden/);
+assert.match(page, /Monitor/);
+assert.match(page, /<Monitor class="h-4 w-4 text-\[color:var\(--accent-text\)\]" \/>\s*电脑剪贴板/);
+assert.match(page, /<Smartphone class="h-4 w-4 text-\[color:var\(--accent-text\)\]" \/>\s*手机提交/);
+assert.doesNotMatch(page, /<Smartphone class="h-4 w-4 text-\[color:var\(--accent-text\)\]" \/>\s*电脑剪贴板/);
+assert.doesNotMatch(page, /<ShieldCheck class="h-4 w-4 text-emerald-300" \/>\s*手机提交/);
 assert.match(page, /data-mobile-qr-rail[\s\S]*data-mobile-content-panel/);
 assert.match(page, /grid-cols-\[minmax\(320px,0\.46fr\)_minmax\(0,0\.54fr\)\]/);
 assert.match(page, /max-w-\[320px\]/);

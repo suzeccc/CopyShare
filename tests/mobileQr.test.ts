@@ -10,9 +10,9 @@ assert.match(router, /import MobileQr from "@\/pages\/MobileQr\.vue"/);
 assert.match(router, /path: "\/mobile"/);
 assert.match(router, /name: "mobile"/);
 
-assert.match(sidebar, /Smartphone/);
-assert.match(sidebar, /path: "\/mobile"/);
-assert.match(sidebar, /手机连接/);
+assert.doesNotMatch(sidebar, /\n\s+Smartphone,\n/);
+assert.doesNotMatch(sidebar, /path: "\/mobile"/);
+assert.doesNotMatch(sidebar, /label: "手机连接"/);
 
 assert.match(tauri, /createMobileSession/);
 assert.match(tauri, /invoke<MobileSessionView>\("create_mobile_session"/);

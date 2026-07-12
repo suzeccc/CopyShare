@@ -376,6 +376,7 @@ mod tests {
             name: name.to_string(),
             size: 1,
             sha256: "hash".to_string(),
+            thumbnail: None,
             saved_path: None,
             transferred_bytes: 0,
             status: FileTransferFileStatus::Pending,

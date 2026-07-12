@@ -7,12 +7,14 @@ import Home from "@/pages/Home.vue";
 import Logs from "@/pages/Logs.vue";
 import MobileQr from "@/pages/MobileQr.vue";
 import Settings from "@/pages/Settings.vue";
+import Translate from "@/pages/Translate.vue";
 
 const router = createRouter({
   history: createWebHashHistory(),
   routes: [
     { path: "/", name: "home", component: Home },
     { path: "/clipboard", name: "clipboard", component: Clipboard },
+    { path: "/translate", name: "translate", component: Translate },
     { path: "/devices", name: "devices", component: Devices },
     { path: "/mobile", name: "mobile", component: MobileQr },
     { path: "/logs", name: "logs", component: Logs },

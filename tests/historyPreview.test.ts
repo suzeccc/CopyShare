@@ -1,10 +1,15 @@
 import assert from "node:assert/strict";
 
 import {
+  CLIPBOARD_PREVIEW_LIMIT,
+  FLOATING_CLIPBOARD_PREVIEW_LIMIT,
+  CLIPBOARD_CATEGORIES,
   filterClipboardItems,
+  getClipboardLinkUrl,
   getClipboardDisplayType,
   getFloatingClipboardItems,
   getRecentClipboardItems,
+  splitClipboardFileSummary,
 } from "../src/lib/historyPreview.ts";
 import type { HistoryItem } from "../src/types/history.ts";
 
@@ -27,8 +32,34 @@ function systemItem(index: number) {
 }
 
 function stripCreatedAt<T>(value: T): T {
-  return JSON.parse(JSON.stringify(value, (key, item) => (key === "createdAt" ? undefined : item)));
+  return JSON.parse(JSON.stringify(value, (key, item) =>
+    key === "createdAt" || key === "direction" ? undefined : item,
+  ));
 }
+
+assert.equal(CLIPBOARD_PREVIEW_LIMIT, 20);
+assert.equal(FLOATING_CLIPBOARD_PREVIEW_LIMIT, 10);
+assert.deepEqual(CLIPBOARD_CATEGORIES, ["全部", "文本", "图片", "视频", "链接", "文件"]);
+
+assert.deepEqual(splitClipboardFileSummary("茶话间.lnk 897 B"), {
+  name: "茶话间.lnk",
+  size: "897 B",
+});
+assert.deepEqual(splitClipboardFileSummary("安装包.zip 1.25 GB"), {
+  name: "安装包.zip",
+  size: "1.25 GB",
+});
+assert.deepEqual(splitClipboardFileSummary("没有大小的文件.txt"), {
+  name: "没有大小的文件.txt",
+  size: null,
+});
+
+assert.equal(getClipboardLinkUrl("https://copyshare.example/download"), "https://copyshare.example/download");
+assert.equal(
+  getClipboardLinkUrl("See https://copyshare.example/docs now"),
+  "https://copyshare.example/docs",
+);
+assert.equal(getClipboardLinkUrl("plain clipboard text"), null);
 
 const items = getRecentClipboardItems([
   historyItem({ id: "1", summary: "Summary one", content: "  Full one  ", sourceDevice: "Office-PC" }),
@@ -44,6 +75,14 @@ const items = getRecentClipboardItems([
   historyItem({ id: "11", summary: "Summary eleven", content: "Full eleven", sourceDevice: "Spare" }),
 ]);
 
+assert.equal(items[0]?.direction, "local");
+assert.equal(
+  getRecentClipboardItems([
+    historyItem({ id: "remote-file", direction: "remote", summary: "remote.zip 1 MB", contentType: "fileList" }),
+  ])[0]?.direction,
+  "remote",
+);
+
 assert.deepEqual(stripCreatedAt(items), [
   { id: "1", text: "Full one", contentType: "text", sourceDevice: "Office-PC", syncStatus: "synced" },
   { id: "2", text: "Summary two", contentType: "text", sourceDevice: "Laptop", syncStatus: "synced" },
@@ -55,6 +94,7 @@ assert.deepEqual(stripCreatedAt(items), [
   { id: "8", text: "Full eight", contentType: "text", sourceDevice: "Studio", syncStatus: "synced" },
   { id: "9", text: "Full nine", contentType: "text", sourceDevice: "Air", syncStatus: "synced" },
   { id: "10", text: "Full ten", contentType: "text", sourceDevice: "Pro", syncStatus: "synced" },
+  { id: "11", text: "Full eleven", contentType: "text", sourceDevice: "Spare", syncStatus: "synced" },
 ]);
 
 assert.deepEqual(
@@ -124,6 +164,9 @@ const imageItem = getRecentClipboardItems([
 const fileItem = getRecentClipboardItems([
   historyItem({ id: "file", summary: "C:\\Users\\SuZe\\Desktop\\setup.exe", contentType: "fileList" }),
 ])[0];
+const videoItem = getRecentClipboardItems([
+  historyItem({ id: "video", summary: "ca693499c52f61d3e1cdb505140927af.mp4 907.1 KB", contentType: "fileList" }),
+])[0];
 const apiKeyItem = getRecentClipboardItems([
   historyItem({ id: "api-key", content: "sk-copyshare-1234567890abcdef", summary: "sk-copyshare-1234567890abcdef" }),
 ])[0];
@@ -134,15 +177,24 @@ const textItem = getRecentClipboardItems([
 assert.equal(getClipboardDisplayType(linkItem).label, "链接");
 assert.equal(getClipboardDisplayType(imageItem).label, "图片");
 assert.equal(getClipboardDisplayType(fileItem).label, "文件");
+assert.equal(getClipboardDisplayType(videoItem).label, "视频");
 assert.equal(getClipboardDisplayType(apiKeyItem).label, "文本");
 assert.equal(getClipboardDisplayType(textItem).label, "文本");
 
 assert.deepEqual(
-  filterClipboardItems([linkItem, imageItem, fileItem, apiKeyItem, textItem], "链接", "").map((item) => item.id),
+  filterClipboardItems([linkItem, imageItem, fileItem, videoItem, apiKeyItem, textItem], "链接", "").map((item) => item.id),
   ["link"],
 );
 assert.deepEqual(
-  filterClipboardItems([linkItem, imageItem, fileItem, apiKeyItem, textItem], "全部", "ping123").map((item) => item.id),
+  filterClipboardItems([linkItem, imageItem, fileItem, videoItem, apiKeyItem, textItem], "视频", "").map((item) => item.id),
+  ["video"],
+);
+assert.deepEqual(
+  filterClipboardItems([linkItem, imageItem, fileItem, videoItem, apiKeyItem, textItem], "文件", "").map((item) => item.id),
+  ["file"],
+);
+assert.deepEqual(
+  filterClipboardItems([linkItem, imageItem, fileItem, videoItem, apiKeyItem, textItem], "全部", "ping123").map((item) => item.id),
   ["link"],
 );
 

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { RefreshCw, ShieldQuestion, ShieldX, Unplug } from "lucide-vue-next";
+import { Monitor, RefreshCw, ShieldQuestion, ShieldX, Unplug } from "lucide-vue-next";
 
 import Button from "@/components/ui/Button.vue";
 import { deviceAddress, formatTime } from "@/lib/format";
@@ -143,7 +143,10 @@ const showCancelAwaitingTrustButton = computed(() =>
     </div>
 
     <div class="mt-4 grid gap-2 text-xs leading-5 text-slate-400">
-      <p class="text-slate-300">{{ status.detail }}</p>
+      <p data-device-status-detail class="flex items-start gap-2 text-slate-300">
+        <Monitor class="h-4 w-4 shrink-0 text-[color:var(--accent-text)]" />
+        <span>{{ status.detail }}</span>
+      </p>
       <p>最后在线：{{ formatTime(device.lastSeenAt) }}</p>
     </div>
 

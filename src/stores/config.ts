@@ -4,7 +4,7 @@ import { getConfig, onAppEvent, updateConfig } from "@/lib/tauri";
 import type { AppConfig } from "@/types/config";
 
 const defaultConfig: AppConfig = {
-  configVersion: 5,
+  configVersion: 6,
   deviceName: "CopyShare",
   deviceId: "",
   theme: "win11Dark",
@@ -27,6 +27,11 @@ const defaultConfig: AppConfig = {
   notifyDeviceStatus: true,
   notifySyncError: true,
   notificationClipboardPreview: true,
+  translationEngine: "google",
+  translationApiUrl: "",
+  translationApiKey: "",
+  translationModel: "gpt-4o-mini",
+  translationProxy: "",
 };
 
 export const useConfigStore = defineStore("config", {

@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { Check, Copy, TriangleAlert } from "lucide-vue-next";
+import { Check, Copy, LoaderCircle, TriangleAlert } from "lucide-vue-next";
 import { computed, onBeforeUnmount, ref } from "vue";
 
 import { copyTextToClipboard, getCopyableText, type CopyTextResult } from "@/lib/clipboard";
 import { copyHistoryItem, type CopyHistoryResult } from "@/lib/tauri";
+import { useHistoryStore } from "@/stores/history";
 import { useToastStore } from "@/stores/toasts";
+import type { FileTransferStatus } from "@/types/fileTransfer";
 import type { ClipboardContentType } from "@/types/history";
 
 import Button from "./Button.vue";
@@ -19,6 +21,8 @@ const props = withDefaults(
     iconOnly?: boolean;
     contentType?: ClipboardContentType;
     historyItemId?: string;
+    fileTransferId?: string;
+    fileTransferStatus?: FileTransferStatus;
   }>(),
   {
     label: "复制",
@@ -32,18 +36,28 @@ const props = withDefaults(
 
 const result = ref<CopyTextResult | CopyHistoryResult | null>(null);
 const toastStore = useToastStore();
+const historyStore = useHistoryStore();
 let resetTimer: number | undefined;
 const requiresHistoryCopy = computed(
   () => props.contentType === "image" || props.contentType === "fileList",
 );
+const fileDownloadActive = computed(() =>
+  props.contentType === "fileList"
+    && historyStore.isFileDownloadActive(props.fileTransferId),
+);
 
 const canCopy = computed(() =>
-  requiresHistoryCopy.value
-    ? Boolean(props.historyItemId)
-    : Boolean(getCopyableText(props.text)),
+  !fileDownloadActive.value
+    && (requiresHistoryCopy.value
+      ? Boolean(props.historyItemId)
+      : Boolean(getCopyableText(props.text))),
 );
 const hasError = computed(() => result.value === "failed" || result.value === "unsupported");
 const buttonLabel = computed(() => {
+  if (fileDownloadActive.value) {
+    return "下载中";
+  }
+
   if (result.value === "copied") {
     return props.copiedLabel;
   }
@@ -68,9 +82,17 @@ async function copyText() {
     if (!props.historyItemId) {
       result.value = "empty";
     } else {
+      if (
+        props.contentType === "fileList"
+        && props.fileTransferId
+        && (props.fileTransferStatus ?? "pending") === "pending"
+      ) {
+        historyStore.beginFileDownload(props.fileTransferId);
+      }
       try {
         result.value = await copyHistoryItem(props.historyItemId);
-      } catch {
+      } catch (error) {
+        historyStore.failFileDownload(props.fileTransferId, String(error));
         result.value = "failed";
       }
     }
@@ -79,9 +101,11 @@ async function copyText() {
   }
 
   if (result.value === "downloadStarted") {
-    toastStore.success("开始下载，完成后会写入剪贴板");
+    historyStore.beginFileDownload(props.fileTransferId);
+    toastStore.success("开始下载");
   } else if (result.value === "downloading") {
-    toastStore.success("文件正在下载");
+    historyStore.beginFileDownload(props.fileTransferId);
+    toastStore.info("文件正在下载");
   } else if (result.value === "copied") {
     toastStore.success(
       props.contentType === "image"
@@ -117,12 +141,14 @@ onBeforeUnmount(() => {
     @click.stop="copyText"
   >
     <Check v-if="result === 'copied'" class="h-3.5 w-3.5" />
+    <LoaderCircle v-else-if="fileDownloadActive" class="h-3.5 w-3.5 animate-spin" />
     <TriangleAlert v-else-if="hasError" class="h-3.5 w-3.5" />
     <Copy v-else class="h-3.5 w-3.5" />
   </button>
 
   <Button v-else :size="size" :variant="variant" :disabled="!canCopy" @click.stop="copyText">
     <Check v-if="result === 'copied'" class="h-4 w-4" />
+    <LoaderCircle v-else-if="fileDownloadActive" class="h-4 w-4 animate-spin" />
     <TriangleAlert v-else-if="hasError" class="h-4 w-4" />
     <Copy v-else class="h-4 w-4" />
     {{ buttonLabel }}

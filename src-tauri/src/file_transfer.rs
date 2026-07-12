@@ -211,6 +211,7 @@ impl FileTransferManager {
                 selected.name.clone(),
                 selected.size,
                 selected.sha256.clone(),
+                selected.thumbnail.clone(),
             );
             managed_files.insert(
                 file_id.clone(),
@@ -227,6 +228,7 @@ impl FileTransferManager {
                 file_name: selected.name,
                 file_size: selected.size,
                 sha256: selected.sha256,
+                thumbnail: selected.thumbnail,
                 token,
             });
             task_files.push(task_file);
@@ -862,11 +864,13 @@ impl FileTransferManager {
         let mut managed_files = HashMap::new();
         for offered_file in offer.files {
             let file_name = sanitize_file_name(&offered_file.file_name);
+            let thumbnail = offered_file.thumbnail.clone();
             task_files.push(new_transfer_file(
                 offered_file.file_id.clone(),
                 file_name,
                 offered_file.file_size,
                 offered_file.sha256,
+                thumbnail,
             ));
             managed_files.insert(
                 offered_file.file_id,
@@ -1222,6 +1226,7 @@ impl FileTransferManager {
                 file_name.to_string(),
                 size,
                 "hash".to_string(),
+                None,
             ));
             managed_files.insert(
                 file_id.to_string(),
@@ -1277,6 +1282,7 @@ impl FileTransferManager {
             file_name.to_string(),
             size,
             sha256.to_string(),
+            None,
         );
         let task = FileTransferTask {
             transfer_id: transfer_id.clone(),
@@ -1573,6 +1579,7 @@ fn pending_clipboard_file_content(task: &FileTransferTask) -> AppResult<String> 
             path: String::new(),
             name: file.name.clone(),
             size: file.size,
+            thumbnail: file.thumbnail.clone(),
         })
         .collect::<Vec<_>>();
     serde_json::to_string(&entries).map_err(Into::into)
@@ -1654,6 +1661,35 @@ pub fn open_transfer_folder(config: &AppConfig) -> AppResult<()> {
     let folder = transfer_save_dir(config)?;
     std::fs::create_dir_all(&folder)?;
     open_folder_with_system_file_manager(&folder)
+}
+
+pub fn source_file_path_from_history_item(item: &HistoryItem) -> AppResult<PathBuf> {
+    if item.direction != HistoryDirection::Local
+        || item.content_type != ClipboardContentType::FileList
+    {
+        return Err(AppError::InvalidInput(
+            "history item is not a local file item".to_string(),
+        ));
+    }
+    file_path_from_history_item(item)
+}
+
+pub fn file_path_from_history_item(item: &HistoryItem) -> AppResult<PathBuf> {
+    if item.content_type != ClipboardContentType::FileList {
+        return Err(AppError::InvalidInput(
+            "history item is not a file item".to_string(),
+        ));
+    }
+
+    let path = clipboard::clipboard_content_to_file_paths(&item.content)?
+        .into_iter()
+        .find(|path| path.exists())
+        .ok_or_else(|| AppError::InvalidInput("source file path is missing".to_string()))?;
+    Ok(path)
+}
+
+pub fn open_history_file_location(item: &HistoryItem) -> AppResult<()> {
+    reveal_path_with_system_file_manager(&source_file_path_from_history_item(item)?)
 }
 
 fn maybe_open_folder_after_save(config: &AppConfig, save_dir: &Path) -> AppResult<()> {
@@ -1822,6 +1858,7 @@ async fn selected_files_from_paths(paths: Vec<PathBuf>) -> AppResult<Vec<Selecte
             name,
             size: metadata.len(),
             sha256,
+            thumbnail: history::video_thumbnail_base64_for_path(&path, 240).ok(),
         });
     }
     validate_transfer_limits(selected.len(), &sizes)?;
@@ -1925,12 +1962,19 @@ fn advertised_download_endpoint(
     })
 }
 
-fn new_transfer_file(id: String, name: String, size: u64, sha256: String) -> FileTransferFile {
+fn new_transfer_file(
+    id: String,
+    name: String,
+    size: u64,
+    sha256: String,
+    thumbnail: Option<String>,
+) -> FileTransferFile {
     FileTransferFile {
         id,
         name,
         size,
         sha256,
+        thumbnail,
         saved_path: None,
         transferred_bytes: 0,
         status: FileTransferFileStatus::Pending,
@@ -2141,15 +2185,42 @@ fn open_folder_with_system_file_manager(path: &Path) -> AppResult<()> {
     Ok(())
 }
 
+#[cfg(target_os = "windows")]
+fn reveal_path_with_system_file_manager(path: &Path) -> AppResult<()> {
+    std::process::Command::new("explorer")
+        .arg("/select,")
+        .arg(path)
+        .spawn()?;
+    Ok(())
+}
+
 #[cfg(target_os = "macos")]
 fn open_folder_with_system_file_manager(path: &Path) -> AppResult<()> {
     std::process::Command::new("open").arg(path).spawn()?;
     Ok(())
 }
 
+#[cfg(target_os = "macos")]
+fn reveal_path_with_system_file_manager(path: &Path) -> AppResult<()> {
+    std::process::Command::new("open")
+        .arg("-R")
+        .arg(path)
+        .spawn()?;
+    Ok(())
+}
+
 #[cfg(all(unix, not(target_os = "macos")))]
 fn open_folder_with_system_file_manager(path: &Path) -> AppResult<()> {
     std::process::Command::new("xdg-open").arg(path).spawn()?;
+    Ok(())
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn reveal_path_with_system_file_manager(path: &Path) -> AppResult<()> {
+    let folder = path.parent().ok_or_else(|| {
+        AppError::InvalidInput("source file parent folder is missing".to_string())
+    })?;
+    std::process::Command::new("xdg-open").arg(folder).spawn()?;
     Ok(())
 }
 
@@ -2161,13 +2232,16 @@ mod tests {
     use sha2::{Digest, Sha256};
     use uuid::Uuid;
 
-    use crate::models::{DeviceInfo, DeviceStatus, FileTransferStatus};
+    use crate::models::{
+        ClipboardContentType, DeviceInfo, DeviceStatus, FileTransferStatus, HistoryDirection,
+        HistoryItem, SyncStatus,
+    };
 
     use super::{
         advertised_download_endpoint, current_transfer_save_dir, pending_clipboard_file_content,
-        sanitize_file_name, transfer_save_dir, trusted_transfer_peer, unique_save_path,
-        validate_transfer_limits, DownloadClaimError, FileTransferManager, MAX_SINGLE_FILE_SIZE, MAX_TRANSFER_FILE_COUNT,
-        MAX_TRANSFER_TOTAL_SIZE,
+        sanitize_file_name, source_file_path_from_history_item, transfer_save_dir,
+        trusted_transfer_peer, unique_save_path, validate_transfer_limits, DownloadClaimError,
+        FileTransferManager, MAX_SINGLE_FILE_SIZE, MAX_TRANSFER_FILE_COUNT, MAX_TRANSFER_TOTAL_SIZE,
     };
 
     fn temp_path(name: &str) -> PathBuf {
@@ -2190,6 +2264,54 @@ mod tests {
             last_seen_at: Some(Utc::now()),
             status: DeviceStatus::Online,
         }
+    }
+
+    fn local_file_history(content: String) -> HistoryItem {
+        HistoryItem {
+            id: "local-file".to_string(),
+            direction: HistoryDirection::Local,
+            source_device: "CopyShare".to_string(),
+            summary: "file.txt 5 B".to_string(),
+            content,
+            content_type: ClipboardContentType::FileList,
+            sync_status: SyncStatus::Synced,
+            file_transfer_id: None,
+            file_transfer_status: None,
+            success: true,
+            created_at: Utc::now(),
+        }
+    }
+
+    #[test]
+    fn sender_history_resolves_first_existing_source_file() {
+        let first = temp_path("first-source.txt");
+        let second = temp_path("second-source.txt");
+        fs::write(&first, b"first").unwrap();
+        fs::write(&second, b"second").unwrap();
+        let content = crate::clipboard::file_paths_to_clipboard_content(&[
+            first.clone(),
+            second.clone(),
+        ])
+        .unwrap();
+
+        let resolved = source_file_path_from_history_item(&local_file_history(content)).unwrap();
+
+        assert_eq!(resolved, first);
+        let _ = fs::remove_file(first);
+        let _ = fs::remove_file(second);
+    }
+
+    #[test]
+    fn sender_history_rejects_missing_source_file() {
+        let missing = temp_path("missing-source.txt");
+        let content = serde_json::json!([{
+            "path": missing.to_string_lossy(),
+            "name": "missing-source.txt",
+            "size": 0
+        }])
+        .to_string();
+
+        assert!(source_file_path_from_history_item(&local_file_history(content)).is_err());
     }
 
     #[test]

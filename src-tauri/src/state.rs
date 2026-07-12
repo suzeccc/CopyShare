@@ -422,6 +422,14 @@ impl AppState {
             .insert(connection_id.to_string());
     }
 
+    pub async fn peer_confirmation_required(&self, connection_id: &str) -> bool {
+        self.inner
+            .peer_confirmation_requests
+            .lock()
+            .await
+            .contains(connection_id)
+    }
+
     pub async fn take_peer_confirmation_required(&self, connection_id: &str) -> bool {
         self.inner
             .peer_confirmation_requests
@@ -710,12 +718,23 @@ impl AppState {
     }
 
     pub async fn forget_peer(&self, connection_id: &str) -> Option<String> {
-        self.inner
-            .peers
-            .lock()
-            .await
-            .remove(connection_id)
-            .and_then(|peer| peer.device_id)
+        let mut peers = self.inner.peers.lock().await;
+        let peer = peers.remove(connection_id)?;
+        let has_replacement = peers.values().any(|remaining| {
+            if let Some(device_id) = peer.device_id.as_deref() {
+                peer_matches_identity(remaining, device_id, peer.endpoint.as_deref())
+            } else {
+                peer.endpoint
+                    .as_deref()
+                    .map(|endpoint| remaining.endpoint.as_deref() == Some(endpoint))
+                    .unwrap_or(false)
+            }
+        });
+        if has_replacement {
+            None
+        } else {
+            Some(peer_disconnect_key(&peer, connection_id))
+        }
     }
 
     pub async fn broadcast(&self, message: WireMessage) {
@@ -1256,6 +1275,64 @@ mod runtime_tests {
         assert_eq!(devices.len(), 1);
         assert!(!devices[0].connected);
         assert_eq!(devices[0].status, DeviceStatus::Offline);
+    }
+
+    #[tokio::test]
+    async fn stale_duplicate_peer_cleanup_does_not_disconnect_replacement_peer_device() {
+        let state = AppState::new();
+        state
+            .upsert_device(DeviceInfo {
+                id: "device-remote".to_string(),
+                name: "CopyShare".to_string(),
+                ip: "10.194.33.156".to_string(),
+                port: 8765,
+                connected: true,
+                trusted: true,
+                remote_trusted: true,
+                has_connected_before: true,
+                last_seen_at: Some(Utc::now()),
+                status: DeviceStatus::Online,
+            })
+            .await;
+
+        let (old_sender, _old_receiver) = mpsc::unbounded_channel();
+        let old_join = tauri::async_runtime::spawn(async {
+            futures_util::future::pending::<()>().await;
+        });
+        state
+            .register_peer("ws://10.194.33.156:8765/".to_string(), old_sender, old_join)
+            .await;
+        state
+            .attach_peer_device(
+                "ws://10.194.33.156:8765/",
+                "device-remote".to_string(),
+                Some("ws://10.194.33.156:8765/".to_string()),
+            )
+            .await;
+
+        let (new_sender, _new_receiver) = mpsc::unbounded_channel();
+        let new_join = tauri::async_runtime::spawn(async {
+            futures_util::future::pending::<()>().await;
+        });
+        state
+            .register_peer("10.194.33.156:51234".to_string(), new_sender, new_join)
+            .await;
+        state
+            .attach_peer_device(
+                "10.194.33.156:51234",
+                "device-remote".to_string(),
+                Some("ws://10.194.33.156:8765/".to_string()),
+            )
+            .await;
+
+        if let Some(disconnect_key) = state.forget_peer("ws://10.194.33.156:8765/").await {
+            let _ = state.mark_device_disconnected(&disconnect_key).await;
+        }
+
+        let devices = state.devices().await;
+        assert_eq!(devices.len(), 1);
+        assert!(devices[0].connected);
+        assert_eq!(devices[0].status, DeviceStatus::Online);
     }
 
     #[tokio::test]

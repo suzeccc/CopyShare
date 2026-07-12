@@ -5,6 +5,9 @@ const home = readFileSync("src/pages/Clipboard.vue", "utf8");
 const expandButtonClasses = [...home.matchAll(/data-clipboard-expand-button[\s\S]*?class="([^"]*)"/g)].map(
   (match) => match[1] ?? "",
 );
+const contentClasses = [...home.matchAll(/data-clipboard-card-content class="([^"]*)"/g)].map(
+  (match) => match[1] ?? "",
+);
 
 assert.match(home, /expandedClipboardItemIds/);
 assert.match(home, /isClipboardItemExpandable/);
@@ -18,5 +21,19 @@ assert.match(home, /展开/);
 assert.match(home, /收起/);
 assert.match(home, /line-clamp-2/);
 assert.match(home, /isClipboardItemExpanded\(item\)/);
+assert.equal(contentClasses.length, 2);
+assert.equal(contentClasses.every((className) => className.includes("relative")), true);
 assert.equal(expandButtonClasses.length, 2);
-assert.equal(expandButtonClasses.every((className) => !className.includes("absolute bottom-2.5 right-3")), true);
+assert.equal(
+  expandButtonClasses.every((className) =>
+    className.includes("absolute")
+      && className.includes("bottom-0")
+      && className.includes("right-0"),
+  ),
+  true,
+);
+assert.match(
+  home,
+  /data-clipboard-expand-button[\s\S]*@click\.stop="toggleClipboardItemExpanded\(item\)"/,
+);
+assert.match(home, /isClipboardItemExpandable\(item\) \? 'pr-14' : ''/);

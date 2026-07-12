@@ -15,6 +15,7 @@ mod security;
 mod state;
 mod sync;
 mod tray;
+mod translator;
 mod window_position;
 
 use state::AppState;
@@ -88,6 +89,7 @@ pub fn run() {
             commands::update_config,
             commands::get_history,
             commands::get_clipboard_history,
+            commands::translate_text,
             commands::select_file_for_transfer,
             commands::select_files_for_transfer,
             commands::send_file_to_device,
@@ -100,13 +102,18 @@ pub fn run() {
             commands::select_transfer_save_dir,
             commands::reset_transfer_save_dir,
             commands::open_transfer_folder,
+            commands::open_history_file_location,
             commands::create_mobile_session,
             commands::get_mobile_session_status,
             commands::close_mobile_session,
             commands::confirm_mobile_clipboard_write,
             commands::clear_history,
+            commands::get_cache_size,
+            commands::clear_cache,
             commands::copy_history_item,
             commands::get_history_image_thumbnail,
+            commands::get_history_file_thumbnail,
+            commands::get_history_file_preview_path,
             commands::open_external_url,
             commands::show_main_window,
             commands::hide_main_window,

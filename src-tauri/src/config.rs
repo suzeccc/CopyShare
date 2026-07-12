@@ -10,7 +10,7 @@ use crate::{
 };
 
 const CONFIG_FILE: &str = "config.json";
-const CURRENT_CONFIG_VERSION: u16 = 5;
+const CURRENT_CONFIG_VERSION: u16 = 6;
 
 pub fn load_config(app: &AppHandle) -> AppResult<AppConfig> {
     let path = config_path(app)?;
@@ -105,6 +105,7 @@ mod tests {
     fn default_config_matches_mvp_scope() {
         let config = AppConfig::default();
 
+        assert_eq!(config.config_version, 6);
         assert_eq!(config.port, 8765);
         assert_eq!(config.theme, crate::models::AppTheme::Win11Dark);
         assert_eq!(config.close_action, crate::models::CloseAction::Ask);
@@ -124,6 +125,11 @@ mod tests {
         assert!(config.notify_device_status);
         assert!(config.notify_sync_error);
         assert!(config.notification_clipboard_preview);
+        assert_eq!(config.translation_engine, crate::models::TranslationEngine::Google);
+        assert_eq!(config.translation_api_url, "");
+        assert_eq!(config.translation_api_key, "");
+        assert_eq!(config.translation_model, "gpt-4o-mini");
+        assert_eq!(config.translation_proxy, "");
     }
 
     #[test]
@@ -174,7 +180,7 @@ mod tests {
         let mut config: AppConfig = serde_json::from_value(json).unwrap();
 
         assert!(super::migrate_config(&mut config));
-        assert_eq!(config.config_version, 5);
+        assert_eq!(config.config_version, 6);
         assert!(config.sync_image);
         assert!(config.sync_files);
         assert!(config.notification_clipboard_preview);
@@ -185,7 +191,7 @@ mod tests {
         config.notification_clipboard_preview = false;
         config.notify_device_status = false;
         assert!(!super::migrate_config(&mut config));
-        assert_eq!(config.config_version, 5);
+        assert_eq!(config.config_version, 6);
         assert!(!config.sync_image);
         assert!(!config.sync_files);
         assert!(!config.notification_clipboard_preview);

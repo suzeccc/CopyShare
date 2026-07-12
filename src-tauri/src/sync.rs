@@ -429,12 +429,17 @@ where
 {
     let (mut sink, mut stream) = socket.split();
     let (sender, mut receiver) = mpsc::unbounded_channel::<WireMessage>();
+    let (start_sender, start_receiver) = oneshot::channel::<()>();
     let hello = build_hello(&state, &connection_id).await;
     let connection_id_for_task = connection_id.clone();
     let app_for_task = app.clone();
     let state_for_task = state.clone();
 
     let join = tauri::async_runtime::spawn(async move {
+        if start_receiver.await.is_err() {
+            return;
+        }
+
         if let Ok(text) = network::encode_wire_message(&hello) {
             let _ = sink.send(Message::Text(text.into())).await;
         }
@@ -534,6 +539,7 @@ where
     });
 
     state.register_peer(connection_id, sender, join).await;
+    let _ = start_sender.send(());
     Ok(())
 }
 
@@ -560,17 +566,16 @@ async fn handle_wire_text(app: &AppHandle, state: &AppState, connection_id: &str
             state
                 .attach_peer_device(connection_id, device_id.clone(), Some(endpoint.clone()))
                 .await;
-            if manual_trust_required {
-                state.mark_manual_trust_required(connection_id).await;
-            }
-            let manual_trust_required = state
-                .manual_trust_required_for_peer(connection_id, &device_id, &endpoint)
-                .await;
-            if !manual_trust_required && security::is_device_id_trusted(&config, &device_id) {
-                for key in [connection_id, &device_id, &endpoint] {
-                    security::trust_device(&mut config, key);
-                }
-                app_config::normalize_config(&mut config);
+            let trust_decision = resolve_hello_trust(
+                state,
+                &mut config,
+                connection_id,
+                &device_id,
+                &endpoint,
+                manual_trust_required,
+            )
+            .await;
+            if trust_decision.config_changed {
                 match app_config::save_config(app, &config) {
                     Ok(()) => {
                         state.set_config(config.clone()).await;
@@ -581,22 +586,13 @@ async fn handle_wire_text(app: &AppHandle, state: &AppState, connection_id: &str
                     }
                 }
             }
-            let trusted = !manual_trust_required
-                && reset_local_observation_if_peer_is_trusted(
-                    state,
-                    &config,
-                    connection_id,
-                    &device_id,
-                    &endpoint,
-                )
-                .await;
             let device = DeviceInfo {
                 id: device_id.clone(),
                 name: device_name,
                 ip: network::display_host_from_connection_id(connection_id),
                 port,
                 connected: true,
-                trusted,
+                trusted: trust_decision.trusted,
                 remote_trusted: false,
                 has_connected_before: false,
                 last_seen_at: Some(Utc::now()),
@@ -604,10 +600,13 @@ async fn handle_wire_text(app: &AppHandle, state: &AppState, connection_id: &str
             };
             let device = state.upsert_device(device).await;
             persist_devices(app, state).await;
-            if !device.trusted {
+            if trust_decision.prompt_required {
                 notifications::notify_trust_required(app, &config, &device);
             }
             let _ = app.emit("device-connected", device);
+            if trust_decision.notify_peer_trusted {
+                notify_peer_trusted(state, &config, &device_id).await;
+            }
             emit_status(app, state).await;
         }
         WireMessage::TrustGranted {
@@ -1020,20 +1019,59 @@ fn write_remote_clipboard(app: &AppHandle, message: &ClipboardMessage) -> AppRes
     }
 }
 
-async fn reset_local_observation_if_peer_is_trusted(
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct HelloTrustDecision {
+    trusted: bool,
+    config_changed: bool,
+    notify_peer_trusted: bool,
+    prompt_required: bool,
+}
+
+async fn resolve_hello_trust(
     state: &AppState,
-    config: &AppConfig,
+    config: &mut AppConfig,
     connection_id: &str,
     device_id: &str,
     endpoint: &str,
-) -> bool {
-    let _ = (connection_id, endpoint);
-    let trusted = security::is_device_id_trusted(config, device_id);
+    peer_requested_manual_trust: bool,
+) -> HelloTrustDecision {
+    let local_manual_connect = state
+        .take_peer_confirmation_required(connection_id)
+        .await;
+    let was_trusted = security::is_device_id_trusted(config, device_id);
+    let mut config_changed = false;
+
+    if local_manual_connect && !was_trusted {
+        security::trust_device(config, device_id);
+        config_changed = true;
+        app_config::normalize_config(config);
+    }
+
+    if peer_requested_manual_trust
+        && !local_manual_connect
+        && !security::is_device_id_trusted(config, device_id)
+    {
+        state.mark_manual_trust_required(connection_id).await;
+    }
+
+    if local_manual_connect || security::is_device_id_trusted(config, device_id) {
+        state.clear_manual_trust_required(device_id).await;
+    }
+
+    let manual_trust_required = state
+        .manual_trust_required_for_peer(connection_id, device_id, endpoint)
+        .await;
+    let trusted = !manual_trust_required && security::is_device_id_trusted(config, device_id);
     if trusted {
         state.reset_local_clipboard_observation().await;
     }
 
-    trusted
+    HelloTrustDecision {
+        trusted,
+        config_changed,
+        notify_peer_trusted: trusted,
+        prompt_required: !trusted,
+    }
 }
 
 async fn apply_peer_trust_grant(
@@ -1095,7 +1133,7 @@ async fn send_reciprocal_trust_grant_if_needed(
 
 async fn build_hello(state: &AppState, connection_id: &str) -> WireMessage {
     let status = state.status().await;
-    let manual_trust_required = state.take_peer_confirmation_required(connection_id).await
+    let manual_trust_required = state.peer_confirmation_required(connection_id).await
         && !state.connection_matches_trusted_device(connection_id).await;
     WireMessage::Hello {
         device_id: status.device_id,
@@ -1384,6 +1422,172 @@ mod tests {
         };
 
         assert!(!manual_trust_required);
+    }
+
+    #[tokio::test]
+    async fn manual_connect_initiator_auto_trusts_peer_after_hello() {
+        let state = AppState::new();
+        let mut config = AppConfig::default();
+        config.device_id = "device-a".to_string();
+        config.device_name = "Laptop A".to_string();
+        state.set_config(config.clone()).await;
+
+        let (sender, _outbound) = mpsc::unbounded_channel();
+        let join = tauri::async_runtime::spawn(async {
+            futures_util::future::pending::<()>().await;
+        });
+        state.mark_peer_confirmation_required("ws://10.194.33.156:8765/").await;
+        state
+            .register_peer("ws://10.194.33.156:8765/".to_string(), sender, join)
+            .await;
+
+        let WireMessage::Hello {
+            manual_trust_required,
+            ..
+        } = build_hello(&state, "ws://10.194.33.156:8765/").await else {
+            panic!("build_hello should produce a Hello message");
+        };
+        assert!(manual_trust_required);
+
+        state
+            .attach_peer_device(
+                "ws://10.194.33.156:8765/",
+                "device-b".to_string(),
+                Some("ws://10.194.33.156:8765/".to_string()),
+            )
+            .await;
+
+        let decision = resolve_hello_trust(
+            &state,
+            &mut config,
+            "ws://10.194.33.156:8765/",
+            "device-b",
+            "ws://10.194.33.156:8765/",
+            false,
+        )
+        .await;
+
+        assert!(decision.trusted);
+        assert!(decision.config_changed);
+        assert!(decision.notify_peer_trusted);
+        assert!(!decision.prompt_required);
+        assert!(config.trusted_devices.contains(&"device-b".to_string()));
+        assert!(state.has_trusted_peers(&config).await);
+    }
+
+    #[tokio::test]
+    async fn simultaneous_manual_connect_does_not_prompt_on_initiator_side() {
+        let state = AppState::new();
+        let mut config = AppConfig::default();
+        config.device_id = "device-a".to_string();
+        state.set_config(config.clone()).await;
+
+        let (sender, _outbound) = mpsc::unbounded_channel();
+        let join = tauri::async_runtime::spawn(async {
+            futures_util::future::pending::<()>().await;
+        });
+        state.mark_peer_confirmation_required("ws://10.194.33.156:8765/").await;
+        state
+            .register_peer("ws://10.194.33.156:8765/".to_string(), sender, join)
+            .await;
+        let _ = build_hello(&state, "ws://10.194.33.156:8765/").await;
+        state
+            .attach_peer_device(
+                "ws://10.194.33.156:8765/",
+                "device-b".to_string(),
+                Some("ws://10.194.33.156:8765/".to_string()),
+            )
+            .await;
+
+        let decision = resolve_hello_trust(
+            &state,
+            &mut config,
+            "ws://10.194.33.156:8765/",
+            "device-b",
+            "ws://10.194.33.156:8765/",
+            true,
+        )
+        .await;
+
+        assert!(decision.trusted);
+        assert!(decision.notify_peer_trusted);
+        assert!(!decision.prompt_required);
+        assert!(
+            !state
+                .manual_trust_required_for_peer(
+                    "ws://10.194.33.156:8765/",
+                    "device-b",
+                    "ws://10.194.33.156:8765/",
+                )
+                .await
+        );
+    }
+
+    #[tokio::test]
+    async fn inbound_trust_request_is_not_mistaken_for_local_manual_connect() {
+        let state = AppState::new();
+        let mut config = AppConfig::default();
+        config.device_id = "device-a".to_string();
+        state.set_config(config.clone()).await;
+
+        state
+            .mark_peer_confirmation_required("ws://10.194.33.156:8765/")
+            .await;
+
+        let decision = resolve_hello_trust(
+            &state,
+            &mut config,
+            "10.194.33.156:51234",
+            "device-b",
+            "ws://10.194.33.156:8765/",
+            true,
+        )
+        .await;
+
+        assert!(!decision.trusted);
+        assert!(!decision.config_changed);
+        assert!(!decision.notify_peer_trusted);
+        assert!(decision.prompt_required);
+        assert!(!config.trusted_devices.contains(&"device-b".to_string()));
+    }
+
+    #[tokio::test]
+    async fn trusted_reconnect_hello_sends_trust_grant() {
+        let state = AppState::new();
+        let mut config = AppConfig::default();
+        config.device_id = "device-a".to_string();
+        config.trusted_devices.push("device-b".to_string());
+        state.set_config(config.clone()).await;
+
+        let (sender, _outbound) = mpsc::unbounded_channel();
+        let join = tauri::async_runtime::spawn(async {
+            futures_util::future::pending::<()>().await;
+        });
+        state
+            .register_peer("ws://10.194.33.156:8765/".to_string(), sender, join)
+            .await;
+        state
+            .attach_peer_device(
+                "ws://10.194.33.156:8765/",
+                "device-b".to_string(),
+                Some("ws://10.194.33.156:8765/".to_string()),
+            )
+            .await;
+
+        let decision = resolve_hello_trust(
+            &state,
+            &mut config,
+            "ws://10.194.33.156:8765/",
+            "device-b",
+            "ws://10.194.33.156:8765/",
+            false,
+        )
+        .await;
+
+        assert!(decision.trusted);
+        assert!(!decision.config_changed);
+        assert!(decision.notify_peer_trusted);
+        assert!(!decision.prompt_required);
     }
 
     #[tokio::test]
@@ -2081,16 +2285,16 @@ mod tests {
         );
         assert!(new_outbound.try_recv().is_err());
 
-        assert!(
-            reset_local_observation_if_peer_is_trusted(
-                &state,
-                &config,
-                "10.194.33.156:51234",
-                "device-new",
-                "ws://10.194.33.156:8765/",
-            )
-            .await
-        );
+        let decision = resolve_hello_trust(
+            &state,
+            &mut config,
+            "10.194.33.156:51234",
+            "device-new",
+            "ws://10.194.33.156:8765/",
+            false,
+        )
+        .await;
+        assert!(decision.trusted);
 
         let republished =
             publish_local_text_if_needed(&state, &config, "current clipboard".to_string())

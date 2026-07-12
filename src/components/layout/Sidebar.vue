@@ -4,16 +4,16 @@ import {
   History,
   Home,
   Info,
+  Languages,
   MonitorSmartphone,
   Settings,
-  Smartphone,
 } from "lucide-vue-next";
 
 const primaryItems = [
   { label: "总览", path: "/", icon: Home },
   { label: "剪切板", path: "/clipboard", icon: Clipboard },
   { label: "设备连接", path: "/devices", icon: MonitorSmartphone },
-  { label: "手机连接", path: "/mobile", icon: Smartphone },
+  { label: "翻译", path: "/translate", icon: Languages },
   { label: "连接与剪贴日志", path: "/logs", icon: History },
 ];
 

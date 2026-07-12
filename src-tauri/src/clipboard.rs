@@ -42,6 +42,8 @@ pub struct ClipboardFileEntry {
     pub path: String,
     pub name: String,
     pub size: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thumbnail: Option<String>,
 }
 
 pub fn read_clipboard_text(app: &AppHandle) -> AppResult<String> {
@@ -139,6 +141,7 @@ pub fn file_paths_to_clipboard_content(paths: &[PathBuf]) -> AppResult<String> {
                 path: path.to_string_lossy().to_string(),
                 name,
                 size,
+                thumbnail: crate::history::video_thumbnail_base64_for_path(path, 240).ok(),
             }
         })
         .collect::<Vec<_>>();
@@ -776,11 +779,13 @@ mod tests {
                 path: r"C:\a.txt".to_string(),
                 name: "a.txt".to_string(),
                 size: 1024,
+                thumbnail: None,
             },
             ClipboardFileEntry {
                 path: r"C:\b.bin".to_string(),
                 name: "b.bin".to_string(),
                 size: 2048,
+                thumbnail: None,
             },
         ];
 
