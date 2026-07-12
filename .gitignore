@@ -31,6 +31,8 @@ env/
 .playwright-cli/
 .superpowers/
 output/
+video_frame_viewer.html
+video_frames/
 
 # Python/PyInstaller legacy artifacts
 build/
