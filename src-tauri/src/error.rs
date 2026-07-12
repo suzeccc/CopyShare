@@ -12,6 +12,8 @@ pub enum AppError {
     WebSocket(#[from] tokio_tungstenite::tungstenite::Error),
     #[error("clipboard error: {0}")]
     Clipboard(String),
+    #[error("{0}")]
+    Ocr(String),
     #[error("invalid input: {0}")]
     InvalidInput(String),
     #[error("sync is already running")]

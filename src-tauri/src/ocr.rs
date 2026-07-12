@@ -3,6 +3,7 @@ use std::io::Cursor;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use image::{DynamicImage, GenericImageView, ImageFormat};
 
+use crate::error::{AppError, AppResult};
 use crate::models::OcrResponse;
 
 const MAX_IMAGE_BYTES: usize = 20 * 1024 * 1024;
@@ -115,6 +116,84 @@ where
             image_height: prepared.image_height,
             error: Some(error),
         },
+    }
+}
+
+pub fn recognize_image_base64(content: &str) -> AppResult<OcrResponse> {
+    let prepared = prepare_image(content).map_err(AppError::Ocr)?;
+    Ok(response_from_engine(prepared, platform::recognize_png))
+}
+
+#[cfg(target_os = "windows")]
+mod platform {
+    use windows::{
+        Graphics::Imaging::BitmapDecoder,
+        Media::Ocr::OcrEngine,
+        Storage::Streams::{DataWriter, InMemoryRandomAccessStream},
+        Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED},
+    };
+
+    fn ocr_error(error: impl std::fmt::Display) -> String {
+        format!("图片文字识别失败：{error}")
+    }
+
+    struct ComApartment;
+
+    impl ComApartment {
+        fn initialize() -> Result<Self, String> {
+            unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }
+                .ok()
+                .map_err(ocr_error)?;
+            Ok(Self)
+        }
+    }
+
+    impl Drop for ComApartment {
+        fn drop(&mut self) {
+            unsafe { CoUninitialize() };
+        }
+    }
+
+    pub fn recognize_png(png: &[u8]) -> Result<String, String> {
+        let _apartment = ComApartment::initialize()?;
+        let stream = InMemoryRandomAccessStream::new().map_err(ocr_error)?;
+        let writer = DataWriter::CreateDataWriter(&stream).map_err(ocr_error)?;
+        writer.WriteBytes(png).map_err(ocr_error)?;
+        writer
+            .StoreAsync()
+            .map_err(ocr_error)?
+            .get()
+            .map_err(ocr_error)?;
+        writer.DetachStream().map_err(ocr_error)?;
+        stream.Seek(0).map_err(ocr_error)?;
+
+        let decoder = BitmapDecoder::CreateAsync(&stream)
+            .map_err(ocr_error)?
+            .get()
+            .map_err(ocr_error)?;
+        let bitmap = decoder
+            .GetSoftwareBitmapAsync()
+            .map_err(ocr_error)?
+            .get()
+            .map_err(ocr_error)?;
+        let engine = OcrEngine::TryCreateFromUserProfileLanguages()
+            .map_err(|_| "Windows OCR 不可用，请安装系统语言包后重试。".to_string())?;
+        let result = engine
+            .RecognizeAsync(&bitmap)
+            .map_err(ocr_error)?
+            .get()
+            .map_err(ocr_error)?;
+        result
+            .Text()
+            .map(|text| text.to_string())
+            .map_err(ocr_error)
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+mod platform {
+    pub fn recognize_png(_png: &[u8]) -> Result<String, String> {
+        Err("图片转文字目前仅支持 Windows。".to_string())
     }
 }
 

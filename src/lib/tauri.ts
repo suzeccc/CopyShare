@@ -24,6 +24,7 @@ import type {
 } from "@/types/fileTransfer";
 import type { HistoryItem } from "@/types/history";
 import type { MobileSessionView } from "@/types/mobile";
+import type { OcrResponse } from "@/types/ocr";
 import type { AppStatus } from "@/types/status";
 import type { TranslateResponse } from "@/types/translation";
 
@@ -90,6 +91,10 @@ export function getHistory(): Promise<HistoryItem[]> {
 
 export function getClipboardHistory(): Promise<Array<{ id: string; text: string }>> {
   return invoke<Array<{ id: string; text: string }>>("get_clipboard_history");
+}
+
+export function recognizeClipboardImage(): Promise<OcrResponse> {
+  return invoke<OcrResponse>("recognize_clipboard_image");
 }
 
 export function selectFileForTransfer(): Promise<SelectedTransferFile | null> {

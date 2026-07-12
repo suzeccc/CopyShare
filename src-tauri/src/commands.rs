@@ -12,10 +12,11 @@ use crate::{
     history,
     mobile,
     notifications,
+    ocr,
     models::{
         AppConfig, AppStatus, ClipboardContentType, ClipboardTextItem, CopyHistoryResult,
         DeviceInfo, FileTransferTask, HistoryItem, MobileSessionView, SelectedTransferFile,
-        TranslateResponse,
+        OcrResponse, TranslateResponse,
     },
     security,
     state::AppState,
@@ -198,6 +199,16 @@ pub async fn get_history(state: State<'_, AppState>) -> AppResult<Vec<HistoryIte
 #[tauri::command]
 pub async fn get_clipboard_history() -> AppResult<Vec<ClipboardTextItem>> {
     clipboard::read_clipboard_history_text(3).await
+}
+
+#[tauri::command]
+pub async fn recognize_clipboard_image(app: AppHandle) -> AppResult<OcrResponse> {
+    let image = clipboard::read_clipboard_image_base64(&app)?
+        .ok_or_else(|| AppError::Ocr("剪贴板中没有图片，请先复制或截图。".to_string()))?;
+
+    tauri::async_runtime::spawn_blocking(move || ocr::recognize_image_base64(&image))
+        .await
+        .map_err(|error| AppError::Ocr(format!("图片文字识别失败：{error}")))?
 }
 
 #[tauri::command]

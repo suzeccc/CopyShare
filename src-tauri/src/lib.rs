@@ -90,6 +90,7 @@ pub fn run() {
             commands::update_config,
             commands::get_history,
             commands::get_clipboard_history,
+            commands::recognize_clipboard_image,
             commands::translate_text,
             commands::select_file_for_transfer,
             commands::select_files_for_transfer,
