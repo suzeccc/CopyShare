@@ -40,6 +40,7 @@ export const useDevicesStore = defineStore("devices", {
     error: null as string | null,
     disconnectNotice: null as string | null,
     lanDiscoveryProgress: null as LanDiscoveryProgress | null,
+    unlisteners: [] as (() => void)[],
   }),
   getters: {
     connected: (state) => connectedTrustedDevices(state.devices),
@@ -105,7 +106,10 @@ export const useDevicesStore = defineStore("devices", {
       this.disconnectNotice = null;
     },
     async subscribe() {
-      await Promise.all([
+      if (this.unlisteners.length) {
+        return;
+      }
+      this.unlisteners = await Promise.all([
         onAppEvent<DeviceInfo>("device-discovered", (device) => this.upsert(device)),
         onAppEvent<LanDiscoveryProgress>("lan-discovery-progress", (progress) => {
           this.lanDiscoveryProgress = progress;

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { useRoute } from "vue-router";
 
 import AppShell from "@/components/layout/AppShell.vue";
 import Button from "@/components/ui/Button.vue";
@@ -19,9 +20,21 @@ const devicesStore = useDevicesStore();
 const configStore = useConfigStore();
 const historyStore = useHistoryStore();
 const toastStore = useToastStore();
+const route = useRoute();
 const STARTUP_OVERLAY_MIN_MS = 900;
-const startupVisible = ref(true);
 const startupUpdate = ref<StartupUpdatePrompt | null>(null);
+const isMediaPreviewRoute = computed(() => isUtilityWindowRoute(route.path) || isUtilityWindowStartupBypassed());
+const startupVisible = ref(!isUtilityWindowStartupBypassed());
+let navigateUnlisten: (() => void) | undefined;
+
+function isUtilityWindowRoute(path: string) {
+  return path === "/media-preview" || path === "/floating-clipboard";
+}
+
+function isUtilityWindowStartupBypassed() {
+  return window.location.hash.startsWith("#/media-preview")
+    || window.location.hash.startsWith("#/floating-clipboard");
+}
 
 function wait(ms: number) {
   return new Promise<void>((resolve) => {
@@ -69,6 +82,11 @@ async function finishStartupOverlay(startedAt: number) {
 }
 
 onMounted(async () => {
+  if (isMediaPreviewRoute.value) {
+    startupVisible.value = false;
+    return;
+  }
+
   const startedAt = performance.now();
 
   try {
@@ -83,8 +101,9 @@ onMounted(async () => {
       devicesStore.subscribe(),
       configStore.subscribe(),
       historyStore.subscribe(),
-      onAppEvent<string>("navigate-to-page", handlePageNavigation),
     ]);
+    navigateUnlisten?.();
+    navigateUnlisten = await onAppEvent<string>("navigate-to-page", handlePageNavigation);
     void checkForAppUpdateOnStartup((update) => {
       startupUpdate.value = update;
     });
@@ -92,10 +111,16 @@ onMounted(async () => {
     await finishStartupOverlay(startedAt);
   }
 });
+
+onBeforeUnmount(() => {
+  navigateUnlisten?.();
+  navigateUnlisten = undefined;
+});
 </script>
 
 <template>
-  <AppShell />
+  <RouterView v-if="isMediaPreviewRoute" />
+  <AppShell v-else />
   <ToastStack />
   <Transition name="trust-prompt">
     <div
@@ -124,7 +149,7 @@ onMounted(async () => {
   </Transition>
   <Transition name="startup-overlay">
     <div
-      v-if="startupVisible"
+      v-if="startupVisible && !isMediaPreviewRoute"
       data-startup-overlay
       class="startup-overlay"
       role="status"

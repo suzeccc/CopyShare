@@ -43,6 +43,8 @@
   --floating-surface-line: rgba(86, 202, 111, 0.44);
   --floating-surface-bg: linear-gradient(135deg, rgba(53, 200, 90, 0.14), transparent 44%),
     rgba(11, 16, 14, 0.72);
+  --floating-clipboard-history-bg: linear-gradient(135deg, rgba(53, 200, 90, 0.16), transparent 42%),
+    rgba(11, 16, 14, 0.84);
   --floating-stat-bg: rgba(24, 36, 30, 0.72);
   --floating-stat-line: rgba(86, 202, 111, 0.2);
   --floating-muted-text: rgba(188, 216, 195, 0.78);
@@ -111,6 +113,8 @@ html[data-app-theme="win11Dark"] {
   --floating-surface-line: rgba(255, 255, 255, 0.16);
   --floating-surface-bg: linear-gradient(135deg, rgba(96, 205, 255, 0.08), transparent 48%),
     rgba(32, 32, 32, 0.72);
+  --floating-clipboard-history-bg: linear-gradient(135deg, rgba(96, 205, 255, 0.1), transparent 44%),
+    rgba(32, 32, 32, 0.84);
   --floating-stat-bg: rgba(47, 47, 47, 0.68);
   --floating-stat-line: rgba(255, 255, 255, 0.12);
   --floating-muted-text: rgba(245, 245, 245, 0.68);
@@ -176,6 +180,8 @@ html[data-app-theme="macosLight"] {
   --floating-surface-line: rgba(60, 60, 67, 0.16);
   --floating-surface-bg: linear-gradient(135deg, rgba(10, 132, 255, 0.08), transparent 48%),
     rgba(255, 255, 255, 0.74);
+  --floating-clipboard-history-bg: linear-gradient(135deg, rgba(10, 132, 255, 0.1), transparent 44%),
+    rgba(255, 255, 255, 0.88);
   --floating-stat-bg: rgba(255, 255, 255, 0.64);
   --floating-stat-line: rgba(60, 60, 67, 0.12);
   --floating-muted-text: rgba(58, 58, 60, 0.74);
@@ -241,6 +247,8 @@ html[data-app-theme="macosDark"] {
   --floating-surface-line: rgba(255, 255, 255, 0.14);
   --floating-surface-bg: linear-gradient(135deg, rgba(167, 139, 250, 0.08), transparent 48%),
     rgba(28, 28, 30, 0.74);
+  --floating-clipboard-history-bg: linear-gradient(135deg, rgba(167, 139, 250, 0.1), transparent 44%),
+    rgba(28, 28, 30, 0.86);
   --floating-stat-bg: rgba(58, 58, 60, 0.62);
   --floating-stat-line: rgba(255, 255, 255, 0.1);
   --floating-muted-text: rgba(209, 209, 214, 0.72);
@@ -750,13 +758,15 @@ button[data-window-control]:active {
   .startup-progress::before,
   .trust-prompt-enter-active,
   .trust-prompt-leave-active,
+  .floating-clipboard-row,
   button[data-window-control] {
     transition: none !important;
     animation: none !important;
   }
 
   button[data-window-control]:hover,
-  button[data-window-control]:active {
+  button[data-window-control]:active,
+  .floating-clipboard-row:hover {
     transform: none;
   }
 }
@@ -798,6 +808,10 @@ button[data-window-control]:active {
   backdrop-filter: blur(20px) saturate(150%);
 }
 
+.floating-clipboard-history-surface {
+  background: var(--floating-clipboard-history-bg);
+}
+
 .floating-stat {
   display: grid;
   min-width: 0;
@@ -820,6 +834,31 @@ button[data-window-control]:active {
   white-space: nowrap;
   font-size: 13px;
   color: var(--floating-strong-text);
+}
+
+.floating-clipboard-row {
+  border-radius: 7px;
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease,
+    box-shadow 150ms ease,
+    transform 150ms ease;
+}
+
+.floating-clipboard-row:hover {
+  border-color: var(--floating-control-line);
+  background: rgba(255, 255, 255, 0.055);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+  transform: translateY(-1px);
+}
+
+.floating-link-chip {
+  border-radius: 6px;
+  padding: 1px 4px;
+}
+
+.floating-link-chip:hover {
+  background: rgba(255, 255, 255, 0.07);
 }
 
 .trust-prompt-enter-active,

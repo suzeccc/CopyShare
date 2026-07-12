@@ -87,6 +87,7 @@ onBeforeUnmount(() => {
       :alt="props.alt"
       :class="imageClass"
       loading="lazy"
+      draggable="false"
     />
     <ImageIcon v-else class="h-5 w-5 text-slate-500" />
   </div>

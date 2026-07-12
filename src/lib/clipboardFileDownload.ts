@@ -28,6 +28,8 @@ export type ClipboardFileCardAction =
   | "openSourceLocation"
   | "unavailable";
 
+export const CLIPBOARD_FILE_DOWNLOAD_LIMIT = 100;
+
 export function clipboardFileDownloadActivityFromTask(
   task: FileTransferTask,
 ): ClipboardFileDownloadActivity {
@@ -49,6 +51,21 @@ export function applyClipboardFileDownloadProgress(
     totalSize: progress.totalSize,
     error: current?.error ?? null,
   };
+}
+
+export function limitClipboardFileDownloads(
+  downloads: Record<string, ClipboardFileDownloadActivity>,
+  limit = CLIPBOARD_FILE_DOWNLOAD_LIMIT,
+): Record<string, ClipboardFileDownloadActivity> {
+  if (limit <= 0) {
+    return {};
+  }
+
+  const entries = Object.entries(downloads);
+  if (entries.length <= limit) {
+    return downloads;
+  }
+  return Object.fromEntries(entries.slice(-limit));
 }
 
 export function getClipboardFileDownloadFeedback(

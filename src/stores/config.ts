@@ -39,6 +39,7 @@ export const useConfigStore = defineStore("config", {
     config: defaultConfig,
     saving: false,
     error: null as string | null,
+    unlisteners: [] as (() => void)[],
   }),
   actions: {
     async refresh() {
@@ -61,9 +62,14 @@ export const useConfigStore = defineStore("config", {
       }
     },
     async subscribe() {
-      await onAppEvent<AppConfig>("config-updated", (config) => {
-        this.config = config;
-      });
+      if (this.unlisteners.length) {
+        return;
+      }
+      this.unlisteners = await Promise.all([
+        onAppEvent<AppConfig>("config-updated", (config) => {
+          this.config = config;
+        }),
+      ]);
     },
   },
 });

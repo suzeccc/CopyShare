@@ -485,9 +485,21 @@ function clipboardTime(value: string | undefined) {
               >
                 <HistoryImageThumb :history-id="item.id" />
               </button>
-              <p data-clipboard-history-text class="min-w-0 text-[13px] font-medium leading-[19px] text-[color:var(--clipboard-card-text)]">
-                {{ item.text }}
-              </p>
+              <div
+                data-clipboard-image-summary
+                class="flex min-w-0 items-baseline gap-2.5 text-[13px] font-medium leading-[19px] text-[color:var(--clipboard-card-text)]"
+              >
+                <span data-clipboard-image-name class="min-w-0 truncate">
+                  {{ clipboardFileSummary(item).name }}
+                </span>
+                <span
+                  v-if="clipboardFileSummary(item).size"
+                  data-clipboard-image-size
+                  class="shrink-0 text-[12px] text-[color:var(--clipboard-card-footer-text)]"
+                >
+                  {{ clipboardFileSummary(item).size }}
+                </span>
+              </div>
             </div>
             <div
               v-else-if="item.contentType === 'fileList'"
@@ -739,9 +751,21 @@ function clipboardTime(value: string | undefined) {
                     >
                       <HistoryImageThumb :history-id="item.id" />
                     </button>
-                    <p data-clipboard-history-text class="min-w-0 text-[13px] font-medium leading-[19px] text-[color:var(--clipboard-card-text)]">
-                      {{ item.text }}
-                    </p>
+                    <div
+                      data-clipboard-image-summary
+                      class="flex min-w-0 items-baseline gap-2.5 text-[13px] font-medium leading-[19px] text-[color:var(--clipboard-card-text)]"
+                    >
+                      <span data-clipboard-image-name class="min-w-0 truncate">
+                        {{ clipboardFileSummary(item).name }}
+                      </span>
+                      <span
+                        v-if="clipboardFileSummary(item).size"
+                        data-clipboard-image-size
+                        class="shrink-0 text-[12px] text-[color:var(--clipboard-card-footer-text)]"
+                      >
+                        {{ clipboardFileSummary(item).size }}
+                      </span>
+                    </div>
                   </div>
                   <div
                     v-else-if="item.contentType === 'fileList'"

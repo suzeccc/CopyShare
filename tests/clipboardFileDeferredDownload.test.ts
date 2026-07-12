@@ -31,11 +31,11 @@ assert.match(
 );
 
 assert.match(floatingPanel, /handleClipboardItemClick/);
-assert.match(floatingPanel, /@click="handleClipboardItemClick\(item\)"/);
+assert.match(floatingPanel, /@click="handleFloatingClipboardItemClick\(item\)"/);
 assert.match(floatingPanel, /isClipboardFileCardInteractive/);
 assert.match(
   floatingPanel,
-  /'cursor-wait': isClipboardFileCardInteractive\([\s\S]*historyStore\.isFileDownloadActive/,
+  /'cursor-wait': isFloatingClipboardItemInteractive\(item\) && historyStore\.isFileDownloadActive/,
 );
 
 assert.match(copyButton, /result\.value = await copyHistoryItem\(props\.historyItemId\)/);

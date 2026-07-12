@@ -192,7 +192,7 @@ pub async fn update_config(
 
 #[tauri::command]
 pub async fn get_history(state: State<'_, AppState>) -> AppResult<Vec<HistoryItem>> {
-    Ok(state.history().await)
+    Ok(history::history_items_for_frontend(&state.history().await))
 }
 
 #[tauri::command]

@@ -20,6 +20,9 @@ const lanCardClass = devices.match(/data-lan-discovery-card[\s\S]*?class="([^"]+
 const mobileCardClass = devices.match(/data-mobile-connect-card[\s\S]*?class="([^"]+)"/)?.[1] ?? "";
 assert.equal(mobileCardClass, lanCardClass);
 assert.doesNotMatch(mobileCardClass, /accent|shadow-\[inset/);
+assert.match(devices, /data-lan-discovery-card[\s\S]*?<div class="min-w-0 flex-1">/);
+assert.match(devices, /data-mobile-connect-card[\s\S]*?<div class="min-w-0 flex-1">/);
+assert.match(devices, /data-mobile-connect-dialog-button[\s\S]*class="shrink-0"/);
 assert.match(devices, /data-mobile-connect-dialog-button[\s\S]*variant="secondary"/);
 
 assert.match(dialog, /data-mobile-connect-dialog/);

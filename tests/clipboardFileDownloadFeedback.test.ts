@@ -5,6 +5,7 @@ import {
   clipboardFileDownloadActivityFromTask,
   getClipboardFileCardAction,
   getClipboardFileDownloadFeedback,
+  limitClipboardFileDownloads,
 } from "../src/lib/clipboardFileDownload.ts";
 import type { ClipboardPreviewItem } from "../src/lib/historyPreview.ts";
 import type { FileTransferTask } from "../src/types/fileTransfer.ts";
@@ -114,3 +115,20 @@ assert.equal(
   getClipboardFileCardAction({ ...item, fileTransferId: undefined }),
   "copy",
 );
+
+const downloads = Object.fromEntries(
+  Array.from({ length: 120 }, (_, index) => [
+    `transfer-${index}`,
+    {
+      status: "completed" as const,
+      transferredBytes: index,
+      totalSize: 120,
+      error: null,
+    },
+  ]),
+);
+const limitedDownloads = limitClipboardFileDownloads(downloads, 100);
+assert.equal(Object.keys(limitedDownloads).length, 100);
+assert.equal(limitedDownloads["transfer-0"], undefined);
+assert.equal(limitedDownloads["transfer-20"]?.transferredBytes, 20);
+assert.equal(limitedDownloads["transfer-119"]?.transferredBytes, 119);

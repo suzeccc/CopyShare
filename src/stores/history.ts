@@ -4,6 +4,7 @@ import { clearHistory, getHistory, onAppEvent } from "@/lib/tauri";
 import {
   applyClipboardFileDownloadProgress,
   clipboardFileDownloadActivityFromTask,
+  limitClipboardFileDownloads,
   type ClipboardFileDownloadActivity,
 } from "@/lib/clipboardFileDownload";
 import { useToastStore } from "@/stores/toasts";
@@ -16,6 +17,7 @@ export const useHistoryStore = defineStore("history", {
     loading: false,
     error: null as string | null,
     fileDownloads: {} as Record<string, ClipboardFileDownloadActivity>,
+    unlisteners: [] as (() => void)[],
   }),
   actions: {
     async refresh() {
@@ -51,7 +53,7 @@ export const useHistoryStore = defineStore("history", {
         return;
       }
       const current = this.fileDownloads[transferId];
-      this.fileDownloads = {
+      this.fileDownloads = limitClipboardFileDownloads({
         ...this.fileDownloads,
         [transferId]: {
           status: "accepted",
@@ -59,14 +61,14 @@ export const useHistoryStore = defineStore("history", {
           totalSize: current?.totalSize ?? 0,
           error: null,
         },
-      };
+      });
     },
     failFileDownload(transferId?: string, error = "文件下载失败") {
       if (!transferId) {
         return;
       }
       const current = this.fileDownloads[transferId];
-      this.fileDownloads = {
+      this.fileDownloads = limitClipboardFileDownloads({
         ...this.fileDownloads,
         [transferId]: {
           status: "failed",
@@ -74,16 +76,16 @@ export const useHistoryStore = defineStore("history", {
           totalSize: current?.totalSize ?? 0,
           error,
         },
-      };
+      });
     },
     updateFileDownloadTask(task: FileTransferTask) {
       if (!task.clipboardSync) {
         return;
       }
-      this.fileDownloads = {
+      this.fileDownloads = limitClipboardFileDownloads({
         ...this.fileDownloads,
         [task.transferId]: clipboardFileDownloadActivityFromTask(task),
-      };
+      });
     },
     updateFileDownloadProgress(progress: FileTransferProgressEvent) {
       const belongsToClipboard = Boolean(this.fileDownloads[progress.transferId])
@@ -91,16 +93,19 @@ export const useHistoryStore = defineStore("history", {
       if (!belongsToClipboard) {
         return;
       }
-      this.fileDownloads = {
+      this.fileDownloads = limitClipboardFileDownloads({
         ...this.fileDownloads,
         [progress.transferId]: applyClipboardFileDownloadProgress(
           this.fileDownloads[progress.transferId],
           progress,
         ),
-      };
+      });
     },
     async subscribe() {
-      await Promise.all([
+      if (this.unlisteners.length) {
+        return;
+      }
+      this.unlisteners = await Promise.all([
         onAppEvent<HistoryItem>("clipboard-synced", (item) => {
           this.items = [item, ...this.items.filter((existing) => existing.id !== item.id)].slice(0, 100);
         }),

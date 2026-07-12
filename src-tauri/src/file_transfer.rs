@@ -33,6 +33,7 @@ use crate::{
 const MAX_SINGLE_FILE_SIZE: u64 = 500 * 1024 * 1024;
 const MAX_TRANSFER_FILE_COUNT: usize = 100;
 const MAX_TRANSFER_TOTAL_SIZE: u64 = 1024 * 1024 * 1024;
+const MAX_RETAINED_TRANSFER_TASKS: usize = 100;
 const TRANSFER_CHUNK_SIZE: usize = 64 * 1024;
 
 static FILE_TRANSFER_MANAGER: OnceLock<Arc<FileTransferManager>> = OnceLock::new();
@@ -1067,7 +1068,9 @@ impl FileTransferManager {
         ) {
             entry.task.completed_at = Some(Utc::now());
         }
-        Ok(entry.task.clone())
+        let task = entry.task.clone();
+        prune_terminal_transfer_tasks(&mut tasks);
+        Ok(task)
     }
 
     async fn mark_file_completed(
@@ -1123,7 +1126,9 @@ impl FileTransferManager {
             file.transferred_bytes = file.size;
             file.error = None;
         }
-        Ok(entry.task.clone())
+        let task = entry.task.clone();
+        prune_terminal_transfer_tasks(&mut tasks);
+        Ok(task)
     }
 
     async fn mark_error_text(
@@ -1153,7 +1158,9 @@ impl FileTransferManager {
                 file.error = Some(message.to_string());
             }
         }
-        Ok(entry.task.clone())
+        let task = entry.task.clone();
+        prune_terminal_transfer_tasks(&mut tasks);
+        Ok(task)
     }
 
     async fn mark_file_failed(
@@ -1173,7 +1180,9 @@ impl FileTransferManager {
             file.status = FileTransferFileStatus::Failed;
             file.error = Some(message.to_string());
         }
-        Ok(entry.task.clone())
+        let task = entry.task.clone();
+        prune_terminal_transfer_tasks(&mut tasks);
+        Ok(task)
     }
 
     async fn cleanup_temp(&self, transfer_id: &str) {
@@ -1497,7 +1506,6 @@ async fn apply_completed_clipboard_file_sync(
         return Ok(());
     }
 
-    clipboard::write_clipboard_files(app, &paths)?;
     let content = clipboard::file_paths_to_clipboard_content(&paths)?;
     let message = ClipboardMessage {
         message_id: task.transfer_id.clone(),
@@ -1508,7 +1516,8 @@ async fn apply_completed_clipboard_file_sync(
         content: content.clone(),
         timestamp: Utc::now().timestamp(),
     };
-    let _ = state.apply_remote_clipboard(&message).await;
+    state.mark_remote_clipboard_applied(&message).await;
+    clipboard::write_clipboard_files(app, &paths)?;
 
     let config = state.config().await;
     if config.save_history {
@@ -1533,7 +1542,7 @@ async fn apply_completed_clipboard_file_sync(
             item
         };
         history::save_history(app, &state.history().await)?;
-        let _ = app.emit("clipboard-synced", item);
+        let _ = app.emit("clipboard-synced", history::history_item_for_frontend(&item));
     }
     Ok(())
 }
@@ -1567,7 +1576,7 @@ async fn push_pending_clipboard_file_history(
     item.file_transfer_status = Some(task.status.clone());
     state.push_history(item.clone()).await;
     history::save_history(app, &state.history().await)?;
-    let _ = app.emit("clipboard-synced", item);
+    let _ = app.emit("clipboard-synced", history::history_item_for_frontend(&item));
     Ok(())
 }
 
@@ -1596,7 +1605,7 @@ async fn update_clipboard_file_history_status(
         .await
     {
         history::save_history(app, &state.history().await)?;
-        let _ = app.emit("clipboard-synced", item);
+        let _ = app.emit("clipboard-synced", history::history_item_for_frontend(&item));
     }
     Ok(())
 }
@@ -1898,6 +1907,45 @@ fn validate_transfer_limits(file_count: usize, sizes: &[u64]) -> AppResult<()> {
         ));
     }
     Ok(())
+}
+
+fn prune_terminal_transfer_tasks(tasks: &mut HashMap<String, ManagedTransfer>) {
+    let terminal_count = tasks
+        .values()
+        .filter(|entry| is_terminal_transfer_status(&entry.task.status))
+        .count();
+    if terminal_count <= MAX_RETAINED_TRANSFER_TASKS {
+        return;
+    }
+
+    let mut removable = tasks
+        .iter()
+        .filter(|(_, entry)| is_terminal_transfer_status(&entry.task.status))
+        .map(|(transfer_id, entry)| {
+            (
+                transfer_id.clone(),
+                entry.task.completed_at.unwrap_or(entry.task.created_at),
+            )
+        })
+        .collect::<Vec<_>>();
+    removable.sort_by_key(|(_, completed_at)| *completed_at);
+
+    for (transfer_id, _) in removable
+        .into_iter()
+        .take(terminal_count - MAX_RETAINED_TRANSFER_TASKS)
+    {
+        tasks.remove(&transfer_id);
+    }
+}
+
+fn is_terminal_transfer_status(status: &FileTransferStatus) -> bool {
+    matches!(
+        status,
+        FileTransferStatus::Completed
+            | FileTransferStatus::Failed
+            | FileTransferStatus::Canceled
+            | FileTransferStatus::Rejected
+    )
 }
 
 async fn sha256_file(path: &Path) -> AppResult<String> {
@@ -2542,5 +2590,36 @@ mod tests {
             Some(FileTransferStatus::Canceled)
         );
         let _ = fs::remove_file(source);
+    }
+
+    #[tokio::test]
+    async fn completed_transfer_tasks_are_pruned_to_recent_entries() {
+        let manager = FileTransferManager::new();
+        let mut sources = Vec::new();
+
+        for index in 0..120 {
+            let source = temp_path(&format!("source-{index}.txt"));
+            fs::write(&source, b"hello").unwrap();
+            let transfer_id = manager
+                .insert_test_send_task(
+                    "device-b",
+                    source.clone(),
+                    &format!("hello-{index}.txt"),
+                    &format!("token-{index}"),
+                )
+                .await;
+            manager.mark_completed(&transfer_id).await.unwrap();
+            sources.push(source);
+        }
+
+        assert_eq!(
+            manager.tasks().await.len(),
+            100,
+            "completed transfer tasks should be capped"
+        );
+
+        for source in sources {
+            let _ = fs::remove_file(source);
+        }
     }
 }

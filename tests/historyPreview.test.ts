@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import {
   CLIPBOARD_PREVIEW_LIMIT,
+  FLOATING_CLIPBOARD_HISTORY_LIMIT,
   FLOATING_CLIPBOARD_PREVIEW_LIMIT,
   CLIPBOARD_CATEGORIES,
   filterClipboardItems,
@@ -9,6 +11,7 @@ import {
   getClipboardDisplayType,
   getFloatingClipboardItems,
   getRecentClipboardItems,
+  shouldShowClipboardItemMore,
   splitClipboardFileSummary,
 } from "../src/lib/historyPreview.ts";
 import type { HistoryItem } from "../src/types/history.ts";
@@ -37,8 +40,12 @@ function stripCreatedAt<T>(value: T): T {
   ));
 }
 
+const historyPreviewSource = readFileSync("src/lib/historyPreview.ts", "utf8");
+
 assert.equal(CLIPBOARD_PREVIEW_LIMIT, 20);
 assert.equal(FLOATING_CLIPBOARD_PREVIEW_LIMIT, 10);
+assert.equal(FLOATING_CLIPBOARD_HISTORY_LIMIT, 50);
+assert.doesNotMatch(historyPreviewSource, /FLOATING_CLIPBOARD_MORE_LIMIT/);
 assert.deepEqual(CLIPBOARD_CATEGORIES, ["全部", "文本", "图片", "视频", "链接", "文件"]);
 
 assert.deepEqual(splitClipboardFileSummary("茶话间.lnk 897 B"), {
@@ -53,6 +60,33 @@ assert.deepEqual(splitClipboardFileSummary("没有大小的文件.txt"), {
   name: "没有大小的文件.txt",
   size: null,
 });
+
+assert.equal(
+  shouldShowClipboardItemMore({ id: "short", text: "短文本", contentType: "text", syncStatus: "synced" }),
+  false,
+);
+assert.equal(
+  shouldShowClipboardItemMore({ id: "multi", text: "第一行\n第二行", contentType: "text", syncStatus: "synced" }),
+  true,
+);
+assert.equal(
+  shouldShowClipboardItemMore({
+    id: "long-file",
+    text: "very-long-copyshare-preview-file-name-that-will-be-clipped.png 25.2 KB",
+    contentType: "image",
+    syncStatus: "synced",
+  }),
+  false,
+);
+assert.equal(
+  shouldShowClipboardItemMore({
+    id: "compact-long-text",
+    text: "定位20条上限应该落在哪个数据流，再写失败测试复现当前超过显示限制的文本",
+    contentType: "text",
+    syncStatus: "synced",
+  }, { textLimit: 18 }),
+  true,
+);
 
 assert.equal(getClipboardLinkUrl("https://copyshare.example/download"), "https://copyshare.example/download");
 assert.equal(
@@ -101,7 +135,7 @@ assert.deepEqual(
   stripCreatedAt(getRecentClipboardItems([
     historyItem({ id: "image-1", summary: "图片 1089 KB", content: "base64", contentType: "image" }),
   ])),
-  [{ id: "image-1", text: "图片", contentType: "image", sourceDevice: "Device", syncStatus: "synced" }],
+  [{ id: "image-1", text: "图片 1089 KB", contentType: "image", sourceDevice: "Device", syncStatus: "synced" }],
 );
 
 assert.equal(
@@ -113,7 +147,7 @@ assert.deepEqual(
   stripCreatedAt(getRecentClipboardItems([
     historyItem({ id: "image-clean", summary: "\u56fe\u7247 2 KB", contentType: "image" }),
   ])),
-  [{ id: "image-clean", text: "\u56fe\u7247", contentType: "image", sourceDevice: "Device", syncStatus: "synced" }],
+  [{ id: "image-clean", text: "\u56fe\u7247 2 KB", contentType: "image", sourceDevice: "Device", syncStatus: "synced" }],
 );
 
 assert.deepEqual(
@@ -131,6 +165,14 @@ assert.deepEqual(getRecentClipboardItems([], 3), []);
 assert.deepEqual(getRecentClipboardItems([historyItem({ id: "empty", summary: " " })], 3), []);
 
 assert.equal(getFloatingClipboardItems(Array.from({ length: 11 }, (_, index) => systemItem(index + 1)), []).length, 10);
+assert.equal(
+  getFloatingClipboardItems(
+    Array.from({ length: 51 }, (_, index) => systemItem(index + 1)),
+    [],
+    FLOATING_CLIPBOARD_HISTORY_LIMIT,
+  ).length,
+  50,
+);
 
 assert.deepEqual(
   stripCreatedAt(getFloatingClipboardItems(

@@ -1,7 +1,10 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { emitTo, listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import {
+  currentMonitor,
   getCurrentWindow,
+  LogicalPosition,
   LogicalSize,
 } from "@tauri-apps/api/window";
 
@@ -10,6 +13,8 @@ import {
   MAIN_WINDOW_BOUNDS,
   TRANSPARENT_WINDOW_BACKGROUND,
 } from "@/lib/windowMode";
+import type { ClipboardPreviewItem } from "@/lib/historyPreview";
+import { getMediaPreviewWindowPosition } from "@/lib/mediaPreviewWindow";
 import type { AppConfig } from "@/types/config";
 import type { DeviceInfo } from "@/types/device";
 import type {
@@ -199,6 +204,166 @@ export function getHistoryFilePreviewPath(historyId: string): Promise<string> {
 
 export function convertLocalFileSrc(filePath: string): string {
   return convertFileSrc(filePath);
+}
+
+export const MEDIA_PREVIEW_WINDOW_LABEL = "media-preview";
+
+export const MEDIA_PREVIEW_WINDOW_BOUNDS = {
+  width: 720,
+  height: 520,
+  offset: 14,
+} as const;
+
+export const FLOATING_CLIPBOARD_WINDOW_LABEL = "floating-clipboard-history";
+
+export const FLOATING_CLIPBOARD_WINDOW_BOUNDS = {
+  width: 460,
+  height: 620,
+  offset: 14,
+} as const;
+
+export const FLOATING_CLIPBOARD_HISTORY_STORAGE_KEY = "copyshare:floating-clipboard-history";
+
+export type MediaPreviewKind = "image" | "video";
+
+export type MediaPreviewPayload = {
+  kind: MediaPreviewKind;
+  historyId: string;
+  title: string;
+  src?: string;
+};
+
+export type FloatingClipboardHistoryPayload = {
+  items: ClipboardPreviewItem[];
+};
+
+function mediaPreviewUrl(payload: MediaPreviewPayload): string {
+  const params = new URLSearchParams({
+    kind: payload.kind,
+    historyId: payload.historyId,
+    title: payload.title,
+  });
+  if (payload.src) {
+    params.set("src", payload.src);
+  }
+  return `/#/media-preview?${params.toString()}`;
+}
+
+async function nearbyFloatingWindowInitialPosition(
+  bounds: { width: number; height: number; offset: number },
+): Promise<LogicalPosition | undefined> {
+  try {
+    const current = getCurrentWindow();
+    const [position, size, scaleFactor, monitor] = await Promise.all([
+      current.outerPosition(),
+      current.outerSize(),
+      current.scaleFactor(),
+      currentMonitor(),
+    ]);
+    const monitorPosition = monitor?.workArea?.position ?? monitor?.position;
+    const monitorSize = monitor?.workArea?.size ?? monitor?.size;
+    if (!monitorPosition || !monitorSize) {
+      return undefined;
+    }
+    const next = getMediaPreviewWindowPosition({
+      floating: {
+        x: position.x / scaleFactor,
+        y: position.y / scaleFactor,
+        width: size.width / scaleFactor,
+        height: size.height / scaleFactor,
+      },
+      monitor: {
+        x: monitorPosition.x / scaleFactor,
+        y: monitorPosition.y / scaleFactor,
+        width: monitorSize.width / scaleFactor,
+        height: monitorSize.height / scaleFactor,
+      },
+      preview: bounds,
+    });
+
+    return new LogicalPosition(next.x, next.y);
+  } catch {
+    return undefined;
+  }
+}
+
+async function mediaPreviewInitialPosition(): Promise<LogicalPosition | undefined> {
+  return nearbyFloatingWindowInitialPosition(MEDIA_PREVIEW_WINDOW_BOUNDS);
+}
+
+export async function openMediaPreviewWindow(payload: MediaPreviewPayload): Promise<void> {
+  const existing = await WebviewWindow.getByLabel(MEDIA_PREVIEW_WINDOW_LABEL);
+  if (existing) {
+    await emitTo(MEDIA_PREVIEW_WINDOW_LABEL, "media-preview-open", payload);
+    await existing.show();
+    await existing.setFocus();
+    return;
+  }
+
+  const position = await mediaPreviewInitialPosition();
+  new WebviewWindow(MEDIA_PREVIEW_WINDOW_LABEL, {
+    url: mediaPreviewUrl(payload),
+    title: "媒体预览",
+    width: MEDIA_PREVIEW_WINDOW_BOUNDS.width,
+    height: MEDIA_PREVIEW_WINDOW_BOUNDS.height,
+    minWidth: 420,
+    minHeight: 300,
+    x: position?.x,
+    y: position?.y,
+    decorations: false,
+    transparent: true,
+    backgroundColor: TRANSPARENT_WINDOW_BACKGROUND,
+    resizable: true,
+    visible: true,
+    focus: true,
+    alwaysOnTop: true,
+    shadow: false,
+  });
+}
+
+function writeFloatingClipboardHistoryPayload(payload: FloatingClipboardHistoryPayload): void {
+  window.localStorage.setItem(FLOATING_CLIPBOARD_HISTORY_STORAGE_KEY, JSON.stringify(payload));
+}
+
+export async function updateFloatingClipboardHistoryWindow(payload: FloatingClipboardHistoryPayload): Promise<void> {
+  writeFloatingClipboardHistoryPayload(payload);
+  const existing = await WebviewWindow.getByLabel(FLOATING_CLIPBOARD_WINDOW_LABEL);
+  if (!existing) {
+    return;
+  }
+
+  await emitTo(FLOATING_CLIPBOARD_WINDOW_LABEL, "floating-clipboard-refresh", payload);
+}
+
+export async function openFloatingClipboardHistoryWindow(payload: FloatingClipboardHistoryPayload): Promise<void> {
+  writeFloatingClipboardHistoryPayload(payload);
+  const existing = await WebviewWindow.getByLabel(FLOATING_CLIPBOARD_WINDOW_LABEL);
+  if (existing) {
+    await emitTo(FLOATING_CLIPBOARD_WINDOW_LABEL, "floating-clipboard-refresh", payload);
+    await existing.show();
+    await existing.setFocus();
+    return;
+  }
+
+  const position = await nearbyFloatingWindowInitialPosition(FLOATING_CLIPBOARD_WINDOW_BOUNDS);
+  new WebviewWindow(FLOATING_CLIPBOARD_WINDOW_LABEL, {
+    url: "/#/floating-clipboard",
+    title: "剪贴板内容",
+    width: FLOATING_CLIPBOARD_WINDOW_BOUNDS.width,
+    height: FLOATING_CLIPBOARD_WINDOW_BOUNDS.height,
+    minWidth: 360,
+    minHeight: 360,
+    x: position?.x,
+    y: position?.y,
+    decorations: false,
+    transparent: true,
+    backgroundColor: TRANSPARENT_WINDOW_BACKGROUND,
+    resizable: true,
+    visible: true,
+    focus: true,
+    alwaysOnTop: true,
+    shadow: false,
+  });
 }
 
 export function openExternalUrl(url: string): Promise<void> {

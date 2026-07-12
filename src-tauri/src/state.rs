@@ -23,6 +23,8 @@ use crate::{
     sync::SyncEngine,
 };
 
+const MAX_TRANSIENT_PEER_TRACKING: usize = 1024;
+
 #[derive(Clone)]
 pub struct AppState {
     inner: Arc<AppStateInner>,
@@ -357,11 +359,12 @@ impl AppState {
     }
 
     pub async fn mark_manual_trust_required(&self, connection_id: &str) {
-        self.inner
-            .manual_trust_required
-            .lock()
-            .await
-            .insert(connection_id.to_string());
+        let mut manual_trust_required = self.inner.manual_trust_required.lock().await;
+        insert_bounded_set(
+            &mut manual_trust_required,
+            connection_id.to_string(),
+            MAX_TRANSIENT_PEER_TRACKING,
+        );
     }
 
     pub async fn clear_manual_trust_required(&self, device_key: &str) {
@@ -415,11 +418,12 @@ impl AppState {
     }
 
     pub async fn mark_peer_confirmation_required(&self, connection_id: &str) {
-        self.inner
-            .peer_confirmation_requests
-            .lock()
-            .await
-            .insert(connection_id.to_string());
+        let mut peer_confirmation_requests = self.inner.peer_confirmation_requests.lock().await;
+        insert_bounded_set(
+            &mut peer_confirmation_requests,
+            connection_id.to_string(),
+            MAX_TRANSIENT_PEER_TRACKING,
+        );
     }
 
     pub async fn peer_confirmation_required(&self, connection_id: &str) -> bool {
@@ -678,7 +682,12 @@ impl AppState {
             &device_id,
             endpoint.as_deref(),
         );
-        pending.insert(connection_id.to_string(), PendingPeerIdentity { device_id, endpoint });
+        insert_bounded_map(
+            &mut pending,
+            connection_id.to_string(),
+            PendingPeerIdentity { device_id, endpoint },
+            MAX_TRANSIENT_PEER_TRACKING,
+        );
     }
 
     pub async fn remove_peer(&self, connection_id: &str) {
@@ -687,11 +696,14 @@ impl AppState {
             remove_pending_peer_by_key(&mut pending, connection_id)
         };
         if !removed_pending_ids.is_empty() {
-            self.inner
-                .ignored_peer_connections
-                .lock()
-                .await
-                .extend(removed_pending_ids);
+            let mut ignored = self.inner.ignored_peer_connections.lock().await;
+            for removed_pending_id in removed_pending_ids {
+                insert_bounded_set(
+                    &mut ignored,
+                    removed_pending_id,
+                    MAX_TRANSIENT_PEER_TRACKING,
+                );
+            }
         }
         let mut peers = self.inner.peers.lock().await;
         let mut disconnected_keys = Vec::new();
@@ -816,11 +828,12 @@ impl AppState {
     }
 
     pub async fn mark_peer_rejected(&self, connection_id: &str) {
-        self.inner
-            .rejected_peer_connections
-            .lock()
-            .await
-            .insert(connection_id.to_string());
+        let mut rejected_peer_connections = self.inner.rejected_peer_connections.lock().await;
+        insert_bounded_set(
+            &mut rejected_peer_connections,
+            connection_id.to_string(),
+            MAX_TRANSIENT_PEER_TRACKING,
+        );
     }
 
     pub async fn take_peer_rejected(&self, connection_id: &str) -> bool {
@@ -988,6 +1001,39 @@ fn manual_trust_required_matches_peer(
 fn push_unique_key(keys: &mut Vec<String>, key: &str) {
     if !keys.iter().any(|existing| existing == key) {
         keys.push(key.to_string());
+    }
+}
+
+fn insert_bounded_set(set: &mut HashSet<String>, value: String, max_len: usize) {
+    set.insert(value.clone());
+    while set.len() > max_len {
+        let Some(stale) = set
+            .iter()
+            .find(|candidate| candidate.as_str() != value)
+            .cloned()
+        else {
+            break;
+        };
+        set.remove(&stale);
+    }
+}
+
+fn insert_bounded_map<T>(
+    map: &mut HashMap<String, T>,
+    key: String,
+    value: T,
+    max_len: usize,
+) {
+    map.insert(key.clone(), value);
+    while map.len() > max_len {
+        let Some(stale) = map
+            .keys()
+            .find(|candidate| candidate.as_str() != key)
+            .cloned()
+        else {
+            break;
+        };
+        map.remove(&stale);
     }
 }
 
@@ -1942,6 +1988,68 @@ mod device_dedup_tests {
 
         assert_eq!(rejected.id, "new-device");
         assert!(state.devices().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn transient_peer_tracking_is_bounded_and_keeps_latest_keys() {
+        let state = AppState::new();
+
+        for index in 0..1100 {
+            let connection_id = format!("ws://10.194.33.{index}:8765/");
+            state.mark_manual_trust_required(&connection_id).await;
+            state.mark_peer_confirmation_required(&connection_id).await;
+            state.mark_peer_rejected(&connection_id).await;
+            state
+                .attach_peer_device(
+                    &connection_id,
+                    format!("device-{index}"),
+                    Some(connection_id.clone()),
+                )
+                .await;
+        }
+
+        let latest = "ws://10.194.33.1099:8765/";
+        assert!(state
+            .manual_trust_required_for_peer(latest, "device-1099", latest)
+            .await);
+        assert!(state.peer_confirmation_required(latest).await);
+        assert!(state.take_peer_rejected(latest).await);
+        assert!(
+            state.inner.manual_trust_required.lock().await.len() <= 1024,
+            "manual trust tracking should be bounded"
+        );
+        assert!(
+            state.inner.peer_confirmation_requests.lock().await.len() <= 1024,
+            "confirmation tracking should be bounded"
+        );
+        assert!(
+            state.inner.rejected_peer_connections.lock().await.len() <= 1024,
+            "rejection tracking should be bounded"
+        );
+        assert!(
+            state.inner.pending_peer_identities.lock().await.len() <= 1024,
+            "pending peer identities should be bounded"
+        );
+
+        for index in 0..1100 {
+            let connection_id = format!("ws://10.195.33.{index}:8765/");
+            state
+                .attach_peer_device(
+                    &connection_id,
+                    format!("ignored-device-{index}"),
+                    Some(connection_id.clone()),
+                )
+                .await;
+            state.remove_peer(&connection_id).await;
+        }
+
+        let latest_ignored = "ws://10.195.33.1099:8765/";
+        let ignored = state.inner.ignored_peer_connections.lock().await;
+        assert!(
+            ignored.len() <= 1024,
+            "ignored peer tracking should be bounded"
+        );
+        assert!(ignored.contains(latest_ignored));
     }
 }
 

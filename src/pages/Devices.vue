@@ -112,12 +112,13 @@ async function scanLanDevices() {
             data-lan-discovery-card
             class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[color:var(--main-line-soft)] bg-[color:var(--field-bg)] p-4"
           >
-            <div class="min-w-0">
+            <div class="min-w-0 flex-1">
               <p class="text-sm font-semibold text-white">局域网自动发现</p>
               <p class="mt-1 text-xs leading-5 text-[color:var(--muted-text)]">扫描同网段 CopyShare 电脑设备。</p>
             </div>
             <Button
               data-lan-discovery-scan-button
+              class="shrink-0"
               variant="secondary"
               :disabled="devicesStore.loading || lanDiscoveryScanning"
               @click="scanLanDevices"
@@ -129,12 +130,13 @@ async function scanLanDevices() {
             data-mobile-connect-card
             class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[color:var(--main-line-soft)] bg-[color:var(--field-bg)] p-4"
           >
-            <div class="min-w-0">
+            <div class="min-w-0 flex-1">
               <p class="text-sm font-semibold text-white">手机连接</p>
               <p class="mt-1 text-xs leading-5 text-[color:var(--muted-text)]">手机扫码临时传输剪贴板，无需安装 App。</p>
             </div>
             <Button
               data-mobile-connect-dialog-button
+              class="shrink-0"
               variant="secondary"
               @click="showMobileConnectDialog = true"
             >

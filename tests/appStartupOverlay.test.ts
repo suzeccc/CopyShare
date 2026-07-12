@@ -5,7 +5,11 @@ const app = readFileSync("src/App.vue", "utf8");
 const style = readFileSync("src/style.css", "utf8");
 
 assert.match(app, /const STARTUP_OVERLAY_MIN_MS = 900;/);
-assert.match(app, /const startupVisible = ref\(true\);/);
+assert.match(app, /function isUtilityWindowStartupBypassed\(\)/);
+assert.match(app, /#\/media-preview/);
+assert.match(app, /#\/floating-clipboard/);
+assert.match(app, /const startupVisible = ref\(!isUtilityWindowStartupBypassed\(\)\);/);
+assert.match(app, /v-if="startupVisible && !isMediaPreviewRoute"/);
 assert.match(app, /performance\.now\(\)/);
 assert.match(app, /Math\.max\(STARTUP_OVERLAY_MIN_MS - elapsed, 0\)/);
 assert.match(app, /startupVisible\.value = false;/);

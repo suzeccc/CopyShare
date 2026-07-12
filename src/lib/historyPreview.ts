@@ -20,6 +20,9 @@ export type ClipboardPreviewItem = {
 
 export const CLIPBOARD_PREVIEW_LIMIT = 20;
 export const FLOATING_CLIPBOARD_PREVIEW_LIMIT = 10;
+export const FLOATING_CLIPBOARD_HISTORY_LIMIT = 50;
+export const CLIPBOARD_MORE_TEXT_LIMIT = 80;
+export const CLIPBOARD_MORE_FILE_NAME_LIMIT = 32;
 export const CLIPBOARD_CATEGORIES = ["全部", "文本", "图片", "视频", "链接", "文件"] as const;
 
 export type ClipboardCategory = (typeof CLIPBOARD_CATEGORIES)[number];
@@ -35,12 +38,13 @@ export type ClipboardFileSummary = {
   size: string | null;
 };
 
+export type ClipboardMoreVisibilityOptions = {
+  textLimit?: number;
+};
+
 function previewText(item: HistoryItem): string {
   if (item.contentType === "text") {
     return item.content || item.summary;
-  }
-  if (item.contentType === "image") {
-    return stripSizeSuffix(item.summary);
   }
   return item.summary;
 }
@@ -63,6 +67,23 @@ export function splitClipboardFileSummary(text: string): ClipboardFileSummary {
 
 export function getClipboardLinkUrl(text: string): string | null {
   return text.match(/https?:\/\/[^\s]+/i)?.[0] ?? null;
+}
+
+export function shouldShowClipboardItemMore(
+  item: Pick<ClipboardPreviewItem, "text" | "contentType">,
+  options: ClipboardMoreVisibilityOptions = {},
+): boolean {
+  const text = item.text.trim();
+  if (!text) {
+    return false;
+  }
+  if (item.contentType !== "text") {
+    return false;
+  }
+  if (text.includes("\n")) {
+    return true;
+  }
+  return text.length > (options.textLimit ?? CLIPBOARD_MORE_TEXT_LIMIT);
 }
 
 export function isClipboardVideoFile(item: Pick<ClipboardPreviewItem, "text" | "contentType">): boolean {

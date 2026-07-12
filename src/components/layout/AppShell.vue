@@ -9,13 +9,18 @@ import Sidebar from "@/components/layout/Sidebar.vue";
 import TitleBar from "@/components/layout/TitleBar.vue";
 import WindowTitleBar from "@/components/layout/WindowTitleBar.vue";
 import { deviceAddress } from "@/lib/format";
-import { getFloatingClipboardItems, type ClipboardPreviewItem } from "@/lib/historyPreview";
+import {
+  FLOATING_CLIPBOARD_HISTORY_LIMIT,
+  getFloatingClipboardItems,
+  type ClipboardPreviewItem,
+} from "@/lib/historyPreview";
 import { namedTrustDevices } from "@/lib/trustPrompt";
 import {
   enterFloatingWindow,
   getClipboardHistory,
   hideMainWindow,
   restoreMainWindow,
+  updateFloatingClipboardHistoryWindow,
 } from "@/lib/tauri";
 import { getLatencyLabel, type AppWindowMode } from "@/lib/windowMode";
 import type { WindowTransitionPointer } from "@/lib/windowTransition";
@@ -42,7 +47,7 @@ const clipboardHistoryItems = computed(() =>
   getFloatingClipboardItems(
     systemClipboardItems.value,
     historyStore.items,
-    Math.max(systemClipboardItems.value.length + historyStore.items.length, 1),
+    FLOATING_CLIPBOARD_HISTORY_LIMIT,
   ),
 );
 const latencyLabel = computed(() =>
@@ -87,6 +92,20 @@ watch(
 
     mainScrollRef.value.scrollTop = 0;
     mainScrollRef.value.scrollLeft = 0;
+  },
+  { flush: "post" },
+);
+
+watch(
+  clipboardHistoryItems,
+  (items) => {
+    if (!isFloating.value) {
+      return;
+    }
+
+    void updateFloatingClipboardHistoryWindow({
+      items,
+    });
   },
   { flush: "post" },
 );

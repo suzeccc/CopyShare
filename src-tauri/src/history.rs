@@ -188,14 +188,24 @@ fn history_content(message: &ClipboardMessage) -> String {
 fn history_items_for_disk(items: &[HistoryItem]) -> Vec<HistoryItem> {
     items
         .iter()
-        .map(|item| {
-            let mut item = item.clone();
-            if item.content_type == ClipboardContentType::Image {
-                item.content.clear();
-            }
-            item
-        })
+        .map(strip_frontend_heavy_content)
         .collect()
+}
+
+pub fn history_items_for_frontend(items: &[HistoryItem]) -> Vec<HistoryItem> {
+    items.iter().map(strip_frontend_heavy_content).collect()
+}
+
+pub fn history_item_for_frontend(item: &HistoryItem) -> HistoryItem {
+    strip_frontend_heavy_content(item)
+}
+
+fn strip_frontend_heavy_content(item: &HistoryItem) -> HistoryItem {
+    let mut item = item.clone();
+    if item.content_type == ClipboardContentType::Image {
+        item.content.clear();
+    }
+    item
 }
 
 fn save_history_images(image_dir: &PathBuf, items: &[HistoryItem]) -> AppResult<()> {
@@ -744,6 +754,27 @@ mod tests {
 
         assert_eq!(disk_items[0].summary, "图片");
         assert!(disk_items[0].content.is_empty());
+    }
+
+    #[test]
+    fn image_history_content_is_stripped_before_sending_to_frontend() {
+        let content = STANDARD.encode(vec![0; 4096]);
+        let message = ClipboardMessage {
+            message_id: "m".to_string(),
+            source_device_id: "d".to_string(),
+            source_device_name: "Device".to_string(),
+            content_type: crate::models::ClipboardContentType::Image,
+            content,
+            content_hash: "hash".to_string(),
+            timestamp: 1,
+        };
+
+        let item = make_history_item(HistoryDirection::Local, "Device", &message);
+        let frontend_items = history_items_for_frontend(&[item.clone()]);
+
+        assert!(!item.content.is_empty(), "state keeps content for copy");
+        assert_eq!(frontend_items[0].summary, item.summary);
+        assert!(frontend_items[0].content.is_empty());
     }
 
     #[test]

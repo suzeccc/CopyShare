@@ -98,6 +98,20 @@ pub fn clipboard_has_image_data() -> bool {
     }
 }
 
+pub fn clipboard_sequence_number() -> Option<u32> {
+    #[cfg(target_os = "windows")]
+    {
+        let sequence =
+            unsafe { windows::Win32::System::DataExchange::GetClipboardSequenceNumber() };
+        return (sequence != 0).then_some(sequence);
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        None
+    }
+}
+
 pub fn write_clipboard_files(app: &AppHandle, paths: &[PathBuf]) -> AppResult<()> {
     if paths.is_empty() {
         return Err(AppError::InvalidInput("鏂囦欢鍒楄〃涓虹┖".to_string()));
@@ -146,6 +160,20 @@ pub fn file_paths_to_clipboard_content(paths: &[PathBuf]) -> AppResult<String> {
         })
         .collect::<Vec<_>>();
     serde_json::to_string(&entries).map_err(Into::into)
+}
+
+pub fn summarize_image_file_paths(paths: &[PathBuf]) -> AppResult<Option<String>> {
+    let image_paths = paths
+        .iter()
+        .filter(|path| is_supported_image_file(path))
+        .cloned()
+        .collect::<Vec<_>>();
+    if image_paths.is_empty() {
+        return Ok(None);
+    }
+
+    let content = file_paths_to_clipboard_content(&image_paths)?;
+    Ok(Some(summarize_file_content(&content)))
 }
 
 pub fn clipboard_content_to_file_entries(content: &str) -> AppResult<Vec<ClipboardFileEntry>> {
@@ -853,6 +881,20 @@ mod tests {
                 .expect("unsupported extension should not be an error")
                 .is_none()
         );
+    }
+
+    #[test]
+    fn image_file_summary_uses_file_name_and_size() {
+        let path = std::env::temp_dir().join(format!("copyshare-image-summary-{}.png", uuid::Uuid::new_v4()));
+        std::fs::write(&path, vec![1; 1536]).expect("test image file should be written");
+
+        let summary = summarize_image_file_paths(&[path.clone()])
+            .expect("image paths should summarize")
+            .expect("image path should produce summary");
+
+        let _ = std::fs::remove_file(path);
+        assert!(summary.starts_with("copyshare-image-summary-"));
+        assert!(summary.ends_with(".png 1.50 KB"));
     }
 
     #[test]

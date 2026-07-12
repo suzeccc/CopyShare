@@ -44,6 +44,7 @@ node_modules/
 .pnpm-store/
 target/
 src-tauri/target/
+src-tauri/target-exe-build/
 src-tauri/gen/
 src-tauri/.tauri/
 

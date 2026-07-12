@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     net::{IpAddr, Ipv4Addr, SocketAddr},
     sync::{Arc, OnceLock},
 };
@@ -38,6 +38,7 @@ pub const MOBILE_TEXT_LIMIT_BYTES: usize = 100 * 1024;
 pub const MOBILE_SESSION_TTL: Duration = Duration::from_secs(15 * 60);
 pub const MOBILE_DEVICE_NAME: &str = "移动端";
 const MOBILE_PC_ITEM_LIMIT: usize = 20;
+const MAX_RETAINED_MOBILE_SESSIONS: usize = 10;
 const DEFAULT_PC_SOURCE_DEVICE: &str = "CopyShare";
 
 static MOBILE_RUNTIME: OnceLock<MobileRuntime> = OnceLock::new();
@@ -70,6 +71,7 @@ pub struct MobileSessionStore {
     host: String,
     port: u16,
     sessions: HashMap<String, MobileSession>,
+    session_order: VecDeque<String>,
     test_clock_offset: chrono::Duration,
 }
 
@@ -99,6 +101,7 @@ impl MobileSessionStore {
             host: host.into(),
             port,
             sessions: HashMap::new(),
+            session_order: VecDeque::new(),
             test_clock_offset: chrono::Duration::zero(),
         }
     }
@@ -123,7 +126,7 @@ impl MobileSessionStore {
             DEFAULT_PC_SOURCE_DEVICE.to_string(),
         );
         let view = self.session_view(&session);
-        self.sessions.insert(session.id.clone(), session);
+        self.insert_session(session);
         Ok(view)
     }
 
@@ -136,7 +139,7 @@ impl MobileSessionStore {
             DEFAULT_PC_SOURCE_DEVICE.to_string(),
         );
         let view = self.session_view(&session);
-        self.sessions.insert(session.id.clone(), session);
+        self.insert_session(session);
         Ok(view)
     }
 
@@ -154,7 +157,7 @@ impl MobileSessionStore {
         self.close_open_sessions();
         let session = self.new_session(MobileSessionMode::Bidirectional, contents, source_device);
         let view = self.session_view(&session);
-        self.sessions.insert(session.id.clone(), session);
+        self.insert_session(session);
         Ok(view)
     }
 
@@ -288,6 +291,7 @@ impl MobileSessionStore {
             session.phase = MobileSessionPhase::Closed;
             session.clone()
         };
+        self.prune_finished_sessions();
         Ok(self.session_view(&view_session))
     }
 
@@ -393,6 +397,33 @@ impl MobileSessionStore {
             return Err(AppError::InvalidInput("此二维码已失效".to_string()));
         }
         Ok(())
+    }
+
+    fn insert_session(&mut self, session: MobileSession) {
+        let id = session.id.clone();
+        self.sessions.insert(id.clone(), session);
+        self.session_order.push_back(id);
+        self.prune_finished_sessions();
+    }
+
+    fn prune_finished_sessions(&mut self) {
+        let max_checks = self.session_order.len();
+        let mut checked = 0;
+
+        while self.sessions.len() > MAX_RETAINED_MOBILE_SESSIONS && checked < max_checks {
+            let Some(id) = self.session_order.pop_front() else {
+                break;
+            };
+            checked += 1;
+
+            match self.sessions.get(&id) {
+                Some(session) if session_is_finished(&session.phase) => {
+                    self.sessions.remove(&id);
+                }
+                Some(_) => self.session_order.push_back(id),
+                None => {}
+            }
+        }
     }
 
     fn close_open_sessions(&mut self) {
@@ -538,7 +569,7 @@ async fn record_mobile_submitted_history(
     let item = mobile_submitted_history_item_from_message(message);
     state.push_history(item.clone()).await;
     history::save_history(app, &state.history().await)?;
-    let _ = app.emit("clipboard-synced", item);
+    let _ = app.emit("clipboard-synced", history::history_item_for_frontend(&item));
     Ok(())
 }
 
@@ -1414,6 +1445,29 @@ mod tests {
         );
         assert!(store.load_send_content_items(&first.id, &first_token).is_err());
         assert_eq!(store.get_session_view(&second.id).unwrap().phase, MobileSessionPhase::Waiting);
+    }
+
+    #[test]
+    fn repeated_mobile_sessions_do_not_accumulate_unbounded_closed_sessions() {
+        let mut store = MobileSessionStore::new_for_tests("10.194.34.119", 8766);
+        let mut latest_id = String::new();
+
+        for index in 0..40 {
+            latest_id = store
+                .create_session(vec![format!("session {index}")])
+                .unwrap()
+                .id;
+        }
+
+        assert!(
+            store.sessions.len() <= 10,
+            "expected closed mobile sessions to be pruned, got {}",
+            store.sessions.len()
+        );
+        assert_eq!(
+            store.get_session_view(&latest_id).unwrap().phase,
+            MobileSessionPhase::Waiting
+        );
     }
 
     #[test]

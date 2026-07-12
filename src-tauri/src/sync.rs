@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -34,6 +34,7 @@ use crate::models::AppConfig;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
 const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(60);
+const MAX_TRACKED_CLIPBOARD_MESSAGES: usize = 1_024;
 
 fn heartbeat_timed_out(
     last_seen_at: tokio::time::Instant,
@@ -60,9 +61,11 @@ pub struct SyncEngine {
     device_id: String,
     device_name: String,
     seen_message_ids: HashSet<String>,
+    seen_message_order: VecDeque<String>,
     last_local_hash: Option<String>,
     last_remote_hash: Option<String>,
     pending_remote_echo_hashes: HashSet<String>,
+    pending_remote_echo_order: VecDeque<String>,
 }
 
 impl SyncEngine {
@@ -71,9 +74,11 @@ impl SyncEngine {
             device_id: device_id.into(),
             device_name: device_name.into(),
             seen_message_ids: HashSet::new(),
+            seen_message_order: VecDeque::new(),
             last_local_hash: None,
             last_remote_hash: None,
             pending_remote_echo_hashes: HashSet::new(),
+            pending_remote_echo_order: VecDeque::new(),
         }
     }
 
@@ -109,6 +114,8 @@ impl SyncEngine {
         let local_hash = content_hash(&content_type, &content);
 
         if self.pending_remote_echo_hashes.remove(&local_hash) {
+            self.pending_remote_echo_order
+                .retain(|hash| hash != &local_hash);
             self.last_local_hash = Some(local_hash);
             return None;
         }
@@ -127,7 +134,11 @@ impl SyncEngine {
             timestamp: Utc::now().timestamp(),
         };
         self.last_local_hash = Some(local_hash);
-        self.seen_message_ids.insert(message.message_id.clone());
+        insert_bounded(
+            &mut self.seen_message_ids,
+            &mut self.seen_message_order,
+            message.message_id.clone(),
+        );
         Some(message)
     }
 
@@ -149,11 +160,18 @@ impl SyncEngine {
     }
 
     pub fn mark_remote_message_applied(&mut self, message: &ClipboardMessage) {
-        self.seen_message_ids.insert(message.message_id.clone());
+        insert_bounded(
+            &mut self.seen_message_ids,
+            &mut self.seen_message_order,
+            message.message_id.clone(),
+        );
         self.last_remote_hash = Some(message.content_hash.clone());
         self.last_local_hash = Some(message.content_hash.clone());
-        self.pending_remote_echo_hashes
-            .insert(message.content_hash.clone());
+        insert_bounded(
+            &mut self.pending_remote_echo_hashes,
+            &mut self.pending_remote_echo_order,
+            message.content_hash.clone(),
+        );
     }
 
     pub fn apply_remote_message(&mut self, message: &ClipboardMessage) -> bool {
@@ -259,6 +277,26 @@ async fn is_file_transfer_http_stream(stream: &TcpStream) -> bool {
     }
 }
 
+fn insert_bounded(set: &mut HashSet<String>, order: &mut VecDeque<String>, value: String) {
+    if set.insert(value.clone()) {
+        order.push_back(value);
+    }
+
+    while let Some(front) = order.front() {
+        if set.contains(front) {
+            break;
+        }
+        order.pop_front();
+    }
+
+    while set.len() > MAX_TRACKED_CLIPBOARD_MESSAGES {
+        let Some(oldest) = order.pop_front() else {
+            break;
+        };
+        set.remove(&oldest);
+    }
+}
+
 fn is_file_transfer_http_request_prefix(bytes: &[u8]) -> bool {
     let Ok(text) = std::str::from_utf8(bytes) else {
         return false;
@@ -269,13 +307,31 @@ fn is_file_transfer_http_request_prefix(bytes: &[u8]) -> bool {
 pub fn start_clipboard_monitor(app: AppHandle, state: AppState) {
     tauri::async_runtime::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_millis(450));
+        let mut last_clipboard_sequence = None;
         loop {
             interval.tick().await;
+            if !should_poll_clipboard_sequence(
+                &mut last_clipboard_sequence,
+                clipboard::clipboard_sequence_number(),
+            ) {
+                continue;
+            }
             if let Err(error) = poll_local_clipboard(&app, &state).await {
                 emit_sync_error(&app, &state, error.to_string()).await;
             }
         }
     });
+}
+
+fn should_poll_clipboard_sequence(last_sequence: &mut Option<u32>, current: Option<u32>) -> bool {
+    let Some(current) = current else {
+        return true;
+    };
+    if last_sequence.as_ref() == Some(&current) {
+        return false;
+    }
+    *last_sequence = Some(current);
+    true
 }
 
 pub async fn start_sync_runtime(app: AppHandle, state: AppState) -> AppResult<()> {
@@ -816,7 +872,8 @@ async fn handle_wire_text(app: &AppHandle, state: &AppState, connection_id: &str
                     );
                     state.push_history(item.clone()).await;
                     let _ = history::save_history(app, &state.history().await);
-                    let _ = app.emit("clipboard-synced", item);
+                    let _ =
+                        app.emit("clipboard-synced", history::history_item_for_frontend(&item));
                 }
                 if should_forward_applied_remote_clipboard() {
                     state.broadcast_trusted(&config, clipboard.into()).await;
@@ -848,7 +905,7 @@ async fn poll_local_clipboard(app: &AppHandle, state: &AppState) -> AppResult<()
     if config.sync_text {
         if let Ok(text) = clipboard::read_clipboard_text(app) {
             if let Some(message) = state.observe_local_text(text).await {
-                record_observed_local_history(app, state, &config, &message).await?;
+                record_observed_local_history(app, state, &config, &message, None).await?;
                 changed = true;
             }
         }
@@ -868,9 +925,16 @@ async fn poll_local_clipboard(app: &AppHandle, state: &AppState) -> AppResult<()
     }
 
     if config.sync_image && !observed_file_list {
+        let image_file_summary = if config.sync_files {
+            clipboard::read_clipboard_files()
+                .ok()
+                .and_then(|files| clipboard::summarize_image_file_paths(&files).ok().flatten())
+        } else {
+            None
+        };
         if let Some(image_base64) = clipboard::read_clipboard_image_base64(app)? {
             if let Some(message) = state.observe_local_image(image_base64).await {
-                record_observed_local_history(app, state, &config, &message).await?;
+                record_observed_local_history(app, state, &config, &message, image_file_summary).await?;
                 changed = true;
             }
         }
@@ -907,6 +971,7 @@ async fn record_observed_local_history(
     state: &AppState,
     config: &AppConfig,
     message: &ClipboardMessage,
+    summary_override: Option<String>,
 ) -> AppResult<()> {
     let sent_count = if state.status().await.running {
         state.broadcast_trusted(config, message.clone().into()).await
@@ -930,11 +995,12 @@ async fn record_observed_local_history(
         config,
         message,
         local_sync_status_from_sent_count(sent_count),
+        summary_override,
     )
     .await
     {
         history::save_history(app, &state.history().await)?;
-        let _ = app.emit("clipboard-synced", item);
+        let _ = app.emit("clipboard-synced", history::history_item_for_frontend(&item));
     }
 
     Ok(())
@@ -962,11 +1028,12 @@ async fn record_observed_local_file_list(
         config,
         message,
         local_sync_status_from_sent_count(sent_count),
+        None,
     )
     .await
     {
         history::save_history(app, &state.history().await)?;
-        let _ = app.emit("clipboard-synced", item);
+        let _ = app.emit("clipboard-synced", history::history_item_for_frontend(&item));
     }
 
     Ok(())
@@ -977,17 +1044,21 @@ async fn push_local_history_item(
     config: &AppConfig,
     message: &ClipboardMessage,
     sync_status: SyncStatus,
+    summary_override: Option<String>,
 ) -> Option<crate::models::HistoryItem> {
     if !config.save_history {
         return None;
     }
 
-    let item = history::make_history_item_with_status(
+    let mut item = history::make_history_item_with_status(
         HistoryDirection::Local,
         message.source_device_name.clone(),
         message,
         sync_status,
     );
+    if let Some(summary) = summary_override.filter(|summary| !summary.trim().is_empty()) {
+        item.summary = summary;
+    }
     Some(state.upsert_history_by_content(item).await)
 }
 
@@ -1296,6 +1367,28 @@ mod tests {
     }
 
     #[test]
+    fn applied_message_tracking_is_bounded() {
+        let mut engine = SyncEngine::new("device-a", "Laptop A");
+
+        for index in 0..2_000 {
+            let remote = remote_message(
+                &format!("remote-{index}"),
+                &format!("remote text {index}"),
+            );
+            engine.mark_remote_message_applied(&remote);
+        }
+
+        assert!(
+            engine.seen_message_ids.len() <= 1_024,
+            "seen message ids should not grow without bound"
+        );
+        assert!(
+            engine.pending_remote_echo_hashes.len() <= 1_024,
+            "pending echo hashes should not grow without bound"
+        );
+    }
+
+    #[test]
     fn own_device_messages_are_ignored() {
         let mut engine = SyncEngine::new("device-a", "Laptop A");
         let content_type = ClipboardContentType::Text;
@@ -1353,6 +1446,16 @@ mod tests {
             last_seen,
             last_seen + Duration::from_secs(60)
         ));
+    }
+
+    #[test]
+    fn clipboard_sequence_polling_skips_unchanged_sequence() {
+        let mut last = None;
+
+        assert!(should_poll_clipboard_sequence(&mut last, Some(10)));
+        assert!(!should_poll_clipboard_sequence(&mut last, Some(10)));
+        assert!(should_poll_clipboard_sequence(&mut last, Some(11)));
+        assert!(should_poll_clipboard_sequence(&mut last, None));
     }
 
     #[test]
@@ -2131,6 +2234,7 @@ mod tests {
             &config,
             &message,
             crate::models::SyncStatus::Unsynced,
+            None,
         )
         .await
         .expect("history should be recorded");
@@ -2165,6 +2269,7 @@ mod tests {
             &config,
             &message,
             local_sync_status_from_sent_count(sent_count),
+            None,
         )
         .await
         .expect("history should be recorded");
