@@ -81,6 +81,7 @@ pub fn make_history_item_with_status(
         source_device: source_device.into(),
         summary: summarize_message(message),
         content: history_content(message),
+        content_hash: message.content_hash.clone(),
         content_type: message.content_type.clone(),
         sync_status,
         file_transfer_id: None,
@@ -795,6 +796,7 @@ mod tests {
 
         assert_eq!(item.summary, "a.txt 1.00 KB");
         assert_eq!(item.content, content);
+        assert_eq!(item.content_hash, "hash");
         assert_eq!(disk_items[0].content, content);
     }
 
@@ -811,6 +813,7 @@ mod tests {
             source_device: "Device".to_string(),
             summary: "image".to_string(),
             content: content.clone(),
+            content_hash: String::new(),
             content_type: ClipboardContentType::Image,
             sync_status: SyncStatus::Synced,
             file_transfer_id: None,
@@ -842,6 +845,7 @@ mod tests {
             source_device: "Device".to_string(),
             summary: "image".to_string(),
             content: STANDARD.encode(vec![1; 16]),
+            content_hash: String::new(),
             content_type: ClipboardContentType::Image,
             sync_status: SyncStatus::Synced,
             file_transfer_id: None,
@@ -883,6 +887,7 @@ mod tests {
             source_device: "Device".to_string(),
             summary: "image".to_string(),
             content: STANDARD.encode(png),
+            content_hash: String::new(),
             content_type: ClipboardContentType::Image,
             sync_status: SyncStatus::Synced,
             file_transfer_id: None,
@@ -921,6 +926,7 @@ mod tests {
             source_device: "Device".to_string(),
             summary: "image".to_string(),
             content: STANDARD.encode(vec![1; 16]),
+            content_hash: String::new(),
             content_type: ClipboardContentType::Image,
             sync_status: SyncStatus::Synced,
             file_transfer_id: None,

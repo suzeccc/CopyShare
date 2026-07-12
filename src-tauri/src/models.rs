@@ -289,6 +289,8 @@ pub struct HistoryItem {
     pub summary: String,
     #[serde(default)]
     pub content: String,
+    #[serde(default)]
+    pub content_hash: String,
     pub content_type: ClipboardContentType,
     #[serde(default)]
     pub sync_status: SyncStatus,
@@ -298,6 +300,79 @@ pub struct HistoryItem {
     pub file_transfer_status: Option<FileTransferStatus>,
     pub success: bool,
     pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum LibraryRole {
+    Saved,
+    Snippet,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum LibraryAssetKind {
+    Image,
+    File,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryAssetRef {
+    pub asset_id: String,
+    pub kind: LibraryAssetKind,
+    pub file_name: String,
+    pub relative_path: String,
+    pub sha256: String,
+    pub size: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryItem {
+    pub id: String,
+    pub role: LibraryRole,
+    pub content_type: ClipboardContentType,
+    pub title: String,
+    #[serde(default)]
+    pub content: String,
+    pub summary: String,
+    #[serde(default)]
+    pub assets: Vec<LibraryAssetRef>,
+    #[serde(default)]
+    pub source_history_id: Option<String>,
+    #[serde(default)]
+    pub source_content_hash: Option<String>,
+    #[serde(default)]
+    pub source_device: String,
+    pub content_hash: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub note: String,
+    #[serde(default)]
+    pub is_pinned: bool,
+    #[serde(default)]
+    pub pin_order: Option<u64>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct LibrarySnapshot {
+    pub items: Vec<LibraryItem>,
+    #[serde(default)]
+    pub warning: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryItemUpdate {
+    pub title: String,
+    pub content: Option<String>,
+    pub tags: Vec<String>,
+    pub note: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

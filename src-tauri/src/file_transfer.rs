@@ -2315,12 +2315,14 @@ mod tests {
     }
 
     fn local_file_history(content: String) -> HistoryItem {
+        let content_hash = crate::sync::content_hash(&ClipboardContentType::FileList, &content);
         HistoryItem {
             id: "local-file".to_string(),
             direction: HistoryDirection::Local,
             source_device: "CopyShare".to_string(),
             summary: "file.txt 5 B".to_string(),
             content,
+            content_hash,
             content_type: ClipboardContentType::FileList,
             sync_status: SyncStatus::Synced,
             file_transfer_id: None,

@@ -7,6 +7,7 @@ mod discovery;
 mod error;
 mod file_transfer;
 mod history;
+mod library;
 mod mobile;
 mod models;
 mod network;
