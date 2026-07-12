@@ -8,6 +8,7 @@ import Home from "@/pages/Home.vue";
 import Logs from "@/pages/Logs.vue";
 import MediaPreview from "@/pages/MediaPreview.vue";
 import MobileQr from "@/pages/MobileQr.vue";
+import Ocr from "@/pages/Ocr.vue";
 import Settings from "@/pages/Settings.vue";
 import Translate from "@/pages/Translate.vue";
 
@@ -16,6 +17,7 @@ const router = createRouter({
   routes: [
     { path: "/", name: "home", component: Home },
     { path: "/clipboard", name: "clipboard", component: Clipboard },
+    { path: "/ocr", name: "ocr", component: Ocr },
     { path: "/translate", name: "translate", component: Translate },
     { path: "/devices", name: "devices", component: Devices },
     { path: "/mobile", name: "mobile", component: MobileQr },
