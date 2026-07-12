@@ -11,6 +11,7 @@ mod mobile;
 mod models;
 mod network;
 mod notifications;
+mod ocr;
 mod security;
 mod state;
 mod sync;

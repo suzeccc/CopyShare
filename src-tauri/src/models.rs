@@ -128,6 +128,16 @@ pub struct TranslateResponse {
     pub engine: TranslationEngine,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OcrResponse {
+    pub text: String,
+    pub preview_base64: String,
+    pub image_width: u32,
+    pub image_height: u32,
+    pub error: Option<String>,
+}
+
 fn default_translation_model() -> String {
     "gpt-4o-mini".to_string()
 }
