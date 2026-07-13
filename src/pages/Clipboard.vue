@@ -528,7 +528,7 @@ function clipboardTime(value: string | undefined) {
                 <button
                   data-history-favorite
                   type="button"
-                  class="clipboard-card-library-action"
+                  class="clipboard-card-library-action clipboard-card-favorite-action"
                   :class="{ active: libraryStore.isHistoryItemSaved(item.id, item.contentHash) }"
                   :disabled="isHistoryActionBusy(item)"
                   :aria-label="libraryStore.isHistoryItemSaved(item.id, item.contentHash) ? '移出收藏夹' : '收藏'"
@@ -822,7 +822,7 @@ function clipboardTime(value: string | undefined) {
                       <button
                         data-history-favorite
                         type="button"
-                        class="clipboard-card-library-action"
+                        class="clipboard-card-library-action clipboard-card-favorite-action"
                         :class="{ active: libraryStore.isHistoryItemSaved(item.id, item.contentHash) }"
                         :disabled="isHistoryActionBusy(item)"
                         :aria-label="libraryStore.isHistoryItemSaved(item.id, item.contentHash) ? '移出收藏夹' : '收藏'"
@@ -1142,6 +1142,16 @@ function clipboardTime(value: string | undefined) {
 .clipboard-card-library-action.active {
   background: var(--accent-soft);
   color: var(--accent-text);
+}
+
+.clipboard-card-favorite-action:hover:not(:disabled) {
+  background: transparent;
+  color: white;
+}
+
+.clipboard-card-favorite-action.active {
+  background: transparent;
+  color: white;
 }
 
 .clipboard-card-library-action:focus-visible {
