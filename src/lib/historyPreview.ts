@@ -181,8 +181,6 @@ export function getFloatingClipboardItems(
       createdAt: item.createdAt,
       fileTransferId: item.fileTransferId,
       fileTransferStatus: item.fileTransferStatus,
-      isPinned: false,
-      pinnedAt: undefined,
     }))
     .filter((item) => item.text.length > 0)
     .slice(0, limit);
