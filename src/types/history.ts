@@ -15,6 +15,8 @@ export interface HistoryItem {
   syncStatus: HistorySyncStatus;
   fileTransferId?: string;
   fileTransferStatus?: FileTransferStatus;
+  isPinned: boolean;
+  pinnedAt?: string;
   success: boolean;
   createdAt: string;
 }

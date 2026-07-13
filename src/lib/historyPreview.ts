@@ -17,6 +17,8 @@ export type ClipboardPreviewItem = {
   createdAt?: string;
   fileTransferId?: string;
   fileTransferStatus?: FileTransferStatus;
+  isPinned: boolean;
+  pinnedAt?: string;
 };
 
 export const CLIPBOARD_PREVIEW_LIMIT = 20;
@@ -114,6 +116,8 @@ export function getRecentClipboardItems(
       createdAt: item.createdAt,
       fileTransferId: item.fileTransferId,
       fileTransferStatus: item.fileTransferStatus,
+      isPinned: item.isPinned,
+      pinnedAt: item.pinnedAt,
     }))
     .filter((item) => item.text.length > 0)
     .slice(0, limit);
@@ -177,6 +181,8 @@ export function getFloatingClipboardItems(
       createdAt: item.createdAt,
       fileTransferId: item.fileTransferId,
       fileTransferStatus: item.fileTransferStatus,
+      isPinned: false,
+      pinnedAt: undefined,
     }))
     .filter((item) => item.text.length > 0)
     .slice(0, limit);

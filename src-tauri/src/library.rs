@@ -931,6 +931,8 @@ mod tests {
             sync_status: SyncStatus::Synced,
             file_transfer_id: None,
             file_transfer_status: None,
+            is_pinned: false,
+            pinned_at: None,
             success: true,
             created_at: Utc::now(),
         }

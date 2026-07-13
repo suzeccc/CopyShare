@@ -301,6 +301,10 @@ pub struct HistoryItem {
     pub file_transfer_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file_transfer_status: Option<FileTransferStatus>,
+    #[serde(default)]
+    pub is_pinned: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pinned_at: Option<DateTime<Utc>>,
     pub success: bool,
     pub created_at: DateTime<Utc>,
 }

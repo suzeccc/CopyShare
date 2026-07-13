@@ -7,12 +7,12 @@ use std::{
 use std::os::windows::process::CommandExt;
 
 use base64::Engine;
-use chrono::Utc;
+use chrono::{Duration as ChronoDuration, Utc};
 use tauri::{AppHandle, Manager};
 use uuid::Uuid;
 
 use crate::{
-    error::AppResult,
+    error::{AppError, AppResult},
     models::{ClipboardContentType, ClipboardMessage, HistoryDirection, HistoryItem, SyncStatus},
 };
 
@@ -86,13 +86,52 @@ pub fn make_history_item_with_status(
         sync_status,
         file_transfer_id: None,
         file_transfer_status: None,
+        is_pinned: false,
+        pinned_at: None,
         success: true,
         created_at: Utc::now(),
     }
 }
 
 pub fn push_history(items: &mut Vec<HistoryItem>, item: HistoryItem) {
-    items.insert(0, item);
+    items.push(item);
+    sort_and_prune_history(items);
+}
+
+pub fn set_history_item_pinned(
+    items: &mut Vec<HistoryItem>,
+    id: &str,
+    pinned: bool,
+) -> AppResult<()> {
+    let newest_pin = items.iter().filter_map(|item| item.pinned_at).max();
+    let item = items
+        .iter_mut()
+        .find(|item| item.id == id)
+        .ok_or_else(|| AppError::InvalidInput("历史记录不存在".to_string()))?;
+    item.is_pinned = pinned;
+    item.pinned_at = if pinned {
+        let now = Utc::now();
+        Some(match newest_pin {
+            Some(latest) if latest >= now => latest + ChronoDuration::nanoseconds(1),
+            _ => now,
+        })
+    } else {
+        None
+    };
+    sort_and_prune_history(items);
+    Ok(())
+}
+
+pub fn sort_and_prune_history(items: &mut Vec<HistoryItem>) {
+    items.sort_by(|left, right| match (left.is_pinned, right.is_pinned) {
+        (true, false) => std::cmp::Ordering::Less,
+        (false, true) => std::cmp::Ordering::Greater,
+        (true, true) => right
+            .pinned_at
+            .cmp(&left.pinned_at)
+            .then_with(|| right.created_at.cmp(&left.created_at)),
+        (false, false) => right.created_at.cmp(&left.created_at),
+    });
     items.truncate(HISTORY_LIMIT);
 }
 
@@ -116,8 +155,8 @@ pub fn upsert_history_by_content(items: &mut Vec<HistoryItem>, item: HistoryItem
         if item.sync_status == SyncStatus::Synced {
             existing.sync_status = SyncStatus::Synced;
         }
-        items.insert(0, existing.clone());
-        items.truncate(HISTORY_LIMIT);
+        items.push(existing.clone());
+        sort_and_prune_history(items);
         return existing;
     }
 
@@ -818,6 +857,8 @@ mod tests {
             sync_status: SyncStatus::Synced,
             file_transfer_id: None,
             file_transfer_status: None,
+            is_pinned: false,
+            pinned_at: None,
             success: true,
             created_at: Utc::now(),
         };
@@ -850,6 +891,8 @@ mod tests {
             sync_status: SyncStatus::Synced,
             file_transfer_id: None,
             file_transfer_status: None,
+            is_pinned: false,
+            pinned_at: None,
             success: true,
             created_at: Utc::now(),
         };
@@ -892,6 +935,8 @@ mod tests {
             sync_status: SyncStatus::Synced,
             file_transfer_id: None,
             file_transfer_status: None,
+            is_pinned: false,
+            pinned_at: None,
             success: true,
             created_at: Utc::now(),
         };
@@ -931,6 +976,8 @@ mod tests {
             sync_status: SyncStatus::Synced,
             file_transfer_id: None,
             file_transfer_status: None,
+            is_pinned: false,
+            pinned_at: None,
             success: true,
             created_at: Utc::now(),
         };
@@ -993,6 +1040,62 @@ mod tests {
         let items = load_history_items_from_text(text).expect("legacy history should load");
 
         assert_eq!(items[0].sync_status, crate::models::SyncStatus::Synced);
+        assert!(!items[0].is_pinned);
+        assert!(items[0].pinned_at.is_none());
+    }
+
+    #[test]
+    fn newly_pinned_history_moves_before_older_pins() {
+        let message = ClipboardMessage {
+            message_id: "m".to_string(),
+            source_device_id: "d".to_string(),
+            source_device_name: "Device".to_string(),
+            content_type: ClipboardContentType::Text,
+            content: "first".to_string(),
+            content_hash: "first".to_string(),
+            timestamp: 1,
+        };
+        let mut first = make_history_item(HistoryDirection::Local, "Device", &message);
+        first.id = "first".to_string();
+        let mut second = first.clone();
+        second.id = "second".to_string();
+        second.content = "second".to_string();
+        let mut items = vec![first, second];
+
+        set_history_item_pinned(&mut items, "first", true).unwrap();
+        set_history_item_pinned(&mut items, "second", true).unwrap();
+
+        assert_eq!(items[0].id, "second");
+        assert!(items[0].is_pinned);
+        assert!(items[0].pinned_at.is_some());
+    }
+
+    #[test]
+    fn history_capacity_retains_pinned_items() {
+        let message = ClipboardMessage {
+            message_id: "m".to_string(),
+            source_device_id: "d".to_string(),
+            source_device_name: "Device".to_string(),
+            content_type: ClipboardContentType::Text,
+            content: "pinned".to_string(),
+            content_hash: "pinned".to_string(),
+            timestamp: 1,
+        };
+        let mut pinned = make_history_item(HistoryDirection::Local, "Device", &message);
+        pinned.id = "keep-pinned".to_string();
+        let mut items = vec![pinned];
+        set_history_item_pinned(&mut items, "keep-pinned", true).unwrap();
+
+        for index in 0..105 {
+            let mut item = make_history_item(HistoryDirection::Local, "Device", &message);
+            item.id = format!("item-{index}");
+            item.created_at = Utc::now() + chrono::Duration::milliseconds(index);
+            push_history(&mut items, item);
+        }
+
+        assert_eq!(items.len(), HISTORY_LIMIT);
+        assert!(items.iter().any(|item| item.id == "keep-pinned"));
+        assert_eq!(items[0].id, "keep-pinned");
     }
 
     #[test]
