@@ -326,11 +326,19 @@ pub fn start_clipboard_monitor(app: AppHandle, state: AppState) {
         let mut last_clipboard_sequence = None;
         loop {
             interval.tick().await;
+            let current_clipboard_sequence = clipboard::clipboard_sequence_number();
             if !should_poll_clipboard_sequence(
                 &mut last_clipboard_sequence,
-                clipboard::clipboard_sequence_number(),
+                current_clipboard_sequence,
             ) {
                 continue;
+            }
+            let config = state.config().await;
+            if should_reset_local_observation_for_sequence(
+                config.deduplicate_sync_content,
+                current_clipboard_sequence,
+            ) {
+                state.reset_local_clipboard_observation().await;
             }
             if let Err(error) = poll_local_clipboard(&app, &state).await {
                 emit_sync_error(&app, &state, error.to_string()).await;
@@ -348,6 +356,13 @@ fn should_poll_clipboard_sequence(last_sequence: &mut Option<u32>, current: Opti
     }
     *last_sequence = Some(current);
     true
+}
+
+fn should_reset_local_observation_for_sequence(
+    deduplicate_sync_content: bool,
+    current_sequence: Option<u32>,
+) -> bool {
+    !deduplicate_sync_content && current_sequence.is_some()
 }
 
 pub async fn start_sync_runtime(app: AppHandle, state: AppState) -> AppResult<()> {
@@ -1540,6 +1555,21 @@ mod tests {
         assert!(!should_poll_clipboard_sequence(&mut last, Some(10)));
         assert!(should_poll_clipboard_sequence(&mut last, Some(11)));
         assert!(should_poll_clipboard_sequence(&mut last, None));
+    }
+
+    #[test]
+    fn disabled_deduplication_allows_same_content_on_a_new_clipboard_sequence() {
+        let mut engine = SyncEngine::new("device-a", "Laptop A");
+        assert!(engine.observe_local_text("repeat").is_some());
+        assert!(engine.observe_local_text("repeat").is_none());
+
+        if should_reset_local_observation_for_sequence(false, Some(11)) {
+            engine.reset_local_observation();
+        }
+
+        assert!(engine.observe_local_text("repeat").is_some());
+        assert!(!should_reset_local_observation_for_sequence(true, Some(12)));
+        assert!(!should_reset_local_observation_for_sequence(false, None));
     }
 
     #[test]
