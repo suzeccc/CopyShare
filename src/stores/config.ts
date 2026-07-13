@@ -17,7 +17,7 @@ const defaultConfig: AppConfig = {
   syncText: true,
   syncImage: true,
   syncFiles: true,
-  deduplicateSyncContent: false,
+  deduplicateSyncContent: true,
   fileSaveDir: null,
   autoOpenFolderAfterSave: false,
   discoveryScanRanges: [],

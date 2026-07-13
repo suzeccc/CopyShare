@@ -162,7 +162,7 @@ pub struct AppConfig {
     pub sync_text: bool,
     pub sync_image: bool,
     pub sync_files: bool,
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub deduplicate_sync_content: bool,
     #[serde(default)]
     pub file_save_dir: Option<String>,
@@ -216,7 +216,7 @@ impl Default for AppConfig {
             sync_text: true,
             sync_image: true,
             sync_files: true,
-            deduplicate_sync_content: false,
+            deduplicate_sync_content: true,
             file_save_dir: None,
             auto_open_folder_after_save: false,
             discovery_scan_ranges: Vec::new(),

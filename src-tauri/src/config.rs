@@ -114,7 +114,7 @@ mod tests {
         assert!(config.sync_text);
         assert!(config.sync_image);
         assert!(config.sync_files);
-        assert!(!config.deduplicate_sync_content);
+        assert!(config.deduplicate_sync_content);
         assert_eq!(config.file_save_dir, None);
         assert!(!config.auto_open_folder_after_save);
         assert!(config.trusted_devices.is_empty());
@@ -151,6 +151,27 @@ mod tests {
         let config: AppConfig = serde_json::from_value(json).unwrap();
 
         assert_eq!(config.theme, crate::models::AppTheme::Win11Dark);
+        assert!(config.deduplicate_sync_content);
+    }
+
+    #[test]
+    fn explicit_disabled_deduplication_is_preserved() {
+        let json = serde_json::json!({
+            "deviceName": "CopyShare",
+            "deviceId": "device-test",
+            "port": 8765,
+            "autoStart": false,
+            "autoSync": true,
+            "saveHistory": true,
+            "trustedDevices": [],
+            "syncText": true,
+            "syncImage": true,
+            "syncFiles": true,
+            "deduplicateSyncContent": false
+        });
+
+        let config: AppConfig = serde_json::from_value(json).unwrap();
+
         assert!(!config.deduplicate_sync_content);
     }
 
