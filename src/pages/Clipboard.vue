@@ -542,7 +542,7 @@ function clipboardTime(value: string | undefined) {
                 <button
                   data-history-pin
                   type="button"
-                  class="clipboard-card-library-action"
+                  class="clipboard-card-library-action clipboard-card-pin-action"
                   :class="{ active: libraryStore.isHistoryItemPinned(item.id) }"
                   :disabled="isHistoryActionBusy(item)"
                   :aria-label="libraryStore.isHistoryItemPinned(item.id) ? '取消置顶' : '收藏并置顶'"
@@ -836,7 +836,7 @@ function clipboardTime(value: string | undefined) {
                       <button
                         data-history-pin
                         type="button"
-                        class="clipboard-card-library-action"
+                        class="clipboard-card-library-action clipboard-card-pin-action"
                         :class="{ active: libraryStore.isHistoryItemPinned(item.id) }"
                         :disabled="isHistoryActionBusy(item)"
                         :aria-label="libraryStore.isHistoryItemPinned(item.id) ? '取消置顶' : '收藏并置顶'"
@@ -1150,6 +1150,16 @@ function clipboardTime(value: string | undefined) {
 }
 
 .clipboard-card-favorite-action.active {
+  background: transparent;
+  color: white;
+}
+
+.clipboard-card-pin-action:hover:not(:disabled) {
+  background: transparent;
+  color: white;
+}
+
+.clipboard-card-pin-action.active {
   background: transparent;
   color: white;
 }

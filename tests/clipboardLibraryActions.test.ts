@@ -22,6 +22,15 @@ test("recent and modal clipboard cards expose favorite and pin actions", () => {
     page,
     /\.clipboard-card-favorite-action\.active[\s\S]*?background:\s*transparent[\s\S]*?color:\s*white/,
   );
+  assert.equal((page.match(/clipboard-card-pin-action/g) ?? []).length, 4);
+  assert.match(
+    page,
+    /\.clipboard-card-pin-action:hover:not\(:disabled\)[\s\S]*?background:\s*transparent/,
+  );
+  assert.match(
+    page,
+    /\.clipboard-card-pin-action\.active[\s\S]*?background:\s*transparent[\s\S]*?color:\s*white/,
+  );
   assert.match(page, /libraryStore\.collectHistoryItem\(item\.id, false\)/);
   assert.match(page, /libraryStore\.collectHistoryItem\(item\.id, true\)/);
 });
