@@ -5,6 +5,7 @@ import Clipboard from "@/pages/Clipboard.vue";
 import Devices from "@/pages/Devices.vue";
 import FloatingClipboardHistory from "@/pages/FloatingClipboardHistory.vue";
 import Home from "@/pages/Home.vue";
+import Library from "@/pages/Library.vue";
 import Logs from "@/pages/Logs.vue";
 import MediaPreview from "@/pages/MediaPreview.vue";
 import MobileQr from "@/pages/MobileQr.vue";
@@ -17,6 +18,7 @@ const router = createRouter({
   routes: [
     { path: "/", name: "home", component: Home },
     { path: "/clipboard", name: "clipboard", component: Clipboard },
+    { path: "/library", name: "library", component: Library },
     { path: "/ocr", name: "ocr", component: Ocr },
     { path: "/translate", name: "translate", component: Translate },
     { path: "/devices", name: "devices", component: Devices },
