@@ -12,9 +12,9 @@ import {
   FLOATING_WINDOW_BOUNDS,
   MAIN_WINDOW_BOUNDS,
   TRANSPARENT_WINDOW_BACKGROUND,
-} from "@/lib/windowMode";
+} from "./windowMode.ts";
 import type { ClipboardPreviewItem } from "@/lib/historyPreview";
-import { getMediaPreviewWindowPosition } from "@/lib/mediaPreviewWindow";
+import { getMediaPreviewWindowPosition } from "./mediaPreviewWindow.ts";
 import type { AppConfig } from "@/types/config";
 import type { DeviceInfo } from "@/types/device";
 import type {

@@ -1,5 +1,17 @@
 import { defineStore } from "pinia";
 
+import {
+  collectHistoryItem as collectHistoryItemApi,
+  convertLibraryItemToSnippet,
+  copyLibraryItem,
+  createTextSnippet,
+  getLibrary,
+  onAppEvent,
+  removeLibraryItem,
+  reorderPinnedLibraryItems,
+  setLibraryItemPinned,
+  updateLibraryItem,
+} from "../lib/tauri.ts";
 import type {
   CreateSnippetInput,
   LibraryContentFilter,
@@ -8,10 +20,6 @@ import type {
   LibrarySnapshot,
   LibraryView,
 } from "@/types/library";
-
-async function api() {
-  return import("@/lib/tauri");
-}
 
 export const useLibraryStore = defineStore("library", {
   state: () => ({
@@ -84,14 +92,14 @@ export const useLibraryStore = defineStore("library", {
       if (this.loading) return;
       this.loading = true;
       try {
-        this.applySnapshot(await (await api()).getLibrary());
+        this.applySnapshot(await getLibrary());
       } finally {
         this.loading = false;
       }
     },
     async subscribe() {
       if (this.unlisten) return;
-      this.unlisten = await (await api()).onAppEvent<LibrarySnapshot>(
+      this.unlisten = await onAppEvent<LibrarySnapshot>(
         "library-updated",
         (snapshot) => this.applySnapshot(snapshot),
       );
@@ -115,32 +123,32 @@ export const useLibraryStore = defineStore("library", {
     },
     async collectHistoryItem(historyId: string, pin: boolean) {
       await this.withItemAction(historyId, async () =>
-        (await api()).collectHistoryItem(historyId, pin));
+        collectHistoryItemApi(historyId, pin));
     },
     async createSnippet(input: CreateSnippetInput) {
-      this.applySnapshot(await (await api()).createTextSnippet(input));
+      this.applySnapshot(await createTextSnippet(input));
     },
     async updateItem(id: string, update: LibraryItemUpdate) {
       await this.withItemAction(id, async () =>
-        (await api()).updateLibraryItem(id, update));
+        updateLibraryItem(id, update));
     },
     async convertToSnippet(id: string) {
       await this.withItemAction(id, async () =>
-        (await api()).convertLibraryItemToSnippet(id));
+        convertLibraryItemToSnippet(id));
     },
     async setPinned(id: string, pinned: boolean) {
       await this.withItemAction(id, async () =>
-        (await api()).setLibraryItemPinned(id, pinned));
+        setLibraryItemPinned(id, pinned));
     },
     async reorderPinned(ids: string[]) {
-      this.applySnapshot(await (await api()).reorderPinnedLibraryItems(ids));
+      this.applySnapshot(await reorderPinnedLibraryItems(ids));
     },
     async removeItem(id: string) {
       await this.withItemAction(id, async () =>
-        (await api()).removeLibraryItem(id));
+        removeLibraryItem(id));
     },
     async copyItem(id: string) {
-      await this.withItemAction(id, async () => (await api()).copyLibraryItem(id));
+      await this.withItemAction(id, async () => copyLibraryItem(id));
     },
   },
 });
