@@ -6,6 +6,8 @@ use std::{
 };
 
 use chrono::Utc;
+use base64::Engine;
+use image::ImageEncoder;
 use sha2::{Digest, Sha256};
 use tauri::Manager;
 use uuid::Uuid;
@@ -13,8 +15,8 @@ use uuid::Uuid;
 use crate::{
     error::{AppError, AppResult},
     models::{
-        ClipboardContentType, LibraryAssetKind, LibraryAssetRef, LibraryItem, LibraryRole,
-        LibrarySnapshot,
+        ClipboardContentType, HistoryItem, LibraryAssetKind, LibraryAssetRef, LibraryItem,
+        LibraryItemUpdate, LibraryRole, LibrarySnapshot,
     },
 };
 
@@ -25,6 +27,17 @@ const TITLE_LIMIT: usize = 120;
 const NOTE_LIMIT: usize = 2_000;
 const TAG_LIMIT: usize = 20;
 const TAG_LENGTH_LIMIT: usize = 32;
+const LIBRARY_ITEM_LIMIT: usize = 5_000;
+const FILE_COUNT_LIMIT: usize = 100;
+const FILE_SIZE_LIMIT: u64 = 500 * 1024 * 1024;
+const FILE_TOTAL_SIZE_LIMIT: u64 = 1024 * 1024 * 1024;
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum LibraryCopyPayload {
+    Text(String),
+    Image(String),
+    Files(Vec<PathBuf>),
+}
 
 struct NormalizedMetadata {
     title: String,
@@ -174,11 +187,7 @@ fn load_library_from_dir(root: &Path) -> LibrarySnapshot {
     }
 }
 
-pub fn save_library(app: &tauri::AppHandle, items: &[LibraryItem]) -> AppResult<()> {
-    save_library_to_dir(&app.path().app_data_dir()?, items)
-}
-
-fn save_library_to_dir(root: &Path, items: &[LibraryItem]) -> AppResult<()> {
+pub(crate) fn save_library_to_dir(root: &Path, items: &[LibraryItem]) -> AppResult<()> {
     fs::create_dir_all(root)?;
     let target = root.join(LIBRARY_FILE);
     let temp = root.join("library.json.tmp");
@@ -321,12 +330,452 @@ pub fn library_storage_size(root: &Path) -> AppResult<u64> {
         + directory_size(&root.join(LIBRARY_THUMBNAIL_DIR))?)
 }
 
+fn default_text_title(content: &str) -> String {
+    let first_line = content.lines().next().unwrap_or_default().trim();
+    let title = first_line.chars().take(40).collect::<String>();
+    if title.is_empty() {
+        "文本".to_string()
+    } else {
+        title
+    }
+}
+
+fn asset_collection_hash(
+    content_type: &ClipboardContentType,
+    assets: &[LibraryAssetRef],
+) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(match content_type {
+        ClipboardContentType::Text => b"text".as_slice(),
+        ClipboardContentType::Image => b"image".as_slice(),
+        ClipboardContentType::FileList => b"fileList".as_slice(),
+    });
+    for asset in assets {
+        hasher.update([0]);
+        hasher.update(asset.sha256.as_bytes());
+    }
+    format!("{:x}", hasher.finalize())
+}
+
+fn source_hash(history: &HistoryItem) -> String {
+    if history.content_hash.trim().is_empty() {
+        crate::sync::content_hash(&history.content_type, &history.content)
+    } else {
+        history.content_hash.clone()
+    }
+}
+
+fn next_pin_order(items: &[LibraryItem]) -> u64 {
+    items
+        .iter()
+        .filter_map(|item| item.pin_order)
+        .max()
+        .map(|order| order.saturating_add(1))
+        .unwrap_or(0)
+}
+
+fn saved_item_from_history(root: &Path, history: &HistoryItem) -> AppResult<LibraryItem> {
+    if !history.success {
+        return Err(AppError::InvalidInput("历史项不可用".into()));
+    }
+
+    let now = Utc::now();
+    let mut item = LibraryItem {
+        id: Uuid::new_v4().to_string(),
+        role: LibraryRole::Saved,
+        content_type: history.content_type.clone(),
+        title: history.summary.trim().to_string(),
+        content: String::new(),
+        summary: history.summary.trim().to_string(),
+        assets: vec![],
+        source_history_id: Some(history.id.clone()),
+        source_content_hash: Some(source_hash(history)),
+        source_device: history.source_device.clone(),
+        content_hash: String::new(),
+        tags: vec![],
+        note: String::new(),
+        is_pinned: false,
+        pin_order: None,
+        created_at: now,
+        updated_at: now,
+    };
+
+    match history.content_type {
+        ClipboardContentType::Text => {
+            let content = history.content.trim();
+            if content.is_empty() {
+                return Err(AppError::InvalidInput("文本历史为空".into()));
+            }
+            item.title = default_text_title(content);
+            item.summary = crate::history::summarize(content);
+            item.content = content.to_string();
+            item.content_hash = text_hash(&LibraryRole::Saved, content);
+        }
+        ClipboardContentType::Image => {
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(history.content.trim())
+                .map_err(|error| AppError::InvalidInput(format!("图片数据无效：{error}")))?;
+            image::load_from_memory(&bytes)
+                .map_err(|error| AppError::InvalidInput(format!("图片数据损坏：{error}")))?;
+            let asset = store_asset(root, LibraryAssetKind::Image, "image.png", &bytes)?;
+            item.title = if item.title.is_empty() {
+                "图片".into()
+            } else {
+                item.title
+            };
+            item.summary = "图片".into();
+            item.assets = vec![asset];
+            item.content_hash = asset_collection_hash(&item.content_type, &item.assets);
+        }
+        ClipboardContentType::FileList => {
+            let entries = crate::clipboard::clipboard_content_to_file_entries(&history.content)?;
+            if entries.is_empty() || entries.len() > FILE_COUNT_LIMIT {
+                return Err(AppError::InvalidInput("文件数量必须在 1 到 100 之间".into()));
+            }
+
+            let mut total_size = 0_u64;
+            let mut sources = Vec::with_capacity(entries.len());
+            for entry in entries {
+                let path = PathBuf::from(&entry.path);
+                let metadata = fs::metadata(&path).map_err(|_| {
+                    AppError::InvalidInput(format!("文件不存在或无法读取：{}", path.display()))
+                })?;
+                if !metadata.is_file() {
+                    return Err(AppError::InvalidInput(format!(
+                        "收藏项不是文件：{}",
+                        path.display()
+                    )));
+                }
+                if metadata.len() > FILE_SIZE_LIMIT {
+                    return Err(AppError::InvalidInput(format!(
+                        "单个文件不能超过 500 MiB：{}",
+                        entry.name
+                    )));
+                }
+                total_size = total_size.saturating_add(metadata.len());
+                if total_size > FILE_TOTAL_SIZE_LIMIT {
+                    return Err(AppError::InvalidInput("单次收藏文件总量不能超过 1 GiB".into()));
+                }
+                sources.push((entry.name, path));
+            }
+
+            for (file_name, path) in sources {
+                let bytes = fs::read(&path)?;
+                item.assets.push(store_asset(
+                    root,
+                    LibraryAssetKind::File,
+                    &file_name,
+                    &bytes,
+                )?);
+            }
+            item.title = if item.title.is_empty() {
+                "文件".into()
+            } else {
+                item.title
+            };
+            item.content_hash = asset_collection_hash(&item.content_type, &item.assets);
+        }
+    }
+
+    Ok(item)
+}
+
+pub fn collect_history_item(
+    root: &Path,
+    items: &[LibraryItem],
+    history: &HistoryItem,
+    pin: bool,
+) -> AppResult<Vec<LibraryItem>> {
+    let candidate = match saved_item_from_history(root, history) {
+        Ok(item) => item,
+        Err(error) => {
+            let _ = prune_library_resources(root, items);
+            return Err(error);
+        }
+    };
+    let mut next = items.to_vec();
+
+    if let Some(existing) = next.iter_mut().find(|item| {
+        item.role == LibraryRole::Saved && item.content_hash == candidate.content_hash
+    }) {
+        existing.source_history_id = candidate.source_history_id;
+        existing.source_content_hash = candidate.source_content_hash;
+        existing.source_device = candidate.source_device;
+        existing.updated_at = Utc::now();
+        if pin && !existing.is_pinned {
+            existing.is_pinned = true;
+            existing.pin_order = Some(next_pin_order(items));
+        }
+        prune_library_resources(root, &next)?;
+        return Ok(sort_library_items(next));
+    }
+
+    if next.len() >= LIBRARY_ITEM_LIMIT {
+        prune_library_resources(root, items)?;
+        return Err(AppError::InvalidInput("收藏库最多保存 5000 项".into()));
+    }
+
+    let mut candidate = candidate;
+    if pin {
+        candidate.is_pinned = true;
+        candidate.pin_order = Some(next_pin_order(items));
+    }
+    next.push(candidate);
+    Ok(sort_library_items(next))
+}
+
+pub fn create_snippet(
+    items: &[LibraryItem],
+    title: &str,
+    content: &str,
+    tags: Vec<String>,
+    note: &str,
+) -> AppResult<Vec<LibraryItem>> {
+    if items.len() >= LIBRARY_ITEM_LIMIT {
+        return Err(AppError::InvalidInput("收藏库最多保存 5000 项".into()));
+    }
+    let mut next = items.to_vec();
+    next.push(new_snippet(title, content, tags, note)?);
+    Ok(sort_library_items(next))
+}
+
+pub fn update_item(
+    items: &[LibraryItem],
+    id: &str,
+    update: LibraryItemUpdate,
+) -> AppResult<Vec<LibraryItem>> {
+    let metadata = normalize_metadata(&update.title, update.tags, &update.note)?;
+    let mut next = items.to_vec();
+    let item = next
+        .iter_mut()
+        .find(|item| item.id == id)
+        .ok_or_else(|| AppError::InvalidInput("收藏项不存在".into()))?;
+    if item.role == LibraryRole::Saved && update.content.is_some() {
+        return Err(AppError::InvalidInput("普通收藏正文不可编辑".into()));
+    }
+    if item.role == LibraryRole::Snippet {
+        let content = update.content.unwrap_or_else(|| item.content.clone());
+        let content = content.trim().to_string();
+        if content.is_empty() {
+            return Err(AppError::InvalidInput("常用片段正文不能为空".into()));
+        }
+        item.summary = crate::history::summarize(&content);
+        item.content_hash = text_hash(&LibraryRole::Snippet, &content);
+        item.content = content;
+    }
+    item.title = metadata.title;
+    item.tags = metadata.tags;
+    item.note = metadata.note;
+    item.updated_at = Utc::now();
+    Ok(sort_library_items(next))
+}
+
+pub fn convert_to_snippet(items: &[LibraryItem], id: &str) -> AppResult<Vec<LibraryItem>> {
+    let mut next = items.to_vec();
+    let item = next
+        .iter_mut()
+        .find(|item| item.id == id)
+        .ok_or_else(|| AppError::InvalidInput("收藏项不存在".into()))?;
+    if item.role != LibraryRole::Saved
+        || item.content_type != ClipboardContentType::Text
+        || item.content.trim().is_empty()
+    {
+        return Err(AppError::InvalidInput("仅文本收藏可转换为常用片段".into()));
+    }
+    item.role = LibraryRole::Snippet;
+    item.source_history_id = None;
+    item.source_content_hash = None;
+    item.content_hash = text_hash(&LibraryRole::Snippet, &item.content);
+    item.updated_at = Utc::now();
+    Ok(sort_library_items(next))
+}
+
+pub fn set_pinned(items: &[LibraryItem], id: &str, pinned: bool) -> AppResult<Vec<LibraryItem>> {
+    let order = next_pin_order(items);
+    let mut next = items.to_vec();
+    let item = next
+        .iter_mut()
+        .find(|item| item.id == id)
+        .ok_or_else(|| AppError::InvalidInput("收藏项不存在".into()))?;
+    if pinned {
+        if !item.is_pinned {
+            item.pin_order = Some(order);
+        }
+        item.is_pinned = true;
+    } else {
+        item.is_pinned = false;
+        item.pin_order = None;
+    }
+    item.updated_at = Utc::now();
+    Ok(sort_library_items(next))
+}
+
+pub fn reorder_pinned(
+    items: &[LibraryItem],
+    ordered_ids: &[String],
+) -> AppResult<Vec<LibraryItem>> {
+    let current = items
+        .iter()
+        .filter(|item| item.is_pinned)
+        .map(|item| item.id.as_str())
+        .collect::<HashSet<_>>();
+    let requested = ordered_ids.iter().map(String::as_str).collect::<HashSet<_>>();
+    if current.len() != ordered_ids.len() || requested.len() != ordered_ids.len() || current != requested {
+        return Err(AppError::InvalidInput("置顶排序项目不完整".into()));
+    }
+
+    let mut next = items.to_vec();
+    for (order, id) in ordered_ids.iter().enumerate() {
+        let item = next
+            .iter_mut()
+            .find(|item| item.id == *id)
+            .ok_or_else(|| AppError::InvalidInput("收藏项不存在".into()))?;
+        item.pin_order = Some(order as u64);
+        item.updated_at = Utc::now();
+    }
+    Ok(sort_library_items(next))
+}
+
+pub fn remove_item(items: &[LibraryItem], id: &str) -> AppResult<Vec<LibraryItem>> {
+    if !items.iter().any(|item| item.id == id) {
+        return Err(AppError::InvalidInput("收藏项不存在".into()));
+    }
+    Ok(sort_library_items(
+        items
+            .iter()
+            .filter(|item| item.id != id)
+            .cloned()
+            .collect(),
+    ))
+}
+
+fn verify_asset_bytes(asset: &LibraryAssetRef, bytes: &[u8]) -> AppResult<()> {
+    if bytes.len() as u64 != asset.size || sha256_hex(bytes) != asset.sha256 {
+        return Err(AppError::InvalidInput(format!(
+            "收藏资源损坏：{}",
+            asset.file_name
+        )));
+    }
+    Ok(())
+}
+
+pub fn copy_payload(root: &Path, item: &LibraryItem) -> AppResult<LibraryCopyPayload> {
+    match item.content_type {
+        ClipboardContentType::Text => {
+            if item.content.is_empty() {
+                return Err(AppError::InvalidInput("收藏文本为空".into()));
+            }
+            Ok(LibraryCopyPayload::Text(item.content.clone()))
+        }
+        ClipboardContentType::Image => {
+            let asset = item
+                .assets
+                .iter()
+                .find(|asset| asset.kind == LibraryAssetKind::Image)
+                .ok_or_else(|| AppError::InvalidInput("收藏图片资源缺失".into()))?;
+            let bytes = fs::read(resolve_asset_path(root, asset)?)?;
+            verify_asset_bytes(asset, &bytes)?;
+            Ok(LibraryCopyPayload::Image(
+                base64::engine::general_purpose::STANDARD.encode(bytes),
+            ))
+        }
+        ClipboardContentType::FileList => {
+            if item.assets.is_empty() {
+                return Err(AppError::InvalidInput("收藏文件资源缺失".into()));
+            }
+            let mut paths = Vec::with_capacity(item.assets.len());
+            for asset in &item.assets {
+                let path = resolve_asset_path(root, asset)?;
+                let bytes = fs::read(&path)?;
+                verify_asset_bytes(asset, &bytes)?;
+                paths.push(path);
+            }
+            Ok(LibraryCopyPayload::Files(paths))
+        }
+    }
+}
+
+fn prune_thumbnails(root: &Path, references: &[LibraryAssetRef]) -> AppResult<()> {
+    let image_hashes = references
+        .iter()
+        .filter(|asset| asset.kind == LibraryAssetKind::Image)
+        .map(|asset| asset.sha256.as_str())
+        .collect::<HashSet<_>>();
+    let directory = root.join(LIBRARY_THUMBNAIL_DIR);
+    if !directory.exists() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(directory)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !image_hashes
+            .iter()
+            .any(|hash| name.starts_with(&format!("{hash}-")))
+        {
+            fs::remove_file(entry.path())?;
+        }
+    }
+    Ok(())
+}
+
+pub fn prune_library_resources(root: &Path, items: &[LibraryItem]) -> AppResult<()> {
+    let references = items
+        .iter()
+        .flat_map(|item| item.assets.iter().cloned())
+        .collect::<Vec<_>>();
+    prune_assets(root, &references)?;
+    prune_thumbnails(root, &references)
+}
+
+pub fn image_thumbnail(root: &Path, item: &LibraryItem, max_size: u32) -> AppResult<String> {
+    let asset = item
+        .assets
+        .iter()
+        .find(|asset| asset.kind == LibraryAssetKind::Image)
+        .ok_or_else(|| AppError::InvalidInput("收藏图片资源缺失".into()))?;
+    let size = max_size.clamp(32, 800);
+    let directory = root.join(LIBRARY_THUMBNAIL_DIR);
+    let target = directory.join(format!("{}-{size}.png", asset.sha256));
+    let bytes = if target.exists() {
+        fs::read(&target)?
+    } else {
+        let source = fs::read(resolve_asset_path(root, asset)?)?;
+        verify_asset_bytes(asset, &source)?;
+        let thumbnail = image::load_from_memory(&source)
+            .map_err(|error| AppError::InvalidInput(format!("收藏图片损坏：{error}")))?
+            .thumbnail(size, size);
+        let mut bytes = Vec::new();
+        image::codecs::png::PngEncoder::new(&mut bytes)
+            .write_image(
+                thumbnail.as_bytes(),
+                thumbnail.width(),
+                thumbnail.height(),
+                thumbnail.color().into(),
+            )
+            .map_err(|error| AppError::InvalidInput(format!("缩略图编码失败：{error}")))?;
+        fs::create_dir_all(&directory)?;
+        let temp = directory.join(format!(".{}-{}.tmp", asset.sha256, Uuid::new_v4()));
+        fs::write(&temp, &bytes)?;
+        fs::rename(temp, &target)?;
+        bytes
+    };
+    Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    use crate::models::LibraryAssetKind;
+    use base64::Engine;
+    use image::ImageEncoder;
+
+    use crate::models::{
+        HistoryDirection, HistoryItem, LibraryAssetKind, LibraryItemUpdate, SyncStatus,
+    };
 
     fn temp_dir(label: &str) -> PathBuf {
         let root = std::env::temp_dir().join(format!(
@@ -335,6 +784,206 @@ mod tests {
         ));
         std::fs::create_dir_all(&root).unwrap();
         root
+    }
+
+    fn history_fixture(
+        id: &str,
+        content_type: ClipboardContentType,
+        content: String,
+    ) -> HistoryItem {
+        let content_hash = crate::sync::content_hash(&content_type, &content);
+        HistoryItem {
+            id: id.to_string(),
+            direction: HistoryDirection::Local,
+            source_device: "This device".into(),
+            summary: crate::history::summarize(&content),
+            content,
+            content_hash,
+            content_type,
+            sync_status: SyncStatus::Synced,
+            file_transfer_id: None,
+            file_transfer_status: None,
+            success: true,
+            created_at: Utc::now(),
+        }
+    }
+
+    #[test]
+    fn collecting_text_deduplicates_and_pin_only_changes_sorting() {
+        let root = temp_dir("collect-text");
+        let history = history_fixture(
+            "history-1",
+            ClipboardContentType::Text,
+            "VPN URL".into(),
+        );
+        let items = collect_history_item(&root, &[], &history, false).unwrap();
+        let items = collect_history_item(&root, &items, &history, true).unwrap();
+
+        assert_eq!(items.len(), 1);
+        assert!(items[0].is_pinned);
+        assert_eq!(items[0].pin_order, Some(0));
+        assert_eq!(items[0].source_history_id.as_deref(), Some("history-1"));
+        assert_eq!(
+            items[0].source_content_hash.as_deref(),
+            Some(history.content_hash.as_str())
+        );
+        assert_eq!(items[0].content, "VPN URL");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn collecting_image_copies_png_and_builds_thumbnail_and_copy_payload() {
+        let root = temp_dir("collect-image");
+        let image = image::RgbaImage::from_pixel(40, 20, image::Rgba([20, 40, 60, 255]));
+        let mut png = Vec::new();
+        image::codecs::png::PngEncoder::new(&mut png)
+            .write_image(&image, 40, 20, image::ColorType::Rgba8.into())
+            .unwrap();
+        let history = history_fixture(
+            "history-image",
+            ClipboardContentType::Image,
+            base64::engine::general_purpose::STANDARD.encode(&png),
+        );
+
+        let items = collect_history_item(&root, &[], &history, false).unwrap();
+        let managed = resolve_asset_path(&root, &items[0].assets[0]).unwrap();
+        assert_eq!(std::fs::read(&managed).unwrap(), png);
+        assert!(matches!(
+            copy_payload(&root, &items[0]).unwrap(),
+            LibraryCopyPayload::Image(_)
+        ));
+        let thumbnail = image_thumbnail(&root, &items[0], 16).unwrap();
+        let thumbnail = base64::engine::general_purpose::STANDARD
+            .decode(thumbnail)
+            .unwrap();
+        let decoded = image::load_from_memory(&thumbnail).unwrap();
+        assert_eq!((decoded.width(), decoded.height()), (32, 16));
+        assert!(root.join(LIBRARY_THUMBNAIL_DIR).exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn collecting_files_copies_all_files_transactionally() {
+        let root = temp_dir("collect-files");
+        let source = root.join("source");
+        std::fs::create_dir_all(&source).unwrap();
+        let first = source.join("a.txt");
+        let second = source.join("b.txt");
+        std::fs::write(&first, b"alpha").unwrap();
+        std::fs::write(&second, b"beta").unwrap();
+        let content =
+            crate::clipboard::file_paths_to_clipboard_content(&[first.clone(), second.clone()])
+                .unwrap();
+        let history = history_fixture("history-files", ClipboardContentType::FileList, content);
+        let items = collect_history_item(&root, &[], &history, false).unwrap();
+        assert_eq!(items[0].assets.len(), 2);
+        assert!(items[0]
+            .assets
+            .iter()
+            .all(|asset| resolve_asset_path(&root, asset).unwrap().exists()));
+
+        std::fs::remove_file(second).unwrap();
+        let broken_content = crate::clipboard::file_paths_to_clipboard_content(&[
+            first,
+            source.join("b.txt"),
+        ])
+        .unwrap();
+        let broken = history_fixture(
+            "history-broken",
+            ClipboardContentType::FileList,
+            broken_content,
+        );
+        let before = library_storage_size(&root).unwrap();
+        assert!(collect_history_item(&root, &items, &broken, false).is_err());
+        assert_eq!(library_storage_size(&root).unwrap(), before);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn snippet_updates_convert_text_and_validate_reorder() {
+        let snippet = new_snippet("Greeting", "Hello", vec![], "").unwrap();
+        let old_hash = snippet.content_hash.clone();
+        let updated = update_item(
+            std::slice::from_ref(&snippet),
+            &snippet.id,
+            LibraryItemUpdate {
+                title: "Greeting".into(),
+                content: Some("Hello team".into()),
+                tags: vec!["reply".into()],
+                note: "Daily".into(),
+            },
+        )
+        .unwrap();
+        assert_ne!(updated[0].content_hash, old_hash);
+        assert_eq!(updated[0].summary, "Hello team");
+
+        let root = temp_dir("convert-text");
+        let history = history_fixture("history-text", ClipboardContentType::Text, "Body".into());
+        let saved = collect_history_item(&root, &[], &history, false).unwrap();
+        let converted = convert_to_snippet(&saved, &saved[0].id).unwrap();
+        assert_eq!(converted[0].role, LibraryRole::Snippet);
+        assert_eq!(converted[0].source_history_id, None);
+
+        let first_id = updated[0].id.clone();
+        let second = new_snippet("Second", "Two", vec![], "").unwrap();
+        let mut pinned = vec![updated[0].clone(), second];
+        pinned = set_pinned(&pinned, &first_id, true).unwrap();
+        let second_id = pinned[1].id.clone();
+        pinned = set_pinned(&pinned, &second_id, true).unwrap();
+        let reordered = reorder_pinned(&pinned, &[second_id.clone(), first_id.clone()]).unwrap();
+        assert_eq!(reordered[0].id, second_id);
+        assert!(reorder_pinned(&pinned, &[first_id]).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn removing_last_reference_prunes_asset_but_unpinning_does_not() {
+        let root = temp_dir("remove-shared");
+        let asset = store_asset(&root, LibraryAssetKind::File, "shared.txt", b"shared").unwrap();
+        let mut first = new_snippet("first", "one", vec![], "").unwrap();
+        first.content_type = ClipboardContentType::FileList;
+        first.role = LibraryRole::Saved;
+        first.content.clear();
+        first.assets = vec![asset.clone()];
+        first.is_pinned = true;
+        first.pin_order = Some(0);
+        let mut second = first.clone();
+        second.id = Uuid::new_v4().to_string();
+        let path = resolve_asset_path(&root, &asset).unwrap();
+
+        let items = set_pinned(&[first.clone(), second.clone()], &first.id, false).unwrap();
+        prune_library_resources(&root, &items).unwrap();
+        assert!(path.exists());
+        let items = remove_item(&items, &first.id).unwrap();
+        prune_library_resources(&root, &items).unwrap();
+        assert!(path.exists());
+        let items = remove_item(&items, &second.id).unwrap();
+        prune_library_resources(&root, &items).unwrap();
+        assert!(items.is_empty());
+        assert!(!path.exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn copy_payload_uses_managed_text_and_file_assets() {
+        let root = temp_dir("copy-payload");
+        let snippet = new_snippet("reply", "received", vec![], "").unwrap();
+        assert_eq!(
+            copy_payload(&root, &snippet).unwrap(),
+            LibraryCopyPayload::Text("received".into())
+        );
+
+        let asset = store_asset(&root, LibraryAssetKind::File, "report.txt", b"report").unwrap();
+        let mut file_item = snippet;
+        file_item.role = LibraryRole::Saved;
+        file_item.content_type = ClipboardContentType::FileList;
+        file_item.content.clear();
+        file_item.assets = vec![asset.clone()];
+        assert_eq!(
+            copy_payload(&root, &file_item).unwrap(),
+            LibraryCopyPayload::Files(vec![resolve_asset_path(&root, &asset).unwrap()])
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

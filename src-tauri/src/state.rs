@@ -14,9 +14,10 @@ use crate::{
     device_store,
     error::{AppError, AppResult},
     history,
+    library,
     models::{
-        AppConfig, AppStatus, DeviceInfo, DeviceStatus, FileTransferStatus, HistoryItem, SyncState,
-        WireMessage,
+        AppConfig, AppStatus, DeviceInfo, DeviceStatus, FileTransferStatus, HistoryItem,
+        LibrarySnapshot, SyncState, WireMessage,
     },
     network,
     security,
@@ -35,6 +36,8 @@ struct AppStateInner {
     config: RwLock<AppConfig>,
     devices: RwLock<HashMap<String, DeviceInfo>>,
     history: RwLock<Vec<HistoryItem>>,
+    library: RwLock<LibrarySnapshot>,
+    library_mutation: Mutex<()>,
     sync_engine: Mutex<SyncEngine>,
     runtime: Mutex<Option<RuntimeHandle>>,
     peers: Mutex<HashMap<String, PeerHandle>>,
@@ -86,6 +89,8 @@ impl AppState {
                 config: RwLock::new(config.clone()),
                 devices: RwLock::new(HashMap::new()),
                 history: RwLock::new(Vec::new()),
+                library: RwLock::new(LibrarySnapshot::default()),
+                library_mutation: Mutex::new(()),
                 sync_engine: Mutex::new(SyncEngine::new(device_id, config.device_name)),
                 runtime: Mutex::new(None),
                 peers: Mutex::new(HashMap::new()),
@@ -102,10 +107,12 @@ impl AppState {
         let config = config::load_config(app)?;
         let device_id = config.device_id.clone();
         let history = history::load_history(app)?;
+        let library = library::load_library(app);
         let devices = device_store::load_devices(app)?;
 
         *self.inner.config.write().await = config.clone();
         *self.inner.history.write().await = history;
+        *self.inner.library.write().await = library;
         self.replace_devices(devices).await;
         *self.inner.sync_engine.lock().await =
             SyncEngine::new(device_id.clone(), config.device_name.clone());
@@ -180,6 +187,18 @@ impl AppState {
 
     pub async fn replace_history(&self, items: Vec<HistoryItem>) {
         *self.inner.history.write().await = items;
+    }
+
+    pub async fn library(&self) -> LibrarySnapshot {
+        self.inner.library.read().await.clone()
+    }
+
+    pub async fn replace_library(&self, snapshot: LibrarySnapshot) {
+        *self.inner.library.write().await = snapshot;
+    }
+
+    pub async fn lock_library_mutation(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        self.inner.library_mutation.lock().await
     }
 
     pub async fn push_history(&self, item: HistoryItem) {

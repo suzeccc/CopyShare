@@ -10,13 +10,14 @@ use crate::{
     error::{AppError, AppResult},
     file_transfer,
     history,
+    library::{self, LibraryCopyPayload},
     mobile,
     notifications,
     ocr,
     models::{
         AppConfig, AppStatus, ClipboardContentType, ClipboardTextItem, CopyHistoryResult,
-        DeviceInfo, FileTransferTask, HistoryItem, MobileSessionView, SelectedTransferFile,
-        OcrResponse, TranslateResponse,
+        DeviceInfo, FileTransferTask, HistoryItem, LibraryItem, LibraryItemUpdate,
+        LibrarySnapshot, MobileSessionView, OcrResponse, SelectedTransferFile, TranslateResponse,
     },
     security,
     state::AppState,
@@ -194,6 +195,202 @@ pub async fn update_config(
 #[tauri::command]
 pub async fn get_history(state: State<'_, AppState>) -> AppResult<Vec<HistoryItem>> {
     Ok(history::history_items_for_frontend(&state.history().await))
+}
+
+async fn mutate_library<F>(
+    app: &AppHandle,
+    state: &AppState,
+    operation: F,
+) -> AppResult<LibrarySnapshot>
+where
+    F: FnOnce(&std::path::Path, &[LibraryItem]) -> AppResult<Vec<LibraryItem>> + Send + 'static,
+{
+    let _guard = state.lock_library_mutation().await;
+    let current = state.library().await;
+    let previous = current.items;
+    let root = app.path().app_data_dir()?;
+    let next = tauri::async_runtime::spawn_blocking(move || {
+        let next = match operation(&root, &previous) {
+            Ok(next) => next,
+            Err(error) => {
+                let _ = library::prune_library_resources(&root, &previous);
+                return Err(error);
+            }
+        };
+        if let Err(error) = library::save_library_to_dir(&root, &next) {
+            let _ = library::prune_library_resources(&root, &previous);
+            return Err(error);
+        }
+        if let Err(error) = library::prune_library_resources(&root, &next) {
+            eprintln!("failed to prune library resources: {error}");
+        }
+        Ok(next)
+    })
+    .await
+    .map_err(|error| AppError::Tauri(format!("收藏任务执行失败：{error}")))??;
+
+    let snapshot = LibrarySnapshot {
+        items: next,
+        warning: None,
+    };
+    state.replace_library(snapshot.clone()).await;
+    app.emit("library-updated", snapshot.clone())?;
+    Ok(snapshot)
+}
+
+#[tauri::command]
+pub async fn get_library(state: State<'_, AppState>) -> AppResult<LibrarySnapshot> {
+    Ok(state.library().await)
+}
+
+#[tauri::command]
+pub async fn collect_history_item(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    history_id: String,
+    pin: bool,
+) -> AppResult<LibrarySnapshot> {
+    let history = state
+        .history()
+        .await
+        .into_iter()
+        .find(|item| item.id == history_id)
+        .ok_or_else(|| AppError::InvalidInput("历史项不存在或已经失效".into()))?;
+    mutate_library(&app, state.inner(), move |root, items| {
+        library::collect_history_item(root, items, &history, pin)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn create_text_snippet(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    title: String,
+    content: String,
+    tags: Vec<String>,
+    note: String,
+) -> AppResult<LibrarySnapshot> {
+    mutate_library(&app, state.inner(), move |_, items| {
+        library::create_snippet(items, &title, &content, tags, &note)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn update_library_item(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    update: LibraryItemUpdate,
+) -> AppResult<LibrarySnapshot> {
+    mutate_library(&app, state.inner(), move |_, items| {
+        library::update_item(items, &id, update)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn convert_library_item_to_snippet(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> AppResult<LibrarySnapshot> {
+    mutate_library(&app, state.inner(), move |_, items| {
+        library::convert_to_snippet(items, &id)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn set_library_item_pinned(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    pinned: bool,
+) -> AppResult<LibrarySnapshot> {
+    mutate_library(&app, state.inner(), move |_, items| {
+        library::set_pinned(items, &id, pinned)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn reorder_pinned_library_items(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    ordered_ids: Vec<String>,
+) -> AppResult<LibrarySnapshot> {
+    mutate_library(&app, state.inner(), move |_, items| {
+        library::reorder_pinned(items, &ordered_ids)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn remove_library_item(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> AppResult<LibrarySnapshot> {
+    mutate_library(&app, state.inner(), move |_, items| {
+        library::remove_item(items, &id)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn copy_library_item(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> AppResult<()> {
+    let item = state
+        .library()
+        .await
+        .items
+        .into_iter()
+        .find(|item| item.id == id)
+        .ok_or_else(|| AppError::InvalidInput("收藏项不存在".into()))?;
+    let root = app.path().app_data_dir()?;
+    let payload = tauri::async_runtime::spawn_blocking(move || {
+        library::copy_payload(&root, &item)
+    })
+    .await
+    .map_err(|error| AppError::Tauri(format!("收藏复制任务执行失败：{error}")))??;
+    match payload {
+        LibraryCopyPayload::Text(text) => clipboard::write_clipboard_text(&app, &text),
+        LibraryCopyPayload::Image(image) => clipboard::write_clipboard_image_base64(&app, &image),
+        LibraryCopyPayload::Files(paths) => clipboard::write_clipboard_files(&app, &paths),
+    }
+}
+
+#[tauri::command]
+pub async fn get_library_storage_size(app: AppHandle) -> AppResult<u64> {
+    let root = app.path().app_data_dir()?;
+    tauri::async_runtime::spawn_blocking(move || library::library_storage_size(&root))
+        .await
+        .map_err(|error| AppError::Tauri(format!("收藏空间统计失败：{error}")))?
+}
+
+#[tauri::command]
+pub async fn get_library_image_thumbnail(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    max_size: u32,
+) -> AppResult<String> {
+    let item = state
+        .library()
+        .await
+        .items
+        .into_iter()
+        .find(|item| item.id == id)
+        .ok_or_else(|| AppError::InvalidInput("收藏项不存在".into()))?;
+    let root = app.path().app_data_dir()?;
+    tauri::async_runtime::spawn_blocking(move || library::image_thumbnail(&root, &item, max_size))
+        .await
+        .map_err(|error| AppError::Tauri(format!("收藏缩略图任务执行失败：{error}")))?
 }
 
 #[tauri::command]
