@@ -15,3 +15,13 @@ test("recent and modal clipboard cards expose favorite and pin actions", () => {
   assert.match(page, /libraryStore\.collectHistoryItem\(item\.id, false\)/);
   assert.match(page, /libraryStore\.collectHistoryItem\(item\.id, true\)/);
 });
+
+test("clipboard starts the shared library subscription before awaiting initial load", () => {
+  const page = readFileSync("src/pages/Clipboard.vue", "utf8");
+  const mounted = page.match(/onMounted\(async \(\) => \{[\s\S]*?\n}\);/)?.[0] ?? "";
+
+  assert.match(
+    mounted,
+    /Promise\.all\(\[[\s\S]*?libraryStore\.load\(\)[\s\S]*?libraryStore\.subscribe\(\)[\s\S]*?\]\)/,
+  );
+});

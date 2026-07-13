@@ -209,7 +209,7 @@ where
     let current = state.library().await;
     let previous = current.items;
     let root = app.path().app_data_dir()?;
-    let next = tauri::async_runtime::spawn_blocking(move || {
+    let (next, prune_error) = tauri::async_runtime::spawn_blocking(move || {
         let next = match operation(&root, &previous) {
             Ok(next) => next,
             Err(error) => {
@@ -221,10 +221,8 @@ where
             let _ = library::prune_library_resources(&root, &previous);
             return Err(error);
         }
-        if let Err(error) = library::prune_library_resources(&root, &next) {
-            eprintln!("failed to prune library resources: {error}");
-        }
-        Ok(next)
+        let prune_error = library::prune_library_resources(&root, &next).err();
+        Ok((next, prune_error))
     })
     .await
     .map_err(|error| AppError::Tauri(format!("收藏任务执行失败：{error}")))??;
@@ -235,6 +233,9 @@ where
     };
     state.replace_library(snapshot.clone()).await;
     app.emit("library-updated", snapshot.clone())?;
+    if let Some(error) = prune_error {
+        return Err(error);
+    }
     Ok(snapshot)
 }
 
@@ -345,6 +346,7 @@ pub async fn copy_library_item(
     state: State<'_, AppState>,
     id: String,
 ) -> AppResult<()> {
+    let _guard = state.lock_library_mutation().await;
     let item = state
         .library()
         .await
@@ -353,15 +355,28 @@ pub async fn copy_library_item(
         .find(|item| item.id == id)
         .ok_or_else(|| AppError::InvalidInput("收藏项不存在".into()))?;
     let root = app.path().app_data_dir()?;
+    let copy_root = root.clone();
     let payload = tauri::async_runtime::spawn_blocking(move || {
-        library::copy_payload(&root, &item)
+        library::copy_payload(&copy_root, &item)
     })
     .await
     .map_err(|error| AppError::Tauri(format!("收藏复制任务执行失败：{error}")))??;
     match payload {
-        LibraryCopyPayload::Text(text) => clipboard::write_clipboard_text(&app, &text),
-        LibraryCopyPayload::Image(image) => clipboard::write_clipboard_image_base64(&app, &image),
-        LibraryCopyPayload::Files(paths) => clipboard::write_clipboard_files(&app, &paths),
+        LibraryCopyPayload::Text(text) => {
+            clipboard::write_clipboard_text(&app, &text)?;
+            library::clear_file_copy_cache(&root)
+        }
+        LibraryCopyPayload::Image(image) => {
+            clipboard::write_clipboard_image_base64(&app, &image)?;
+            library::clear_file_copy_cache(&root)
+        }
+        LibraryCopyPayload::Files(paths) => {
+            if let Err(error) = clipboard::write_clipboard_files(&app, &paths) {
+                let _ = library::discard_file_copy_cache(&paths);
+                return Err(error);
+            }
+            library::commit_file_copy_cache(&root, &paths)
+        }
     }
 }
 

@@ -23,6 +23,7 @@ use crate::{
 const LIBRARY_FILE: &str = "library.json";
 const LIBRARY_ASSET_DIR: &str = "library-assets";
 const LIBRARY_THUMBNAIL_DIR: &str = "library-thumbnails";
+const LIBRARY_COPY_CACHE_DIR: &str = "library-copy-cache";
 const TITLE_LIMIT: usize = 120;
 const NOTE_LIMIT: usize = 2_000;
 const TAG_LIMIT: usize = 20;
@@ -158,9 +159,22 @@ pub fn load_library(app: &tauri::AppHandle) -> LibrarySnapshot {
 }
 
 fn load_library_from_dir(root: &Path) -> LibrarySnapshot {
+    if let Err(error) = clear_file_copy_cache(root) {
+        eprintln!("failed to clear stale library copy cache: {error}");
+    }
     let path = root.join(LIBRARY_FILE);
     if !path.exists() {
-        return LibrarySnapshot::default();
+        let backup = root.join("library.json.bak");
+        if !backup.exists() {
+            return LibrarySnapshot::default();
+        }
+        if let Err(error) = fs::rename(&backup, &path) {
+            eprintln!("failed to restore interrupted library replacement: {error}");
+            return LibrarySnapshot {
+                items: vec![],
+                warning: Some(format!("收藏库备份恢复失败：{error}")),
+            };
+        }
     }
 
     match fs::read_to_string(&path)
@@ -213,7 +227,9 @@ where
         return Err(error.into());
     }
     if backup.exists() {
-        fs::remove_file(backup)?;
+        if let Err(error) = fs::remove_file(backup) {
+            eprintln!("failed to remove committed library backup: {error}");
+        }
     }
     Ok(())
 }
@@ -328,14 +344,21 @@ fn directory_size(directory: &Path) -> AppResult<u64> {
         return Ok(0);
     }
     fs::read_dir(directory)?.try_fold(0_u64, |total, entry| {
-        let metadata = entry?.metadata()?;
-        Ok(total + if metadata.is_file() { metadata.len() } else { 0 })
+        let entry = entry?;
+        let metadata = entry.metadata()?;
+        Ok(total
+            + if metadata.is_dir() {
+                directory_size(&entry.path())?
+            } else {
+                metadata.len()
+            })
     })
 }
 
 pub fn library_storage_size(root: &Path) -> AppResult<u64> {
     Ok(directory_size(&root.join(LIBRARY_ASSET_DIR))?
-        + directory_size(&root.join(LIBRARY_THUMBNAIL_DIR))?)
+        + directory_size(&root.join(LIBRARY_THUMBNAIL_DIR))?
+        + directory_size(&root.join(LIBRARY_COPY_CACHE_DIR))?)
 }
 
 fn default_text_title(content: &str) -> String {
@@ -667,6 +690,110 @@ fn verify_asset_bytes(asset: &LibraryAssetRef, bytes: &[u8]) -> AppResult<()> {
     Ok(())
 }
 
+fn copy_file_name(asset: &LibraryAssetRef) -> AppResult<&str> {
+    let file_name = asset.file_name.as_str();
+    let components = Path::new(file_name).components().collect::<Vec<_>>();
+    let is_single_component = matches!(
+        components.as_slice(),
+        [Component::Normal(name)] if *name == std::ffi::OsStr::new(file_name)
+    );
+    let reserved_base = file_name
+        .split('.')
+        .next()
+        .unwrap_or_default()
+        .to_ascii_uppercase();
+    let is_reserved = matches!(reserved_base.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || reserved_base
+            .strip_prefix("COM")
+            .or_else(|| reserved_base.strip_prefix("LPT"))
+            .is_some_and(|number| matches!(number, "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9"));
+    if !is_single_component
+        || file_name.ends_with(['.', ' '])
+        || file_name.chars().any(|character| {
+            character.is_control()
+                || matches!(character, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*')
+        })
+        || is_reserved
+    {
+        return Err(AppError::InvalidInput("收藏文件名无效".into()));
+    }
+    Ok(file_name)
+}
+
+fn materialize_file_copy(root: &Path, item: &LibraryItem) -> AppResult<Vec<PathBuf>> {
+    let cache_root = root.join(LIBRARY_COPY_CACHE_DIR);
+    let session = cache_root.join(Uuid::new_v4().to_string());
+    fs::create_dir_all(&session)?;
+
+    let result = (|| {
+        let mut paths = Vec::with_capacity(item.assets.len());
+        for (index, asset) in item.assets.iter().enumerate() {
+            let source = resolve_asset_path(root, asset)?;
+            let bytes = fs::read(source)?;
+            verify_asset_bytes(asset, &bytes)?;
+            let directory = session.join(index.to_string());
+            fs::create_dir(&directory)?;
+            let destination = directory.join(copy_file_name(asset)?);
+            fs::write(&destination, bytes)?;
+            paths.push(destination);
+        }
+        Ok(paths)
+    })();
+
+    let paths = match result {
+        Ok(paths) => paths,
+        Err(error) => {
+            let _ = fs::remove_dir_all(&session);
+            return Err(error);
+        }
+    };
+    Ok(paths)
+}
+
+fn file_copy_cache_session(paths: &[PathBuf]) -> AppResult<PathBuf> {
+    let session = paths
+        .first()
+        .and_then(|path| path.parent())
+        .and_then(Path::parent)
+        .ok_or_else(|| AppError::InvalidInput("收藏复制缓存路径无效".into()))?
+        .to_path_buf();
+    if !paths.iter().all(|path| path.starts_with(&session)) {
+        return Err(AppError::InvalidInput("收藏复制缓存路径不一致".into()));
+    }
+    Ok(session)
+}
+
+pub fn discard_file_copy_cache(paths: &[PathBuf]) -> AppResult<()> {
+    let session = file_copy_cache_session(paths)?;
+    if session.exists() {
+        fs::remove_dir_all(session)?;
+    }
+    Ok(())
+}
+
+pub fn commit_file_copy_cache(root: &Path, paths: &[PathBuf]) -> AppResult<()> {
+    let cache_root = root.join(LIBRARY_COPY_CACHE_DIR);
+    let session = file_copy_cache_session(paths)?;
+    if session.parent() != Some(cache_root.as_path()) {
+        return Err(AppError::InvalidInput("收藏复制缓存目录无效".into()));
+    }
+    for entry in fs::read_dir(cache_root)? {
+        let entry = entry?;
+        if entry.path() != session {
+            fs::remove_dir_all(entry.path())?;
+        }
+    }
+    Ok(())
+}
+
+pub fn clear_file_copy_cache(root: &Path) -> AppResult<()> {
+    let cache_root = root.join(LIBRARY_COPY_CACHE_DIR);
+    if cache_root.exists() {
+        fs::remove_dir_all(cache_root)?;
+    }
+    Ok(())
+}
+
 pub fn copy_payload(root: &Path, item: &LibraryItem) -> AppResult<LibraryCopyPayload> {
     match item.content_type {
         ClipboardContentType::Text => {
@@ -691,14 +818,7 @@ pub fn copy_payload(root: &Path, item: &LibraryItem) -> AppResult<LibraryCopyPay
             if item.assets.is_empty() {
                 return Err(AppError::InvalidInput("收藏文件资源缺失".into()));
             }
-            let mut paths = Vec::with_capacity(item.assets.len());
-            for asset in &item.assets {
-                let path = resolve_asset_path(root, asset)?;
-                let bytes = fs::read(&path)?;
-                verify_asset_bytes(asset, &bytes)?;
-                paths.push(path);
-            }
-            Ok(LibraryCopyPayload::Files(paths))
+            Ok(LibraryCopyPayload::Files(materialize_file_copy(root, item)?))
         }
     }
 }
@@ -982,15 +1102,42 @@ mod tests {
         );
 
         let asset = store_asset(&root, LibraryAssetKind::File, "report.txt", b"report").unwrap();
+        let duplicate =
+            store_asset(&root, LibraryAssetKind::File, "summary.txt", b"report").unwrap();
+        for invalid_name in ["C:escape.txt", "../escape.txt", "CON.txt", "trailing."] {
+            let mut invalid = asset.clone();
+            invalid.file_name = invalid_name.into();
+            assert!(copy_file_name(&invalid).is_err(), "accepted {invalid_name}");
+        }
         let mut file_item = snippet;
         file_item.role = LibraryRole::Saved;
         file_item.content_type = ClipboardContentType::FileList;
         file_item.content.clear();
-        file_item.assets = vec![asset.clone()];
+        file_item.assets = vec![asset, duplicate];
+        let old_cache = root.join(LIBRARY_COPY_CACHE_DIR).join("old").join("0");
+        std::fs::create_dir_all(&old_cache).unwrap();
+        std::fs::write(old_cache.join("old.txt"), b"old").unwrap();
+        let LibraryCopyPayload::Files(paths) = copy_payload(&root, &file_item).unwrap() else {
+            panic!("expected file copy payload");
+        };
+        assert!(old_cache.join("old.txt").exists());
+        assert_eq!(library_storage_size(&root).unwrap(), 21);
         assert_eq!(
-            copy_payload(&root, &file_item).unwrap(),
-            LibraryCopyPayload::Files(vec![resolve_asset_path(&root, &asset).unwrap()])
+            paths
+                .iter()
+                .map(|path| path.file_name().unwrap().to_string_lossy().to_string())
+                .collect::<Vec<_>>(),
+            vec!["report.txt", "summary.txt"]
         );
+        assert_ne!(paths[0], paths[1]);
+        assert_eq!(std::fs::read(&paths[0]).unwrap(), b"report");
+        assert_eq!(std::fs::read(&paths[1]).unwrap(), b"report");
+        commit_file_copy_cache(&root, &paths).unwrap();
+        assert!(!old_cache.exists());
+        assert_eq!(library_storage_size(&root).unwrap(), 18);
+        discard_file_copy_cache(&paths).unwrap();
+        assert!(!paths[0].exists());
+        assert_eq!(library_storage_size(&root).unwrap(), 6);
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -1018,6 +1165,40 @@ mod tests {
     }
 
     #[test]
+    fn library_recovers_backup_when_atomic_replace_was_interrupted() {
+        let root = temp_dir("recover-backup");
+        let item = new_snippet("reply", "received", vec![], "").unwrap();
+        save_library_to_dir(&root, std::slice::from_ref(&item)).unwrap();
+        std::fs::rename(
+            root.join("library.json"),
+            root.join("library.json.bak"),
+        )
+        .unwrap();
+
+        let snapshot = load_library_from_dir(&root);
+
+        assert_eq!(snapshot.items, vec![item]);
+        assert_eq!(snapshot.warning, None);
+        assert!(root.join("library.json").exists());
+        assert!(!root.join("library.json.bak").exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn library_startup_clears_stale_file_copy_cache() {
+        let root = temp_dir("stale-copy-cache");
+        let stale = root.join(LIBRARY_COPY_CACHE_DIR).join("old").join("0");
+        std::fs::create_dir_all(&stale).unwrap();
+        std::fs::write(stale.join("report.txt"), b"stale").unwrap();
+
+        let snapshot = load_library_from_dir(&root);
+
+        assert!(snapshot.items.is_empty());
+        assert!(!root.join(LIBRARY_COPY_CACHE_DIR).exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn failed_atomic_replace_restores_original_library() {
         let root = temp_dir("rollback");
         let target = root.join("library.json");
@@ -1040,6 +1221,38 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(std::fs::read(&target).unwrap(), b"old");
         assert!(!root.join("library.json.bak").exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn committed_library_save_ignores_backup_cleanup_failure() {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        let root = temp_dir("committed-backup-cleanup");
+        let target = root.join("library.json");
+        let temp = root.join("library.json.tmp");
+        std::fs::write(&target, b"old").unwrap();
+        std::fs::write(&temp, b"new").unwrap();
+        let backup = root.join("library.json.bak");
+        let mut backup_lock = None;
+
+        let result = replace_with_backup(&target, &temp, |from, to| {
+            std::fs::rename(from, to)?;
+            if to == target && backup.exists() {
+                backup_lock = Some(
+                    std::fs::OpenOptions::new()
+                        .read(true)
+                        .share_mode(1)
+                        .open(&backup)?,
+                );
+            }
+            Ok(())
+        });
+
+        assert!(result.is_ok());
+        assert_eq!(std::fs::read(&target).unwrap(), b"new");
+        drop(backup_lock);
         std::fs::remove_dir_all(root).unwrap();
     }
 

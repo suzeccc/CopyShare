@@ -33,6 +33,8 @@ export const useLibraryStore = defineStore("library", {
     selectedTags: [] as string[],
     busyItemIds: new Set<string>(),
     unlisten: null as null | (() => void),
+    subscriptionUsers: 0,
+    subscriptionPending: null as Promise<void> | null,
   }),
   getters: {
     filteredItems(state): LibraryItem[] {
@@ -98,13 +100,24 @@ export const useLibraryStore = defineStore("library", {
       }
     },
     async subscribe() {
+      this.subscriptionUsers += 1;
       if (this.unlisten) return;
-      this.unlisten = await onAppEvent<LibrarySnapshot>(
-        "library-updated",
-        (snapshot) => this.applySnapshot(snapshot),
-      );
+      if (!this.subscriptionPending) {
+        this.subscriptionPending = onAppEvent<LibrarySnapshot>(
+          "library-updated",
+          (snapshot) => this.applySnapshot(snapshot),
+        ).then((unlisten) => {
+          if (this.subscriptionUsers === 0) unlisten();
+          else this.unlisten = unlisten;
+        }).finally(() => {
+          this.subscriptionPending = null;
+        });
+      }
+      await this.subscriptionPending;
     },
     disposeSubscription() {
+      if (this.subscriptionUsers > 0) this.subscriptionUsers -= 1;
+      if (this.subscriptionUsers > 0) return;
       this.unlisten?.();
       this.unlisten = null;
     },

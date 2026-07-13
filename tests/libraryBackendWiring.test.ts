@@ -37,3 +37,36 @@ test("library backend state and commands are registered", () => {
   assert.match(state, /library_mutation: Mutex<\(\)>/);
   assert.match(state, /library::load_library\(app\)/);
 });
+
+test("library mutations surface prune failures after synchronizing state", () => {
+  const commands = readFileSync("src-tauri/src/commands.rs", "utf8");
+  const mutation = commands.match(
+    /async fn mutate_library[\s\S]*?\n}\n\n#\[tauri::command\]/,
+  )?.[0] ?? "";
+
+  assert.match(
+    mutation,
+    /let prune_error = library::prune_library_resources\(&root, &next\)\.err\(\)/,
+  );
+  assert.match(
+    mutation,
+    /state\.replace_library\(snapshot\.clone\(\)\)\.await;[\s\S]*?if let Some\(error\) = prune_error \{[\s\S]*?return Err\(error\);/,
+  );
+  assert.doesNotMatch(mutation, /failed to prune library resources/);
+});
+
+test("library file-copy cache creation is serialized with mutations", () => {
+  const commands = readFileSync("src-tauri/src/commands.rs", "utf8");
+  const copyCommand = commands.match(
+    /pub async fn copy_library_item[\s\S]*?\n}\n\n#\[tauri::command\]/,
+  )?.[0] ?? "";
+
+  assert.match(copyCommand, /let _guard = state\.lock_library_mutation\(\)\.await;/);
+  assert.match(
+    copyCommand,
+    /lock_library_mutation\(\)\.await;[\s\S]*?\.library\(\)[\s\S]*?\.await/,
+  );
+  assert.match(copyCommand, /commit_file_copy_cache\(&root, &paths\)/);
+  assert.match(copyCommand, /discard_file_copy_cache\(&paths\)/);
+  assert.match(copyCommand, /clear_file_copy_cache\(&root\)/);
+});

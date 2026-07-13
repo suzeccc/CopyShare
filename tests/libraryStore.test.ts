@@ -67,3 +67,48 @@ test("library store filters items and tracks history membership", async () => {
   store.endItemAction("saved-1");
   assert.equal(store.isItemBusy("saved-1"), false);
 });
+
+test("library store shares pending subscriptions and releases after async install", async () => {
+  const listenResolvers: Array<(eventId: number) => void> = [];
+  let listenCalls = 0;
+  let unlistenCalls = 0;
+  const previousWindow = (globalThis as any).window;
+  (globalThis as any).window = {
+    __TAURI_EVENT_PLUGIN_INTERNALS__: {
+      unregisterListener: () => {},
+    },
+    __TAURI_INTERNALS__: {
+      transformCallback: () => 1,
+      invoke(command: string) {
+        if (command === "plugin:event|listen") {
+          listenCalls += 1;
+          return new Promise<number>((resolve) => listenResolvers.push(resolve));
+        }
+        if (command === "plugin:event|unlisten") {
+          unlistenCalls += 1;
+          return Promise.resolve();
+        }
+        throw new Error(`unexpected command: ${command}`);
+      },
+    },
+  };
+
+  try {
+    const { useLibraryStore } = await import("../src/stores/library.ts");
+    setActivePinia(createPinia());
+    const store = useLibraryStore();
+    const first = store.subscribe();
+    const second = store.subscribe();
+    store.disposeSubscription();
+    store.disposeSubscription();
+    listenResolvers.forEach((resolve, index) => resolve(index + 1));
+    await Promise.all([first, second]);
+    await Promise.resolve();
+
+    assert.equal(listenCalls, 1);
+    assert.equal(unlistenCalls, 1);
+    assert.equal(store.unlisten, null);
+  } finally {
+    (globalThis as any).window = previousWindow;
+  }
+});

@@ -138,8 +138,10 @@ async function toggleHistoryPin(item: ClipboardPreviewItem) {
 
 onMounted(async () => {
   try {
-    if (!libraryStore.loaded) await libraryStore.load();
-    await libraryStore.subscribe();
+    await Promise.all([
+      libraryStore.loaded ? Promise.resolve() : libraryStore.load(),
+      libraryStore.subscribe(),
+    ]);
   } catch (error) {
     toastStore.error(`收藏状态加载失败：${String(error)}`);
   }
