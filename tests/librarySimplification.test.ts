@@ -34,3 +34,17 @@ test("snippet metadata and OCR sidebar use the compact labels", () => {
   assert.match(sidebar, /label: "图转文字", path: "\/ocr"/);
   assert.doesNotMatch(sidebar, /label: "图片转文字", path: "\/ocr"/);
 });
+
+test("library toolbar and pinned cards use the corrected compact styling", () => {
+  const page = readFileSync("src/pages/Library.vue", "utf8");
+  const card = readFileSync("src/components/library/LibraryCard.vue", "utf8");
+
+  assert.match(page, /grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/);
+  assert.doesNotMatch(page, /grid-template-columns:\s*repeat\(3,/);
+  assert.match(page, /md:grid-cols-\[minmax\(0,1fr\)_120px\]/);
+  assert.match(page, /data-library-tag-label[^>]*>\s*标签\s*</);
+  assert.match(card, /\.library-card--pinned\s*\{[^}]*padding-top:/s);
+  assert.match(card, /\.library-pin-rail\s*\{[^}]*inset:\s*0\.35rem\s+0\.65rem\s+auto/s);
+  assert.match(card, /\.library-pin-rail\s*\{[^}]*height:\s*3px/s);
+  assert.match(card, /linear-gradient\(90deg,\s*var\(--accent-text\),\s*transparent\s+88%\)/);
+});

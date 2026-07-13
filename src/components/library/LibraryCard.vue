@@ -214,15 +214,15 @@ watch(() => props.item.id, loadThumbnail, { immediate: true });
 
 <style scoped>
 .library-card--pinned {
-  padding-left: 1.25rem;
+  padding-top: 1.25rem;
 }
 
 .library-pin-rail {
   position: absolute;
-  inset: 0.65rem auto 0.65rem 0.35rem;
-  width: 3px;
+  inset: 0.35rem 0.65rem auto;
+  height: 3px;
   border-radius: 999px;
-  background: linear-gradient(180deg, var(--accent-text), transparent 88%);
+  background: linear-gradient(90deg, var(--accent-text), transparent 88%);
   box-shadow: 0 0 14px color-mix(in srgb, var(--accent-text) 42%, transparent);
 }
 

@@ -306,7 +306,7 @@ onUnmounted(() => libraryStore.disposeSubscription());
         </div>
       </div>
 
-      <div class="grid gap-3 md:grid-cols-[minmax(0,1fr)_150px]">
+      <div class="grid gap-3 md:grid-cols-[minmax(0,1fr)_120px]">
         <label class="relative min-w-0">
           <Search class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
           <input
@@ -331,6 +331,12 @@ onUnmounted(() => libraryStore.disposeSubscription());
       </div>
 
       <div v-if="availableTags.length" data-library-tag-filter class="flex flex-wrap gap-2">
+        <span
+          data-library-tag-label
+          class="self-center whitespace-nowrap text-[11px] font-semibold text-[color:var(--muted-text)]"
+        >
+          标签
+        </span>
         <button
           v-for="tag in availableTags"
           :key="tag"
@@ -418,7 +424,7 @@ onUnmounted(() => libraryStore.disposeSubscription());
 <style scoped>
 .library-view-switch {
   display: inline-grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.2rem;
   border: 1px solid var(--main-line-soft);
   border-radius: 0.65rem;
