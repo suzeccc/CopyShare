@@ -34,6 +34,17 @@ test("library page, navigation, cards and dialogs expose the complete phase-one 
   assert.match(page, /<component :is="activeHeader\.icon"/);
   assert.match(page, /\{\{ activeHeader\.title \}\}/);
   assert.match(page, /\{\{ activeHeader\.description \}\}/);
+  assert.match(page, /LayoutGrid/);
+  assert.match(page, /List/);
+  assert.match(page, /const libraryLayout = ref<LibraryLayout>\(readLibraryLayout\(\)\)/);
+  assert.match(page, /writeLibraryLayout\(layout\)/);
+  assert.match(page, /data-library-layout-grid/);
+  assert.match(page, /data-library-layout-list/);
+  assert.match(page, /:aria-pressed="libraryLayout === 'grid'"/);
+  assert.match(page, /:aria-pressed="libraryLayout === 'list'"/);
+  assert.match(page, /:layout="libraryLayout"/);
+  assert.match(page, /libraryLayout === 'grid'[\s\S]*?md:grid-cols-2[\s\S]*?2xl:grid-cols-3/);
+  assert.match(page, /libraryLayout === 'list'[\s\S]*?'grid gap-2'/);
 
   for (const hook of [
     "data-library-page",

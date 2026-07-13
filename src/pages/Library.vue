@@ -2,6 +2,8 @@
 import {
   Bookmark as Bookmarks,
   Filter,
+  LayoutGrid,
+  List,
   MessageSquareText,
   Pin,
   Plus,
@@ -16,6 +18,11 @@ import LibraryMetadataDialog from "@/components/library/LibraryMetadataDialog.vu
 import SnippetEditorDialog from "@/components/library/SnippetEditorDialog.vue";
 import Button from "@/components/ui/Button.vue";
 import Card from "@/components/ui/Card.vue";
+import {
+  readLibraryLayout,
+  writeLibraryLayout,
+  type LibraryLayout,
+} from "@/lib/libraryLayout";
 import { getLibraryStorageSize } from "@/lib/tauri";
 import { useLibraryStore } from "@/stores/library";
 import { useToastStore } from "@/stores/toasts";
@@ -71,11 +78,17 @@ const typeFilters: Array<{ value: LibraryContentFilter; label: string }> = [
 ];
 
 const storageSize = ref(0);
+const libraryLayout = ref<LibraryLayout>(readLibraryLayout());
 const snippetItem = ref<LibraryItem | null>(null);
 const snippetOpen = ref(false);
 const metadataItem = ref<LibraryItem | null>(null);
 const metadataOpen = ref(false);
 const draggedPinnedId = ref<string | null>(null);
+
+function setLibraryLayout(layout: LibraryLayout) {
+  libraryLayout.value = layout;
+  writeLibraryLayout(layout);
+}
 
 function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
@@ -259,9 +272,33 @@ onUnmounted(() => libraryStore.disposeSubscription());
             {{ view.label }}
           </button>
         </div>
-        <span data-library-storage-size class="text-[12px] text-[color:var(--muted-text)]">
-          {{ items.length }} 项 · {{ formatBytes(storageSize) }}
-        </span>
+        <div class="flex items-center gap-2">
+          <span data-library-storage-size class="text-[12px] text-[color:var(--muted-text)]">
+            {{ items.length }} 项 · {{ formatBytes(storageSize) }}
+          </span>
+          <div class="library-layout-switch" aria-label="布局显示方式">
+            <button
+              data-library-layout-grid
+              type="button"
+              class="library-layout-button"
+              :aria-pressed="libraryLayout === 'grid'"
+              title="块状显示"
+              @click="setLibraryLayout('grid')"
+            >
+              <LayoutGrid class="h-3.5 w-3.5" />
+            </button>
+            <button
+              data-library-layout-list
+              type="button"
+              class="library-layout-button"
+              :aria-pressed="libraryLayout === 'list'"
+              title="列表显示"
+              @click="setLibraryLayout('list')"
+            >
+              <List class="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
       </div>
 
       <div class="grid gap-3 md:grid-cols-[minmax(0,1fr)_150px]">
@@ -315,13 +352,17 @@ onUnmounted(() => libraryStore.disposeSubscription());
     <div
       v-if="filteredItems.length"
       data-library-list
-      class="grid gap-3 xl:grid-cols-2"
+      :data-library-layout="libraryLayout"
+      :class="libraryLayout === 'grid'
+        ? 'grid gap-3 md:grid-cols-2 2xl:grid-cols-3'
+        : 'grid gap-2'"
     >
       <LibraryCard
         v-for="item in filteredItems"
         :key="item.id"
         :item="item"
         :busy="libraryStore.isItemBusy(item.id)"
+        :layout="libraryLayout"
         :draggable="item.isPinned"
         @dragstart="draggedPinnedId = item.isPinned ? item.id : null"
         @dragend="draggedPinnedId = null"
@@ -398,5 +439,38 @@ onUnmounted(() => libraryStore.disposeSubscription());
   background: var(--main-bg-muted);
   color: var(--accent-text);
   box-shadow: inset 0 0 0 1px var(--main-line);
+}
+
+.library-layout-switch {
+  display: inline-flex;
+  gap: 0.15rem;
+  border: 1px solid var(--main-line-soft);
+  border-radius: 0.55rem;
+  background: var(--field-bg);
+  padding: 0.15rem;
+}
+
+.library-layout-button {
+  display: grid;
+  width: 1.9rem;
+  height: 1.9rem;
+  place-items: center;
+  border-radius: 0.4rem;
+  color: rgb(148 163 184);
+  transition: 150ms ease;
+}
+
+.library-layout-button:hover {
+  color: white;
+}
+
+.library-layout-button[aria-pressed="true"] {
+  background: var(--main-bg-muted);
+  color: var(--accent-text);
+}
+
+.library-layout-button:focus-visible {
+  outline: 2px solid var(--accent-line);
+  outline-offset: 2px;
 }
 </style>
