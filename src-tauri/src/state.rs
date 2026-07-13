@@ -478,18 +478,27 @@ impl AppState {
     }
 
     pub async fn apply_remote_clipboard(&self, message: &crate::models::ClipboardMessage) -> bool {
-        self.inner.sync_engine.lock().await.apply_remote_message(message)
+        let deduplicate_sync_content = self.config().await.deduplicate_sync_content;
+        self.inner
+            .sync_engine
+            .lock()
+            .await
+            .apply_remote_message_with_deduplication(message, deduplicate_sync_content)
     }
 
     pub async fn should_apply_remote_clipboard(
         &self,
         message: &crate::models::ClipboardMessage,
     ) -> bool {
+        let deduplicate_sync_content = self.config().await.deduplicate_sync_content;
         self.inner
             .sync_engine
             .lock()
             .await
-            .should_apply_remote_message(message)
+            .should_apply_remote_message_with_deduplication(
+                message,
+                deduplicate_sync_content,
+            )
     }
 
     pub async fn mark_remote_clipboard_applied(&self, message: &crate::models::ClipboardMessage) {

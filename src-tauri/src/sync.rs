@@ -162,7 +162,16 @@ impl SyncEngine {
         );
     }
 
+    #[cfg(test)]
     pub fn should_apply_remote_message(&self, message: &ClipboardMessage) -> bool {
+        self.should_apply_remote_message_with_deduplication(message, true)
+    }
+
+    pub fn should_apply_remote_message_with_deduplication(
+        &self,
+        message: &ClipboardMessage,
+        deduplicate_sync_content: bool,
+    ) -> bool {
         if message.source_device_id == self.device_id {
             return false;
         }
@@ -171,8 +180,9 @@ impl SyncEngine {
             return false;
         }
 
-        self.last_remote_hash.as_deref() != Some(&message.content_hash)
-            && self.last_local_hash.as_deref() != Some(&message.content_hash)
+        !deduplicate_sync_content
+            || (self.last_remote_hash.as_deref() != Some(&message.content_hash)
+                && self.last_local_hash.as_deref() != Some(&message.content_hash))
     }
 
     pub fn mark_remote_message_applied(&mut self, message: &ClipboardMessage) {
@@ -190,8 +200,20 @@ impl SyncEngine {
         );
     }
 
+    #[cfg(test)]
     pub fn apply_remote_message(&mut self, message: &ClipboardMessage) -> bool {
-        if !self.should_apply_remote_message(message) {
+        self.apply_remote_message_with_deduplication(message, true)
+    }
+
+    pub fn apply_remote_message_with_deduplication(
+        &mut self,
+        message: &ClipboardMessage,
+        deduplicate_sync_content: bool,
+    ) -> bool {
+        if !self.should_apply_remote_message_with_deduplication(
+            message,
+            deduplicate_sync_content,
+        ) {
             return false;
         }
 
@@ -1512,6 +1534,21 @@ mod tests {
 
         assert!(engine.apply_remote_message(&first));
         assert!(!engine.apply_remote_message(&second));
+    }
+
+    #[tokio::test]
+    async fn disabled_deduplication_applies_repeated_remote_content_with_new_message_ids() {
+        let state = AppState::new();
+        let mut config = AppConfig::default();
+        config.device_id = "device-a".to_string();
+        config.deduplicate_sync_content = false;
+        state.set_config(config).await;
+        let first = remote_message("remote-1", "same");
+        let second = remote_message("remote-2", "same");
+
+        assert!(state.apply_remote_clipboard(&first).await);
+        assert!(state.apply_remote_clipboard(&second).await);
+        assert!(!state.apply_remote_clipboard(&second).await);
     }
 
     #[test]
