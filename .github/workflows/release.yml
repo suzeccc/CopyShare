@@ -23,13 +23,24 @@ jobs:
         include:
           - label: macOS Apple Silicon
             platform: macos-latest
+            rustTargets: aarch64-apple-darwin
             args: --target aarch64-apple-darwin
           - label: macOS Intel
             platform: macos-latest
+            rustTargets: x86_64-apple-darwin
             args: --target x86_64-apple-darwin
           - label: Linux
             platform: ubuntu-22.04
+            rustTargets: ""
             args: ""
+          - label: Windows x64
+            platform: windows-latest
+            rustTargets: x86_64-pc-windows-msvc
+            args: --target x86_64-pc-windows-msvc --bundles nsis
+          - label: Windows ARM64
+            platform: windows-latest
+            rustTargets: aarch64-pc-windows-msvc
+            args: --target aarch64-pc-windows-msvc --bundles nsis
 
     runs-on: ${{ matrix.platform }}
 
@@ -46,7 +57,7 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          targets: ${{ matrix.rustTargets }}
 
       - name: Cache Rust build
         uses: swatinem/rust-cache@v2
@@ -73,6 +84,8 @@ jobs:
             CopyShare desktop release.
 
             Assets include:
+            - Windows x64 installer
+            - Windows ARM64 installer
             - macOS Apple Silicon
             - macOS Intel
             - Linux
