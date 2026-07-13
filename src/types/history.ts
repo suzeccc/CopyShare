@@ -10,6 +10,7 @@ export interface HistoryItem {
   sourceDevice: string;
   summary: string;
   content?: string;
+  contentHash: string;
   contentType: ClipboardContentType;
   syncStatus: HistorySyncStatus;
   fileTransferId?: string;

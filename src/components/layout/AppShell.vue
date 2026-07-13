@@ -122,6 +122,7 @@ async function refreshSystemClipboardHistory() {
   try {
     systemClipboardItems.value = (await getClipboardHistory()).map((item) => ({
       ...item,
+      contentHash: "",
       contentType: "text",
       syncStatus: "unsynced",
     }));

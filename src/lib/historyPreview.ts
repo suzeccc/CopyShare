@@ -9,6 +9,7 @@ import type {
 export type ClipboardPreviewItem = {
   id: string;
   text: string;
+  contentHash: string;
   contentType: ClipboardContentType;
   direction?: HistoryDirection;
   syncStatus: HistorySyncStatus;
@@ -105,6 +106,7 @@ export function getRecentClipboardItems(
     .map((item) => ({
       id: item.id,
       text: previewText(item).trim(),
+      contentHash: item.contentHash,
       contentType: item.contentType,
       direction: item.direction,
       sourceDevice: item.sourceDevice,
@@ -168,6 +170,7 @@ export function getFloatingClipboardItems(
     .map((item) => ({
       id: item.id,
       text: item.text.trim(),
+      contentHash: item.contentHash,
       contentType: item.contentType,
       direction: item.direction,
       syncStatus: item.syncStatus ?? "unsynced",

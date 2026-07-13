@@ -23,6 +23,11 @@ import type {
   SelectedTransferFile,
 } from "@/types/fileTransfer";
 import type { HistoryItem } from "@/types/history";
+import type {
+  CreateSnippetInput,
+  LibraryItemUpdate,
+  LibrarySnapshot,
+} from "@/types/library";
 import type { MobileSessionView } from "@/types/mobile";
 import type { OcrResponse } from "@/types/ocr";
 import type { AppStatus } from "@/types/status";
@@ -38,6 +43,7 @@ export type AppEventName =
   | "clipboard-synced"
   | "sync-error"
   | "config-updated"
+  | "library-updated"
   | "navigate-to-page"
   | "file-transfer-offer"
   | "file-transfer-updated"
@@ -87,6 +93,59 @@ export function updateConfig(config: AppConfig): Promise<AppConfig> {
 
 export function getHistory(): Promise<HistoryItem[]> {
   return invoke<HistoryItem[]>("get_history");
+}
+
+export function getLibrary(): Promise<LibrarySnapshot> {
+  return invoke<LibrarySnapshot>("get_library");
+}
+
+export function collectHistoryItem(
+  historyId: string,
+  pin: boolean,
+): Promise<LibrarySnapshot> {
+  return invoke<LibrarySnapshot>("collect_history_item", { historyId, pin });
+}
+
+export function createTextSnippet(input: CreateSnippetInput): Promise<LibrarySnapshot> {
+  return invoke<LibrarySnapshot>("create_text_snippet", { ...input });
+}
+
+export function updateLibraryItem(
+  id: string,
+  update: LibraryItemUpdate,
+): Promise<LibrarySnapshot> {
+  return invoke<LibrarySnapshot>("update_library_item", { id, update });
+}
+
+export function convertLibraryItemToSnippet(id: string): Promise<LibrarySnapshot> {
+  return invoke<LibrarySnapshot>("convert_library_item_to_snippet", { id });
+}
+
+export function setLibraryItemPinned(
+  id: string,
+  pinned: boolean,
+): Promise<LibrarySnapshot> {
+  return invoke<LibrarySnapshot>("set_library_item_pinned", { id, pinned });
+}
+
+export function reorderPinnedLibraryItems(orderedIds: string[]): Promise<LibrarySnapshot> {
+  return invoke<LibrarySnapshot>("reorder_pinned_library_items", { orderedIds });
+}
+
+export function removeLibraryItem(id: string): Promise<LibrarySnapshot> {
+  return invoke<LibrarySnapshot>("remove_library_item", { id });
+}
+
+export function copyLibraryItem(id: string): Promise<void> {
+  return invoke<void>("copy_library_item", { id });
+}
+
+export function getLibraryStorageSize(): Promise<number> {
+  return invoke<number>("get_library_storage_size");
+}
+
+export function getLibraryImageThumbnail(id: string, maxSize = 200): Promise<string> {
+  return invoke<string>("get_library_image_thumbnail", { id, maxSize });
 }
 
 export function getClipboardHistory(): Promise<Array<{ id: string; text: string }>> {
