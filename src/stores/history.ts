@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 
-import { clearHistory, getHistory, onAppEvent } from "@/lib/tauri";
+import { clearHistory, getHistory, onAppEvent, setHistoryItemPinned } from "@/lib/tauri";
 import {
   applyClipboardFileDownloadProgress,
   clipboardFileDownloadActivityFromTask,
@@ -11,19 +11,30 @@ import { useToastStore } from "@/stores/toasts";
 import type { FileTransferProgressEvent, FileTransferTask } from "@/types/fileTransfer";
 import type { HistoryItem } from "@/types/history";
 
+function sortHistoryItems(items: HistoryItem[]) {
+  return [...items].sort((left, right) => {
+    if (left.isPinned !== right.isPinned) return left.isPinned ? -1 : 1;
+    if (left.isPinned && right.isPinned) {
+      return (Date.parse(right.pinnedAt ?? "") || 0) - (Date.parse(left.pinnedAt ?? "") || 0);
+    }
+    return Date.parse(right.createdAt) - Date.parse(left.createdAt);
+  });
+}
+
 export const useHistoryStore = defineStore("history", {
   state: () => ({
     items: [] as HistoryItem[],
     loading: false,
     error: null as string | null,
     fileDownloads: {} as Record<string, ClipboardFileDownloadActivity>,
+    pinningItemIds: new Set<string>(),
     unlisteners: [] as (() => void)[],
   }),
   actions: {
     async refresh() {
       this.error = null;
       try {
-        this.items = await getHistory();
+        this.items = sortHistoryItems(await getHistory());
       } catch (error) {
         this.error = String(error);
       }
@@ -39,6 +50,20 @@ export const useHistoryStore = defineStore("history", {
         this.error = String(error);
       } finally {
         this.loading = false;
+      }
+    },
+    isPinning(id: string) {
+      return this.pinningItemIds.has(id);
+    },
+    async setPinned(id: string, pinned: boolean) {
+      if (this.pinningItemIds.has(id)) return;
+      this.pinningItemIds = new Set(this.pinningItemIds).add(id);
+      try {
+        this.items = sortHistoryItems(await setHistoryItemPinned(id, pinned));
+      } finally {
+        const next = new Set(this.pinningItemIds);
+        next.delete(id);
+        this.pinningItemIds = next;
       }
     },
     fileDownloadActivity(transferId?: string) {
@@ -107,7 +132,10 @@ export const useHistoryStore = defineStore("history", {
       }
       this.unlisteners = await Promise.all([
         onAppEvent<HistoryItem>("clipboard-synced", (item) => {
-          this.items = [item, ...this.items.filter((existing) => existing.id !== item.id)].slice(0, 100);
+          this.items = sortHistoryItems([item, ...this.items.filter((existing) => existing.id !== item.id)]).slice(0, 100);
+        }),
+        onAppEvent<HistoryItem[]>("history-updated", (items) => {
+          this.items = sortHistoryItems(items);
         }),
         onAppEvent<FileTransferTask>("file-transfer-updated", (task) => {
           this.updateFileDownloadTask(task);

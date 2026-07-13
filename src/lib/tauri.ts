@@ -41,6 +41,7 @@ export type AppEventName =
   | "device-rejected"
   | "lan-discovery-progress"
   | "clipboard-synced"
+  | "history-updated"
   | "sync-error"
   | "config-updated"
   | "library-updated"
@@ -93,6 +94,10 @@ export function updateConfig(config: AppConfig): Promise<AppConfig> {
 
 export function getHistory(): Promise<HistoryItem[]> {
   return invoke<HistoryItem[]>("get_history");
+}
+
+export function setHistoryItemPinned(historyId: string, pinned: boolean): Promise<HistoryItem[]> {
+  return invoke<HistoryItem[]>("set_history_item_pinned", { historyId, pinned });
 }
 
 export function getLibrary(): Promise<LibrarySnapshot> {

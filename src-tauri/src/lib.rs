@@ -90,6 +90,7 @@ pub fn run() {
             commands::get_config,
             commands::update_config,
             commands::get_history,
+            commands::set_history_item_pinned,
             commands::get_library,
             commands::collect_history_item,
             commands::create_text_snippet,

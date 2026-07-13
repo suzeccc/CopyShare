@@ -197,6 +197,22 @@ pub async fn get_history(state: State<'_, AppState>) -> AppResult<Vec<HistoryIte
     Ok(history::history_items_for_frontend(&state.history().await))
 }
 
+#[tauri::command]
+pub async fn set_history_item_pinned(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    history_id: String,
+    pinned: bool,
+) -> AppResult<Vec<HistoryItem>> {
+    let mut items = state.history().await;
+    history::set_history_item_pinned(&mut items, &history_id, pinned)?;
+    history::save_history(&app, &items)?;
+    state.replace_history(items.clone()).await;
+    let frontend_items = history::history_items_for_frontend(&items);
+    app.emit("history-updated", frontend_items.clone())?;
+    Ok(frontend_items)
+}
+
 async fn mutate_library<F>(
     app: &AppHandle,
     state: &AppState,
