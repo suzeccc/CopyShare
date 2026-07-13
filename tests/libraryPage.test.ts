@@ -20,10 +20,20 @@ test("library page, navigation, cards and dialogs expose the complete phase-one 
 
   assert.match(router, /import Library from "@\/pages\/Library\.vue"/);
   assert.match(router, /path: "\/library", name: "library", component: Library/);
-  assert.match(sidebar, /Bookmarks/);
-  assert.match(sidebar, /label: "收藏夹", path: "\/library", icon: Bookmarks/);
-  assert.ok(sidebar.indexOf('label: "剪切板"') < sidebar.indexOf('label: "收藏夹"'));
-  assert.ok(sidebar.indexOf('label: "收藏夹"') < sidebar.indexOf('label: "设备连接"'));
+  assert.match(sidebar, /MessageSquareText/);
+  assert.match(sidebar, /label: "常用片段", path: "\/library", icon: MessageSquareText/);
+  assert.ok(sidebar.indexOf('label: "设备连接"') < sidebar.indexOf('label: "常用片段"'));
+  assert.ok(sidebar.indexOf('label: "常用片段"') < sidebar.indexOf('label: "图片转文字"'));
+
+  const snippetView = page.indexOf('{ value: "snippets", label: "常用片段" }');
+  const allView = page.indexOf('{ value: "all", label: "全部收藏" }');
+  const pinnedView = page.indexOf('{ value: "pinned", label: "已置顶" }');
+  assert.ok(snippetView < allView && allView < pinnedView);
+  assert.match(page, /const activeHeader = computed/);
+  assert.match(page, /v-if="activeView === 'snippets'"/);
+  assert.match(page, /<component :is="activeHeader\.icon"/);
+  assert.match(page, /\{\{ activeHeader\.title \}\}/);
+  assert.match(page, /\{\{ activeHeader\.description \}\}/);
 
   for (const hook of [
     "data-library-page",

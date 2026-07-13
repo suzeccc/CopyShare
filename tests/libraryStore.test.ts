@@ -49,10 +49,12 @@ test("library store filters items and tracks history membership", async () => {
   setActivePinia(createPinia());
   const store = useLibraryStore();
 
+  assert.equal(store.activeView, "snippets");
   store.applySnapshot({ items: structuredClone(fixtures), warning: null });
   assert.equal(store.isHistoryItemSaved("history-1", "hash-1"), true);
   assert.equal(store.isHistoryItemPinned("history-1", "hash-1"), false);
 
+  store.activeView = "all";
   store.query = "vpn";
   assert.deepEqual(store.filteredItems.map((item) => item.id), ["saved-1"]);
   store.query = "";

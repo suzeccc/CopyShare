@@ -2,12 +2,14 @@
 import {
   Bookmark as Bookmarks,
   Filter,
+  MessageSquareText,
+  Pin,
   Plus,
   Search,
   Sparkles,
 } from "lucide-vue-next";
 import { storeToRefs } from "pinia";
-import { onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 
 import LibraryCard from "@/components/library/LibraryCard.vue";
 import LibraryMetadataDialog from "@/components/library/LibraryMetadataDialog.vue";
@@ -40,10 +42,27 @@ const {
 } = storeToRefs(libraryStore);
 
 const views: Array<{ value: LibraryView; label: string }> = [
+  { value: "snippets", label: "常用片段" },
   { value: "all", label: "全部收藏" },
   { value: "pinned", label: "已置顶" },
-  { value: "snippets", label: "常用片段" },
 ];
+const activeHeader = computed(() => ({
+  snippets: {
+    title: "常用片段",
+    description: "快速保存和复用高频文本内容。",
+    icon: MessageSquareText,
+  },
+  all: {
+    title: "收藏夹",
+    description: "长期保存常用内容，不受剪贴板历史清理影响。",
+    icon: Bookmarks,
+  },
+  pinned: {
+    title: "已置顶",
+    description: "集中查看优先保留的收藏和常用片段。",
+    icon: Pin,
+  },
+})[activeView.value]);
 const typeFilters: Array<{ value: LibraryContentFilter; label: string }> = [
   { value: "all", label: "全部类型" },
   { value: "text", label: "文本" },
@@ -201,16 +220,22 @@ onUnmounted(() => libraryStore.disposeSubscription());
       <div class="relative flex flex-wrap items-start justify-between gap-4">
         <div class="flex min-w-0 items-start gap-3">
           <div class="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-[color:var(--accent-line)] bg-[color:var(--accent-soft)] text-[color:var(--accent-text)]">
-            <Bookmarks class="h-5 w-5" />
+            <component :is="activeHeader.icon" class="h-5 w-5" />
           </div>
           <div>
-            <h1 class="text-lg font-bold text-white">收藏夹</h1>
+            <h1 class="text-lg font-bold text-white">{{ activeHeader.title }}</h1>
             <p class="mt-1 text-[13px] leading-5 text-[color:var(--muted-text)]">
-              长期保存常用内容，不受剪贴板历史清理影响。
+              {{ activeHeader.description }}
             </p>
           </div>
         </div>
-        <Button data-library-new-snippet variant="primary" size="sm" @click="openNewSnippet">
+        <Button
+          v-if="activeView === 'snippets'"
+          data-library-new-snippet
+          variant="primary"
+          size="sm"
+          @click="openNewSnippet"
+        >
           <Plus class="h-4 w-4" />
           新建文本片段
         </Button>

@@ -28,7 +28,7 @@ export const useLibraryStore = defineStore("library", {
     loading: false,
     loaded: false,
     query: "",
-    activeView: "all" as LibraryView,
+    activeView: "snippets" as LibraryView,
     contentTypeFilter: "all" as LibraryContentFilter,
     selectedTags: [] as string[],
     busyItemIds: new Set<string>(),

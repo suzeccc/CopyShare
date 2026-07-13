@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import {
-  Bookmark as Bookmarks,
   Clipboard,
   History,
   Home,
   Info,
   Languages,
+  MessageSquareText,
   MonitorSmartphone,
   ScanText,
   Settings,
@@ -14,8 +14,8 @@ import {
 const primaryItems = [
   { label: "总览", path: "/", icon: Home },
   { label: "剪切板", path: "/clipboard", icon: Clipboard },
-  { label: "收藏夹", path: "/library", icon: Bookmarks },
   { label: "设备连接", path: "/devices", icon: MonitorSmartphone },
+  { label: "常用片段", path: "/library", icon: MessageSquareText },
   { label: "图片转文字", path: "/ocr", icon: ScanText },
   { label: "翻译", path: "/translate", icon: Languages },
   { label: "连接与剪贴日志", path: "/logs", icon: History },
