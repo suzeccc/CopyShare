@@ -202,11 +202,11 @@ onUnmounted(() => {
           data-floating-clipboard-history-row
           class="floating-clipboard-row grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2 border-b border-[color:var(--floating-stat-line)] px-2 py-2.5 last:border-b-0"
         >
-          <div class="min-w-0">
+          <div data-floating-clipboard-history-content class="min-w-0 overflow-hidden">
             <button
               v-if="getClipboardLinkUrl(item.text)"
               data-floating-clipboard-link-button
-              class="floating-link-chip line-clamp-2 max-w-full break-all text-left text-xs font-semibold leading-5 text-[color:var(--floating-strong-text)] underline-offset-2 hover:text-[color:var(--accent-text)] hover:underline"
+              class="floating-link-chip block w-full min-w-0 overflow-hidden line-clamp-2 break-all text-left text-xs font-semibold leading-5 text-[color:var(--floating-strong-text)] underline-offset-2 hover:text-[color:var(--accent-text)] hover:underline"
               type="button"
               @click="openClipboardLink(item)"
             >
@@ -242,7 +242,7 @@ onUnmounted(() => {
               {{ item.sourceDevice }}
             </p>
           </div>
-          <div class="flex shrink-0 items-center gap-1">
+          <div data-floating-clipboard-actions class="flex shrink-0 items-center gap-1">
             <ClipboardFileDownloadStatus
               v-if="item.contentType === 'fileList'"
               :item="item"

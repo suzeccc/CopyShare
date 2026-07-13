@@ -331,8 +331,9 @@ function openFullClipboardItem(item: ClipboardPreviewItem) {
           </button>
           <div
             v-if="item.contentType === 'image'"
+            data-floating-clipboard-content
             data-floating-clipboard-image-summary
-            class="flex min-w-0 flex-1 select-none items-baseline gap-2.5 text-xs font-semibold leading-4 text-[color:var(--floating-strong-text)]"
+            class="flex min-w-0 flex-1 select-none items-baseline gap-2.5 overflow-hidden text-xs font-semibold leading-4 text-[color:var(--floating-strong-text)]"
           >
             <span class="min-w-0 truncate">{{ clipboardFileSummary(item).name }}</span>
             <span
@@ -344,8 +345,9 @@ function openFullClipboardItem(item: ClipboardPreviewItem) {
           </div>
           <div
             v-else-if="item.contentType === 'fileList'"
+            data-floating-clipboard-content
             data-floating-clipboard-file-summary
-            class="flex min-w-0 flex-1 select-none items-center gap-2.5 text-xs font-semibold leading-4 text-[color:var(--floating-strong-text)]"
+            class="flex min-w-0 flex-1 select-none items-center gap-2.5 overflow-hidden text-xs font-semibold leading-4 text-[color:var(--floating-strong-text)]"
           >
             <button
               v-if="isClipboardVideoFile(item)"
@@ -369,7 +371,7 @@ function openFullClipboardItem(item: ClipboardPreviewItem) {
               :max-size="96"
               compact
             />
-            <div class="flex min-w-0 items-baseline gap-2.5">
+            <div class="flex min-w-0 flex-1 items-baseline gap-2.5 overflow-hidden">
               <span class="min-w-0 truncate">{{ clipboardFileSummary(item).name }}</span>
               <span
                 v-if="clipboardFileSummary(item).size"
@@ -381,41 +383,49 @@ function openFullClipboardItem(item: ClipboardPreviewItem) {
           </div>
           <button
             v-else-if="getClipboardLinkUrl(item.text)"
+            data-floating-clipboard-content
             data-floating-clipboard-link-button
-            class="floating-link-chip line-clamp-1 w-fit max-w-full min-w-0 cursor-pointer select-none break-words text-left text-xs font-semibold leading-4 text-[color:var(--floating-strong-text)] underline-offset-2 transition-colors duration-150 hover:text-[color:var(--accent-text)] hover:underline"
+            class="floating-link-chip block min-w-0 flex-1 cursor-pointer select-none overflow-hidden text-ellipsis whitespace-nowrap text-left text-xs font-semibold leading-4 text-[color:var(--floating-strong-text)] underline-offset-2 transition-colors duration-150 hover:text-[color:var(--accent-text)] hover:underline"
             type="button"
             @click.stop="openClipboardLink(item)"
           >
             {{ item.text }}
           </button>
-          <p v-else data-floating-clipboard-text class="line-clamp-1 min-w-0 flex-1 break-words text-xs font-semibold leading-4 text-[color:var(--floating-strong-text)]">
+          <p
+            v-else
+            data-floating-clipboard-content
+            data-floating-clipboard-text
+            class="line-clamp-1 min-w-0 flex-1 overflow-hidden break-words text-xs font-semibold leading-4 text-[color:var(--floating-strong-text)]"
+          >
             {{ item.text }}
           </p>
-          <ClipboardFileDownloadStatus
-            v-if="item.contentType === 'fileList'"
-            :item="item"
-            compact
-          />
-          <button
-            v-if="shouldShowFloatingClipboardItemMore(item)"
-            data-floating-clipboard-item-more-button
-            class="grid h-7 w-7 shrink-0 place-items-center rounded-md border border-[color:var(--floating-control-line)] bg-[color:var(--floating-control-bg)] text-[color:var(--floating-control-text)] transition hover:bg-[color:var(--floating-control-bg-hover)]"
-            type="button"
-            title="查看完整内容"
-            @click.stop="openFullClipboardItem(item)"
-          >
-            <MoreHorizontal class="h-3.5 w-3.5" />
-          </button>
-          <CopyTextButton
-            :text="item.text"
-            :content-type="item.contentType"
-            :history-item-id="item.id"
-            :file-transfer-id="item.fileTransferId"
-            :file-transfer-status="item.fileTransferStatus"
-            icon-only
-            label="复制内容"
-            copied-label="已复制"
-          />
+          <div data-floating-clipboard-actions class="flex shrink-0 items-center gap-1">
+            <ClipboardFileDownloadStatus
+              v-if="item.contentType === 'fileList'"
+              :item="item"
+              compact
+            />
+            <button
+              v-if="shouldShowFloatingClipboardItemMore(item)"
+              data-floating-clipboard-item-more-button
+              class="grid h-7 w-7 shrink-0 place-items-center rounded-md border border-[color:var(--floating-control-line)] bg-[color:var(--floating-control-bg)] text-[color:var(--floating-control-text)] transition hover:bg-[color:var(--floating-control-bg-hover)]"
+              type="button"
+              title="查看完整内容"
+              @click.stop="openFullClipboardItem(item)"
+            >
+              <MoreHorizontal class="h-3.5 w-3.5" />
+            </button>
+            <CopyTextButton
+              :text="item.text"
+              :content-type="item.contentType"
+              :history-item-id="item.id"
+              :file-transfer-id="item.fileTransferId"
+              :file-transfer-status="item.fileTransferStatus"
+              icon-only
+              label="复制内容"
+              copied-label="已复制"
+            />
+          </div>
         </div>
       </div>
       <p v-else class="break-words text-xs font-semibold leading-5 text-[color:var(--floating-strong-text)]">

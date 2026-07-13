@@ -18,6 +18,19 @@ assert.match(floatingPanel, /openFloatingClipboardHistoryWindow/);
 assert.match(floatingPanel, /openFloatingClipboardHistoryWindow\(\{\s*items:\s*clipboardHistoryItems\s*\}\)/);
 assert.match(floatingPanel, /shouldShowFloatingClipboardItemMore/);
 assert.match(floatingPanel, /data-floating-clipboard-item-more-button/);
+assert.match(floatingPanel, /data-floating-clipboard-content/);
+assert.match(
+  floatingPanel,
+  /data-floating-clipboard-content[\s\S]*?min-w-0[\s\S]*?flex-1[\s\S]*?overflow-hidden/,
+);
+assert.match(
+  floatingPanel,
+  /data-floating-clipboard-actions[\s\S]*?flex[\s\S]*?shrink-0/,
+);
+assert.match(
+  floatingPanel,
+  /data-floating-clipboard-link-button[\s\S]*?flex-1[\s\S]*?overflow-hidden/,
+);
 assert.match(floatingPanel, /selectedClipboardItem/);
 assert.match(floatingPanel, /data-floating-clipboard-full-content/);
 assert.doesNotMatch(floatingPanel, /showClipboardHistoryModal/);
@@ -65,6 +78,15 @@ assert.doesNotMatch(floatingClipboardWindow, /FLOATING_CLIPBOARD_MORE_LIMIT/);
 assert.match(floatingClipboardWindow, /FLOATING_CLIPBOARD_HISTORY_LIMIT/);
 assert.match(floatingClipboardWindow, /payload\.items\.slice\(0,\s*FLOATING_CLIPBOARD_HISTORY_LIMIT\)/);
 assert.match(floatingClipboardWindow, /data-floating-clipboard-history-row/);
+assert.match(floatingClipboardWindow, /data-floating-clipboard-history-content/);
+assert.match(
+  floatingClipboardWindow,
+  /data-floating-clipboard-history-content[\s\S]*?min-w-0[\s\S]*?overflow-hidden/,
+);
+assert.match(
+  floatingClipboardWindow,
+  /data-floating-clipboard-actions[\s\S]*?shrink-0/,
+);
 assert.match(floatingClipboardWindow, /shouldShowFloatingClipboardHistoryItemMore/);
 assert.match(floatingClipboardWindow, /data-floating-clipboard-item-more-button/);
 assert.match(floatingClipboardWindow, /v-if="shouldShowFloatingClipboardHistoryItemMore\(item\)"/);
