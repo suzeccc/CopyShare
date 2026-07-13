@@ -29,7 +29,7 @@ const expectedSidebarOrder = [
   "剪切板",
   "设备连接",
   "翻译",
-  "连接与剪贴日志",
+  "日志",
 ];
 const sidebarPositions = expectedSidebarOrder.map((label) =>
   sidebar.indexOf(`label: "${label}"`),

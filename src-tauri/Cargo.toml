@@ -1,6 +1,6 @@
 [package]
 name = "copyshare"
-version = "3.3.0"
+version = "3.4.0"
 description = "LAN clipboard sharing desktop app"
 authors = ["CopyShare"]
 edition = "2021"
