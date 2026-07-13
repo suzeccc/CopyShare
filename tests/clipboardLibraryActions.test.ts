@@ -31,6 +31,23 @@ test("recent and modal clipboard cards expose favorite and pin actions", () => {
     page,
     /\.clipboard-card-pin-action\.active[\s\S]*?background:\s*transparent[\s\S]*?color:\s*white/,
   );
+  assert.equal((page.match(/class="clipboard-card-copy-action"/g) ?? []).length, 2);
+  assert.match(
+    page,
+    /\.clipboard-card-library-action:hover:not\(:disabled\)[\s\S]*?transform:\s*translateY\(-1px\)\s*scale\(1\.08\)/,
+  );
+  assert.match(
+    page,
+    /\.clipboard-card-library-action:active:not\(:disabled\)[\s\S]*?transform:\s*scale\(0\.95\)/,
+  );
+  assert.match(
+    page,
+    /\.clipboard-card-copy-action:hover:not\(:disabled\)[\s\S]*?transform:\s*translateY\(-1px\)\s*scale\(1\.08\)/,
+  );
+  assert.match(
+    page,
+    /\.clipboard-card-copy-action:active:not\(:disabled\)[\s\S]*?transform:\s*scale\(0\.95\)/,
+  );
   assert.match(page, /libraryStore\.collectHistoryItem\(item\.id, false\)/);
   assert.match(page, /libraryStore\.collectHistoryItem\(item\.id, true\)/);
 });

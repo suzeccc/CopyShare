@@ -555,6 +555,7 @@ function clipboardTime(value: string | undefined) {
                 </button>
                 <CopyTextButton
                   data-clipboard-card-action
+                  class="clipboard-card-copy-action"
                   :text="item.text"
                   :content-type="item.contentType"
                   :history-item-id="item.id"
@@ -849,6 +850,7 @@ function clipboardTime(value: string | undefined) {
                       </button>
                       <CopyTextButton
                         data-clipboard-card-action
+                        class="clipboard-card-copy-action"
                         :text="item.text"
                         :content-type="item.contentType"
                         :history-item-id="item.id"
@@ -1137,6 +1139,11 @@ function clipboardTime(value: string | undefined) {
 .clipboard-card-library-action:hover:not(:disabled) {
   background: var(--main-bg-muted);
   color: white;
+  transform: translateY(-1px) scale(1.08);
+}
+
+.clipboard-card-library-action:active:not(:disabled) {
+  transform: scale(0.95);
 }
 
 .clipboard-card-library-action.active {
@@ -1162,6 +1169,18 @@ function clipboardTime(value: string | undefined) {
 .clipboard-card-pin-action.active {
   background: transparent;
   color: white;
+}
+
+.clipboard-card-copy-action {
+  transition: transform 150ms ease, background-color 150ms ease, color 150ms ease;
+}
+
+.clipboard-card-copy-action:hover:not(:disabled) {
+  transform: translateY(-1px) scale(1.08);
+}
+
+.clipboard-card-copy-action:active:not(:disabled) {
+  transform: scale(0.95);
 }
 
 .clipboard-card-library-action:focus-visible {
