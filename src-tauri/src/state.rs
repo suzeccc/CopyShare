@@ -530,6 +530,22 @@ impl AppState {
         self.inner.sync_engine.lock().await.reset_local_observation();
     }
 
+    pub async fn should_skip_synchronized_content(&self, enabled: bool, hash: &str) -> bool {
+        self.inner
+            .sync_engine
+            .lock()
+            .await
+            .should_skip_synchronized_content(enabled, hash)
+    }
+
+    pub async fn mark_content_synchronized(&self, hash: String) {
+        self.inner
+            .sync_engine
+            .lock()
+            .await
+            .mark_content_synchronized(hash);
+    }
+
     pub async fn set_running(&self, running: bool, local_ip: Option<String>, message: String) {
         let config = self.config().await;
         let mut status = self.inner.status.write().await;

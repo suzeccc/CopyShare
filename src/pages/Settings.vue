@@ -108,6 +108,7 @@ watch(
       draft.syncText = next.syncText;
       draft.syncImage = next.syncImage;
       draft.syncFiles = next.syncFiles;
+      draft.deduplicateSyncContent = next.deduplicateSyncContent;
       draft.trustedDevices = next.trustedDevices;
       return;
     }
@@ -314,7 +315,7 @@ async function saveAutoOpenFolderAfterSave(autoOpenFolderAfterSave: boolean) {
 }
 
 async function saveSyncSetting(
-  patch: Partial<Pick<AppConfig, "syncImage" | "syncFiles">>,
+  patch: Partial<Pick<AppConfig, "syncImage" | "syncFiles" | "deduplicateSyncContent">>,
   options: { silent?: boolean } = { silent: true },
 ) {
   if (configStore.saving || syncContentSaving.value) return;
@@ -336,6 +337,9 @@ async function saveSyncSetting(
       if ("syncFiles" in patch) {
         draft.syncFiles = configStore.config.syncFiles;
       }
+      if ("deduplicateSyncContent" in patch) {
+        draft.deduplicateSyncContent = configStore.config.deduplicateSyncContent;
+      }
       toastStore.error("保存失败");
     } else {
       if (!options.silent) {
@@ -353,6 +357,10 @@ async function saveSyncImage(syncImage: boolean) {
 
 async function saveSyncFiles(syncFiles: boolean) {
   await saveSyncSetting({ syncFiles });
+}
+
+async function saveDeduplicateSyncContent(deduplicateSyncContent: boolean) {
+  await saveSyncSetting({ deduplicateSyncContent });
 }
 
 function applySavedConfig(config: AppConfig) {
@@ -693,6 +701,22 @@ async function clearLocalCache() {
             label="同步文件"
             :disabled="syncContentSaving"
             @update:model-value="saveSyncFiles"
+          />
+        </div>
+        <div
+          data-settings-image2-row
+          class="flex min-h-[50px] items-center justify-between gap-4 border-t border-[color:var(--main-line-soft)] px-3 py-3"
+        >
+          <span class="grid min-w-0 gap-1">
+            <span class="text-[15px] font-bold text-white">去重同步内容</span>
+            <span class="text-[13px] text-[color:var(--muted-text)]">开启后，相同内容在本次运行期间最多同步一次</span>
+          </span>
+          <Switch
+            control-only
+            :model-value="draft.deduplicateSyncContent"
+            label="去重同步内容"
+            :disabled="syncContentSaving"
+            @update:model-value="saveDeduplicateSyncContent"
           />
         </div>
         <div

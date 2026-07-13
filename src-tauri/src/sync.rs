@@ -989,11 +989,23 @@ async fn record_observed_local_history(
     message: &ClipboardMessage,
     summary_override: Option<String>,
 ) -> AppResult<()> {
+    if state
+        .should_skip_synchronized_content(config.deduplicate_sync_content, &message.content_hash)
+        .await
+    {
+        return Ok(());
+    }
+
     let sent_count = if state.status().await.running {
         state.broadcast_trusted(config, message.clone().into()).await
     } else {
         0
     };
+    if should_record_synchronized_content(config.deduplicate_sync_content, sent_count) {
+        state
+            .mark_content_synchronized(message.content_hash.clone())
+            .await;
+    }
     if sent_count > 0 {
         state.touch_last_sync().await;
     }
@@ -1029,12 +1041,24 @@ async fn record_observed_local_file_list(
     message: &ClipboardMessage,
     files: Vec<PathBuf>,
 ) -> AppResult<()> {
+    if state
+        .should_skip_synchronized_content(config.deduplicate_sync_content, &message.content_hash)
+        .await
+    {
+        return Ok(());
+    }
+
     let sent_count = if state.status().await.running {
         file_transfer::send_clipboard_files_to_trusted_devices(app.clone(), state.clone(), files)
             .await?
     } else {
         0
     };
+    if should_record_synchronized_content(config.deduplicate_sync_content, sent_count) {
+        state
+            .mark_content_synchronized(message.content_hash.clone())
+            .await;
+    }
     if sent_count > 0 {
         state.touch_last_sync().await;
     }
@@ -1104,6 +1128,10 @@ fn write_remote_clipboard(app: &AppHandle, message: &ClipboardMessage) -> AppRes
             clipboard::write_clipboard_files(app, &paths)
         }
     }
+}
+
+fn should_record_synchronized_content(deduplicate: bool, sent_count: usize) -> bool {
+    deduplicate && sent_count > 0
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1261,6 +1289,13 @@ async fn persist_devices(app: &AppHandle, state: &AppState) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deduplication_records_only_successful_sends() {
+        assert!(!should_record_synchronized_content(false, 1));
+        assert!(!should_record_synchronized_content(true, 0));
+        assert!(should_record_synchronized_content(true, 1));
+    }
 
     fn remote_message(id: &str, content: &str) -> ClipboardMessage {
         let content_type = ClipboardContentType::Text;
