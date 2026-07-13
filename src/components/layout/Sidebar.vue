@@ -18,7 +18,7 @@ const primaryItems = [
   { label: "常用片段", path: "/library", icon: MessageSquareText },
   { label: "图转文字", path: "/ocr", icon: ScanText },
   { label: "翻译", path: "/translate", icon: Languages },
-  { label: "连接与剪贴日志", path: "/logs", icon: History },
+  { label: "日志", path: "/logs", icon: History },
 ];
 
 const footerItems = [

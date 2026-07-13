@@ -14,5 +14,7 @@ assert.doesNotMatch(sidebar, /w-60/);
 assert.doesNotMatch(sidebar, /w-64/);
 assert.match(sidebar, /path: "\/settings"/);
 assert.match(sidebar, /path: "\/about"/);
+assert.match(sidebar, /label: "日志", path: "\/logs", icon: History/);
+assert.doesNotMatch(sidebar, /连接与剪贴日志/);
 assert.doesNotMatch(sidebar, /局域网直连/);
 assert.doesNotMatch(sidebar, /发现附近设备，确认信任后即可同步/);
