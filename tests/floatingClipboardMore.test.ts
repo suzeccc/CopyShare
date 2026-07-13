@@ -65,6 +65,9 @@ assert.ok(defaultCapability.windows.includes("floating-clipboard-history"));
 
 assert.equal(existsSync(floatingClipboardWindowPath), true, "floating clipboard history window page must exist");
 const floatingClipboardWindow = readFileSync(floatingClipboardWindowPath, "utf8");
+const applyFloatingClipboardPayload = floatingClipboardWindow.match(
+  /function applyFloatingClipboardPayload\(payload: FloatingClipboardHistoryPayload\) \{[\s\S]*?\n\}/,
+)?.[0] ?? "";
 
 assert.match(floatingClipboardWindow, /data-floating-clipboard-window/);
 assert.match(floatingClipboardWindow, /floating-clipboard-history-surface/);
@@ -72,6 +75,8 @@ assert.match(floatingClipboardWindow, /data-window-drag-region/);
 assert.match(floatingClipboardWindow, /startWindowDrag/);
 assert.match(floatingClipboardWindow, /FloatingClipboardHistoryPayload/);
 assert.match(floatingClipboardWindow, /applyFloatingClipboardPayload/);
+assert.match(applyFloatingClipboardPayload, /resolveFloatingClipboardSelection/);
+assert.doesNotMatch(applyFloatingClipboardPayload, /selectedClipboardItem\.value = null/);
 assert.match(floatingClipboardWindow, /listen<FloatingClipboardHistoryPayload>/);
 assert.match(floatingClipboardWindow, /localStorage\.getItem\(FLOATING_CLIPBOARD_HISTORY_STORAGE_KEY\)/);
 assert.doesNotMatch(floatingClipboardWindow, /FLOATING_CLIPBOARD_MORE_LIMIT/);

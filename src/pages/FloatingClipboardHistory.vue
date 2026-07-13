@@ -5,6 +5,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import ClipboardFileDownloadStatus from "@/components/history/ClipboardFileDownloadStatus.vue";
 import CopyTextButton from "@/components/ui/CopyTextButton.vue";
+import { resolveFloatingClipboardSelection } from "@/lib/floatingClipboardSelection";
 import {
   FLOATING_CLIPBOARD_HISTORY_LIMIT,
   getClipboardLinkUrl,
@@ -75,8 +76,12 @@ function readFloatingClipboardHistoryPayload(): FloatingClipboardHistoryPayload 
 }
 
 function applyFloatingClipboardPayload(payload: FloatingClipboardHistoryPayload) {
-  clipboardItems.value = payload.items.slice(0, FLOATING_CLIPBOARD_HISTORY_LIMIT);
-  selectedClipboardItem.value = null;
+  const nextItems = payload.items.slice(0, FLOATING_CLIPBOARD_HISTORY_LIMIT);
+  selectedClipboardItem.value = resolveFloatingClipboardSelection(
+    nextItems,
+    selectedClipboardItem.value,
+  );
+  clipboardItems.value = nextItems;
 }
 
 function refreshFloatingClipboardItems() {
