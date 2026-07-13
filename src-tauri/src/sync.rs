@@ -66,6 +66,8 @@ pub struct SyncEngine {
     last_remote_hash: Option<String>,
     pending_remote_echo_hashes: HashSet<String>,
     pending_remote_echo_order: VecDeque<String>,
+    synchronized_content_hashes: HashSet<String>,
+    synchronized_content_order: VecDeque<String>,
 }
 
 impl SyncEngine {
@@ -79,6 +81,8 @@ impl SyncEngine {
             last_remote_hash: None,
             pending_remote_echo_hashes: HashSet::new(),
             pending_remote_echo_order: VecDeque::new(),
+            synchronized_content_hashes: HashSet::new(),
+            synchronized_content_order: VecDeque::new(),
         }
     }
 
@@ -144,6 +148,18 @@ impl SyncEngine {
 
     pub fn reset_local_observation(&mut self) {
         self.last_local_hash = None;
+    }
+
+    pub fn should_skip_synchronized_content(&self, enabled: bool, hash: &str) -> bool {
+        enabled && self.synchronized_content_hashes.contains(hash)
+    }
+
+    pub fn mark_content_synchronized(&mut self, hash: String) {
+        insert_bounded(
+            &mut self.synchronized_content_hashes,
+            &mut self.synchronized_content_order,
+            hash,
+        );
     }
 
     pub fn should_apply_remote_message(&self, message: &ClipboardMessage) -> bool {
@@ -1281,6 +1297,39 @@ mod tests {
         assert_eq!(first, second);
         assert_ne!(first, image);
         assert_eq!(first.len(), 64);
+    }
+
+    #[test]
+    fn synchronized_content_is_skipped_only_when_deduplication_is_enabled() {
+        let mut engine = SyncEngine::new("device-a", "Laptop A");
+        let hash = "recorded-hash".to_string();
+
+        engine.mark_content_synchronized(hash.clone());
+
+        assert!(engine.should_skip_synchronized_content(true, &hash));
+        assert!(!engine.should_skip_synchronized_content(false, &hash));
+    }
+
+    #[test]
+    fn unrecorded_content_remains_eligible_for_synchronization() {
+        let engine = SyncEngine::new("device-a", "Laptop A");
+
+        assert!(!engine.should_skip_synchronized_content(true, "unrecorded-hash"));
+    }
+
+    #[test]
+    fn synchronized_content_tracking_evicts_the_oldest_hash() {
+        let mut engine = SyncEngine::new("device-a", "Laptop A");
+
+        for index in 0..=MAX_TRACKED_CLIPBOARD_MESSAGES {
+            engine.mark_content_synchronized(format!("hash-{index}"));
+        }
+
+        assert!(!engine.should_skip_synchronized_content(true, "hash-0"));
+        assert!(engine.should_skip_synchronized_content(
+            true,
+            &format!("hash-{MAX_TRACKED_CLIPBOARD_MESSAGES}")
+        ));
     }
 
     #[test]
