@@ -91,7 +91,7 @@ const filteredAllClipboardItems = computed(() =>
 );
 
 function savedLibraryItem(item: ClipboardPreviewItem) {
-  return libraryStore.savedItemForHistory(item.id, item.contentHash);
+  return libraryStore.savedItemForHistory(item.id);
 }
 
 function isHistoryActionBusy(item: ClipboardPreviewItem) {
@@ -529,28 +529,28 @@ function clipboardTime(value: string | undefined) {
                   data-history-favorite
                   type="button"
                   class="clipboard-card-library-action clipboard-card-favorite-action"
-                  :class="{ active: libraryStore.isHistoryItemSaved(item.id, item.contentHash) }"
+                  :class="{ active: libraryStore.isHistoryItemSaved(item.id) }"
                   :disabled="isHistoryActionBusy(item)"
-                  :aria-label="libraryStore.isHistoryItemSaved(item.id, item.contentHash) ? '移出收藏夹' : '收藏'"
+                  :aria-label="libraryStore.isHistoryItemSaved(item.id) ? '移出收藏夹' : '收藏'"
                   @click.stop="toggleHistoryFavorite(item)"
                 >
                   <Star
                     class="h-3.5 w-3.5"
-                    :fill="libraryStore.isHistoryItemSaved(item.id, item.contentHash) ? 'currentColor' : 'none'"
+                    :fill="libraryStore.isHistoryItemSaved(item.id) ? 'currentColor' : 'none'"
                   />
                 </button>
                 <button
                   data-history-pin
                   type="button"
                   class="clipboard-card-library-action"
-                  :class="{ active: libraryStore.isHistoryItemPinned(item.id, item.contentHash) }"
+                  :class="{ active: libraryStore.isHistoryItemPinned(item.id) }"
                   :disabled="isHistoryActionBusy(item)"
-                  :aria-label="libraryStore.isHistoryItemPinned(item.id, item.contentHash) ? '取消置顶' : '收藏并置顶'"
+                  :aria-label="libraryStore.isHistoryItemPinned(item.id) ? '取消置顶' : '收藏并置顶'"
                   @click.stop="toggleHistoryPin(item)"
                 >
                   <Pin
                     class="h-3.5 w-3.5"
-                    :fill="libraryStore.isHistoryItemPinned(item.id, item.contentHash) ? 'currentColor' : 'none'"
+                    :fill="libraryStore.isHistoryItemPinned(item.id) ? 'currentColor' : 'none'"
                   />
                 </button>
                 <CopyTextButton
@@ -823,28 +823,28 @@ function clipboardTime(value: string | undefined) {
                         data-history-favorite
                         type="button"
                         class="clipboard-card-library-action clipboard-card-favorite-action"
-                        :class="{ active: libraryStore.isHistoryItemSaved(item.id, item.contentHash) }"
+                        :class="{ active: libraryStore.isHistoryItemSaved(item.id) }"
                         :disabled="isHistoryActionBusy(item)"
-                        :aria-label="libraryStore.isHistoryItemSaved(item.id, item.contentHash) ? '移出收藏夹' : '收藏'"
+                        :aria-label="libraryStore.isHistoryItemSaved(item.id) ? '移出收藏夹' : '收藏'"
                         @click.stop="toggleHistoryFavorite(item)"
                       >
                         <Star
                           class="h-3.5 w-3.5"
-                          :fill="libraryStore.isHistoryItemSaved(item.id, item.contentHash) ? 'currentColor' : 'none'"
+                          :fill="libraryStore.isHistoryItemSaved(item.id) ? 'currentColor' : 'none'"
                         />
                       </button>
                       <button
                         data-history-pin
                         type="button"
                         class="clipboard-card-library-action"
-                        :class="{ active: libraryStore.isHistoryItemPinned(item.id, item.contentHash) }"
+                        :class="{ active: libraryStore.isHistoryItemPinned(item.id) }"
                         :disabled="isHistoryActionBusy(item)"
-                        :aria-label="libraryStore.isHistoryItemPinned(item.id, item.contentHash) ? '取消置顶' : '收藏并置顶'"
+                        :aria-label="libraryStore.isHistoryItemPinned(item.id) ? '取消置顶' : '收藏并置顶'"
                         @click.stop="toggleHistoryPin(item)"
                       >
                         <Pin
                           class="h-3.5 w-3.5"
-                          :fill="libraryStore.isHistoryItemPinned(item.id, item.contentHash) ? 'currentColor' : 'none'"
+                          :fill="libraryStore.isHistoryItemPinned(item.id) ? 'currentColor' : 'none'"
                         />
                       </button>
                       <CopyTextButton

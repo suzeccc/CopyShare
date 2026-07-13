@@ -76,19 +76,16 @@ export const useLibraryStore = defineStore("library", {
     isItemBusy(id: string) {
       return this.busyItemIds.has(id);
     },
-    savedItemForHistory(historyId: string, sourceContentHash: string) {
+    savedItemForHistory(historyId: string) {
       return this.items.find((item) =>
         item.role === "saved"
-        && (
-          item.sourceHistoryId === historyId
-          || (sourceContentHash.length > 0 && item.sourceContentHash === sourceContentHash)
-        ));
+        && item.sourceHistoryId === historyId);
     },
-    isHistoryItemSaved(historyId: string, sourceContentHash: string) {
-      return Boolean(this.savedItemForHistory(historyId, sourceContentHash));
+    isHistoryItemSaved(historyId: string) {
+      return Boolean(this.savedItemForHistory(historyId));
     },
-    isHistoryItemPinned(historyId: string, sourceContentHash: string) {
-      return Boolean(this.savedItemForHistory(historyId, sourceContentHash)?.isPinned);
+    isHistoryItemPinned(historyId: string) {
+      return Boolean(this.savedItemForHistory(historyId)?.isPinned);
     },
     async load() {
       if (this.loading) return;

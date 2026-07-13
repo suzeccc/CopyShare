@@ -18,7 +18,7 @@ const fixtures = [
     contentHash: "library-hash-1",
     tags: ["Work"],
     note: "Internal",
-    isPinned: false,
+    isPinned: true,
     pinOrder: null,
     createdAt: "2026-07-13T00:00:00Z",
     updatedAt: "2026-07-13T00:00:00Z",
@@ -51,8 +51,10 @@ test("library store filters items and tracks history membership", async () => {
 
   assert.equal(store.activeView, "snippets");
   store.applySnapshot({ items: structuredClone(fixtures), warning: null });
-  assert.equal(store.isHistoryItemSaved("history-1", "hash-1"), true);
-  assert.equal(store.isHistoryItemPinned("history-1", "hash-1"), false);
+  assert.equal(store.isHistoryItemSaved("history-1"), true);
+  assert.equal(store.isHistoryItemPinned("history-1"), true);
+  assert.equal(store.isHistoryItemSaved("history-duplicate", "hash-1"), false);
+  assert.equal(store.isHistoryItemPinned("history-duplicate", "hash-1"), false);
 
   store.activeView = "all";
   store.query = "vpn";
