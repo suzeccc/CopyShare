@@ -13,13 +13,17 @@ import {
 } from "lucide-vue-next";
 import { computed, ref, watch } from "vue";
 
+import type { LibraryLayout } from "@/lib/libraryLayout";
 import { getLibraryImageThumbnail } from "@/lib/tauri";
 import type { LibraryItem } from "@/types/library";
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   item: LibraryItem;
   busy: boolean;
-}>();
+  layout?: LibraryLayout;
+}>(), {
+  layout: "grid",
+});
 
 const emit = defineEmits<{
   copy: [LibraryItem];
@@ -77,10 +81,13 @@ watch(() => props.item.id, loadThumbnail, { immediate: true });
   <article
     data-library-card
     class="library-card group relative grid min-w-0 gap-3 overflow-hidden rounded-xl border border-[color:var(--main-line-soft)] bg-[color:var(--panel-bg)] p-4 transition duration-150 hover:border-[color:var(--main-line)] hover:bg-[color:var(--main-bg-soft)]"
-    :class="{ 'library-card--pinned': item.isPinned }"
+    :class="{
+      'library-card--pinned': item.isPinned,
+      'library-card--list': layout === 'list',
+    }"
   >
     <span v-if="item.isPinned" class="library-pin-rail" aria-hidden="true" />
-    <div class="flex min-w-0 items-start justify-between gap-3">
+    <div data-library-card-header class="flex min-w-0 items-start justify-between gap-3">
       <div class="flex min-w-0 items-start gap-3">
         <div class="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-[color:var(--main-line-soft)] bg-[color:var(--field-bg)] text-[color:var(--accent-text)]">
           <component :is="typeIcon" class="h-4 w-4" />
@@ -103,44 +110,46 @@ watch(() => props.item.id, loadThumbnail, { immediate: true });
       </span>
     </div>
 
-    <img
-      v-if="thumbnail"
-      :src="`data:image/png;base64,${thumbnail}`"
-      :alt="item.title"
-      class="max-h-48 w-full rounded-lg border border-[color:var(--main-line-soft)] bg-black/20 object-contain"
-    />
-    <div
-      v-else-if="item.contentType === 'fileList'"
-      class="grid gap-1 rounded-lg border border-[color:var(--main-line-soft)] bg-[color:var(--field-bg)] px-3 py-2"
-    >
-      <div v-for="asset in item.assets" :key="asset.assetId" class="flex min-w-0 items-center gap-2 text-[12px] text-slate-300">
-        <Files class="h-3.5 w-3.5 shrink-0 text-slate-500" />
-        <span class="truncate">{{ asset.fileName }}</span>
+    <div data-library-card-preview class="grid min-w-0 gap-3">
+      <img
+        v-if="thumbnail"
+        :src="`data:image/png;base64,${thumbnail}`"
+        :alt="item.title"
+        class="library-image-preview max-h-48 w-full rounded-lg border border-[color:var(--main-line-soft)] bg-black/20 object-contain"
+      />
+      <div
+        v-else-if="item.contentType === 'fileList'"
+        class="library-file-preview grid gap-1 overflow-hidden rounded-lg border border-[color:var(--main-line-soft)] bg-[color:var(--field-bg)] px-3 py-2"
+      >
+        <div v-for="asset in item.assets" :key="asset.assetId" class="flex min-w-0 items-center gap-2 text-[12px] text-slate-300">
+          <Files class="h-3.5 w-3.5 shrink-0 text-slate-500" />
+          <span class="truncate">{{ asset.fileName }}</span>
+        </div>
+      </div>
+      <p
+        v-else
+        class="line-clamp-4 whitespace-pre-wrap break-words text-[13px] leading-6 text-slate-200"
+      >
+        {{ previewText }}
+      </p>
+
+      <p v-if="unavailable" class="rounded-lg border border-red-500/35 bg-red-500/10 px-3 py-2 text-[12px] text-red-200">
+        {{ unavailable }}
+      </p>
+      <p v-if="item.note" class="text-[12px] leading-5 text-[color:var(--muted-text)]">{{ item.note }}</p>
+
+      <div v-if="item.tags.length" class="flex flex-wrap gap-1.5">
+        <span
+          v-for="tag in item.tags"
+          :key="tag"
+          class="rounded-full border border-[color:var(--main-line-soft)] bg-[color:var(--field-bg)] px-2 py-0.5 text-[11px] text-slate-300"
+        >
+          {{ tag }}
+        </span>
       </div>
     </div>
-    <p
-      v-else
-      class="line-clamp-4 whitespace-pre-wrap break-words text-[13px] leading-6 text-slate-200"
-    >
-      {{ previewText }}
-    </p>
 
-    <p v-if="unavailable" class="rounded-lg border border-red-500/35 bg-red-500/10 px-3 py-2 text-[12px] text-red-200">
-      {{ unavailable }}
-    </p>
-    <p v-if="item.note" class="text-[12px] leading-5 text-[color:var(--muted-text)]">{{ item.note }}</p>
-
-    <div v-if="item.tags.length" class="flex flex-wrap gap-1.5">
-      <span
-        v-for="tag in item.tags"
-        :key="tag"
-        class="rounded-full border border-[color:var(--main-line-soft)] bg-[color:var(--field-bg)] px-2 py-0.5 text-[11px] text-slate-300"
-      >
-        {{ tag }}
-      </span>
-    </div>
-
-    <div class="flex flex-wrap items-center gap-1.5 border-t border-[color:var(--main-line-soft)] pt-3">
+    <div data-library-card-actions class="flex flex-wrap items-center gap-1.5 border-t border-[color:var(--main-line-soft)] pt-3">
       <button
         data-library-copy
         type="button"
@@ -217,6 +226,38 @@ watch(() => props.item.id, loadThumbnail, { immediate: true });
   box-shadow: 0 0 14px color-mix(in srgb, var(--accent-text) 42%, transparent);
 }
 
+.library-card--list {
+  grid-template-columns: minmax(180px, 0.8fr) minmax(0, 1.4fr) auto;
+  align-items: center;
+  gap: 1rem;
+  padding-block: 0.75rem;
+}
+
+.library-card--list [data-library-card-preview] {
+  min-width: 0;
+}
+
+.library-card--list [data-library-card-preview] > p {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.library-card--list .library-image-preview {
+  max-height: 4rem;
+}
+
+.library-card--list .library-file-preview {
+  max-height: 4rem;
+}
+
+.library-card--list [data-library-card-actions] {
+  justify-content: flex-end;
+  border-top: 0;
+  padding-top: 0;
+}
+
 .library-action {
   display: inline-flex;
   height: 1.8rem;
@@ -248,5 +289,18 @@ watch(() => props.item.id, loadThumbnail, { immediate: true });
 .library-action--danger:hover:not(:disabled) {
   background: rgb(239 68 68 / 0.12);
   color: rgb(254 202 202);
+}
+
+@media (max-width: 720px) {
+  .library-card--list {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+  }
+
+  .library-card--list [data-library-card-actions] {
+    justify-content: flex-start;
+    border-top: 1px solid var(--main-line-soft);
+    padding-top: 0.75rem;
+  }
 }
 </style>

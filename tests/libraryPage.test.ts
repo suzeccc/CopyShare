@@ -71,6 +71,13 @@ test("library page, navigation, cards and dialogs expose the complete phase-one 
     "data-library-edit-snippet",
     "data-library-remove",
   ]) assert.match(card, new RegExp(hook));
+  assert.match(card, /layout\?: LibraryLayout/);
+  assert.match(card, /library-card--list/);
+  assert.match(card, /data-library-card-header/);
+  assert.match(card, /data-library-card-preview/);
+  assert.match(card, /data-library-card-actions/);
+  assert.match(card, /grid-template-columns:\s*minmax\(180px,\s*0\.8fr\)\s+minmax\(0,\s*1\.4fr\)\s+auto/);
+  assert.match(card, /\.library-card--list[\s\S]*?align-items:\s*center/);
   assert.doesNotMatch(card, /data-library-export/);
   assert.match(snippet, /titleError/);
   assert.match(snippet, /contentError/);
