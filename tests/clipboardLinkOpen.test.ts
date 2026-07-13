@@ -15,7 +15,10 @@ assert.match(floatingPanel, /openExternalUrl/);
 assert.match(floatingPanel, /getClipboardLinkUrl/);
 assert.match(floatingPanel, /data-floating-clipboard-link-button/);
 assert.match(floatingPanel, /cursor-pointer select-none/);
-assert.match(floatingPanel, /data-floating-clipboard-link-button\s+class="[^"]*w-fit[^"]*max-w-full/);
+assert.match(
+  floatingPanel,
+  /data-floating-clipboard-link-button\s+class="[^"]*min-w-0[^"]*flex-1[^"]*overflow-hidden/,
+);
 assert.match(floatingPanel, /@click\.stop="openClipboardLink\(item\)"/);
 
 for (const source of [clipboardPage, floatingPanel]) {
