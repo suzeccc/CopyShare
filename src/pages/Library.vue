@@ -5,13 +5,12 @@ import {
   LayoutGrid,
   List,
   MessageSquareText,
-  Pin,
   Plus,
   Search,
   Sparkles,
 } from "lucide-vue-next";
 import { storeToRefs } from "pinia";
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 
 import LibraryCard from "@/components/library/LibraryCard.vue";
 import LibraryMetadataDialog from "@/components/library/LibraryMetadataDialog.vue";
@@ -51,7 +50,6 @@ const {
 const views: Array<{ value: LibraryView; label: string }> = [
   { value: "snippets", label: "常用片段" },
   { value: "all", label: "全部收藏" },
-  { value: "pinned", label: "已置顶" },
 ];
 const activeHeader = computed(() => ({
   snippets: {
@@ -63,11 +61,6 @@ const activeHeader = computed(() => ({
     title: "收藏夹",
     description: "长期保存常用内容，不受剪贴板历史清理影响。",
     icon: Bookmarks,
-  },
-  pinned: {
-    title: "已置顶",
-    description: "集中查看优先保留的收藏和常用片段。",
-    icon: Pin,
   },
 })[activeView.value]);
 const typeFilters: Array<{ value: LibraryContentFilter; label: string }> = [
@@ -84,6 +77,7 @@ const snippetOpen = ref(false);
 const metadataItem = ref<LibraryItem | null>(null);
 const metadataOpen = ref(false);
 const draggedPinnedId = ref<string | null>(null);
+let storageRefreshId = 0;
 
 function setLibraryLayout(layout: LibraryLayout) {
   libraryLayout.value = layout;
@@ -104,8 +98,23 @@ function formatBytes(bytes: number) {
 }
 
 async function refreshStorage() {
-  storageSize.value = await getLibraryStorageSize();
+  const requestId = ++storageRefreshId;
+  try {
+    const nextSize = await getLibraryStorageSize();
+    if (requestId !== storageRefreshId) return;
+    storageSize.value = nextSize;
+  } catch {
+    // Keep the last successful measurement; library actions remain usable.
+  }
 }
+
+watch(
+  () => items.value
+    .map((item) => `${item.id}:${item.updatedAt}:${item.assets.map((asset) => `${asset.assetId}:${asset.size}`).join(",")}`)
+    .join("|"),
+  () => void refreshStorage(),
+  { immediate: true },
+);
 
 function openNewSnippet() {
   snippetItem.value = null;
@@ -132,7 +141,6 @@ async function saveSnippet(input: CreateSnippetInput) {
       toastStore.success("片段已创建");
     }
     snippetOpen.value = false;
-    await refreshStorage();
   } catch (error) {
     toastStore.error(`保存片段失败：${String(error)}`);
   }
@@ -180,7 +188,6 @@ async function removeItem(item: LibraryItem) {
   if (!window.confirm(`确定移出“${item.title}”吗？`)) return;
   try {
     await libraryStore.removeItem(item.id);
-    await refreshStorage();
     toastStore.success("已移出收藏夹");
   } catch (error) {
     toastStore.error(`移出收藏失败：${String(error)}`);
@@ -216,7 +223,6 @@ onMounted(async () => {
     await Promise.all([
       libraryStore.load(),
       libraryStore.subscribe(),
-      refreshStorage(),
     ]);
   } catch (error) {
     toastStore.error(`收藏夹加载失败：${String(error)}`);
@@ -262,7 +268,6 @@ onUnmounted(() => libraryStore.disposeSubscription());
             v-for="view in views"
             :key="view.value"
             :data-library-view-all="view.value === 'all' || undefined"
-            :data-library-view-pinned="view.value === 'pinned' || undefined"
             :data-library-view-snippets="view.value === 'snippets' || undefined"
             type="button"
             class="library-view-button"

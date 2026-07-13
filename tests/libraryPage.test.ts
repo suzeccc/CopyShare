@@ -23,12 +23,12 @@ test("library page, navigation, cards and dialogs expose the complete phase-one 
   assert.match(sidebar, /MessageSquareText/);
   assert.match(sidebar, /label: "常用片段", path: "\/library", icon: MessageSquareText/);
   assert.ok(sidebar.indexOf('label: "设备连接"') < sidebar.indexOf('label: "常用片段"'));
-  assert.ok(sidebar.indexOf('label: "常用片段"') < sidebar.indexOf('label: "图片转文字"'));
+  assert.ok(sidebar.indexOf('label: "常用片段"') < sidebar.indexOf('label: "图转文字"'));
 
   const snippetView = page.indexOf('{ value: "snippets", label: "常用片段" }');
   const allView = page.indexOf('{ value: "all", label: "全部收藏" }');
-  const pinnedView = page.indexOf('{ value: "pinned", label: "已置顶" }');
-  assert.ok(snippetView < allView && allView < pinnedView);
+  assert.ok(snippetView < allView);
+  assert.doesNotMatch(page, /value: "pinned"/);
   assert.match(page, /const activeHeader = computed/);
   assert.match(page, /v-if="activeView === 'snippets'"/);
   assert.match(page, /<component :is="activeHeader\.icon"/);
@@ -49,7 +49,6 @@ test("library page, navigation, cards and dialogs expose the complete phase-one 
   for (const hook of [
     "data-library-page",
     "data-library-view-all",
-    "data-library-view-pinned",
     "data-library-view-snippets",
     "data-library-search",
     "data-library-type-filter",

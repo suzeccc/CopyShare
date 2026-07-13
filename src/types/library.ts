@@ -2,7 +2,7 @@ import type { ClipboardContentType } from "@/types/history";
 
 export type LibraryRole = "saved" | "snippet";
 export type LibraryAssetKind = "image" | "file";
-export type LibraryView = "all" | "pinned" | "snippets";
+export type LibraryView = "all" | "snippets";
 export type LibraryContentFilter = "all" | ClipboardContentType;
 
 export interface LibraryAssetRef {

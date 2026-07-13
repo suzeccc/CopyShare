@@ -98,7 +98,7 @@ watch(() => props.item.id, loadThumbnail, { immediate: true });
             <h3 class="truncate text-[14px] font-bold text-white">{{ item.title }}</h3>
           </div>
           <p class="mt-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-[color:var(--muted-text)]">
-            {{ typeLabel }} · {{ formatTime(item.createdAt) }}
+            {{ item.role === "snippet" ? formatTime(item.createdAt) : `${typeLabel} · ${formatTime(item.createdAt)}` }}
           </p>
         </div>
       </div>

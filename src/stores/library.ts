@@ -40,7 +40,6 @@ export const useLibraryStore = defineStore("library", {
     filteredItems(state): LibraryItem[] {
       const query = state.query.trim().toLocaleLowerCase();
       return state.items.filter((item) => {
-        if (state.activeView === "pinned" && !item.isPinned) return false;
         if (state.activeView === "snippets" && item.role !== "snippet") return false;
         if (
           state.contentTypeFilter !== "all"
