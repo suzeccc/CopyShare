@@ -245,11 +245,19 @@ fn store_asset(
     bytes: &[u8],
 ) -> AppResult<LibraryAssetRef> {
     let sha256 = sha256_hex(bytes);
-    let stored_name = format!("{sha256}.{}", safe_extension(file_name));
-    let relative_path = format!("{LIBRARY_ASSET_DIR}/{stored_name}");
     let directory = root.join(LIBRARY_ASSET_DIR);
-    let target = directory.join(&stored_name);
     fs::create_dir_all(&directory)?;
+    let hash_prefix = format!("{sha256}.");
+    let stored_name = fs::read_dir(&directory)?
+        .filter_map(Result::ok)
+        .find(|entry| {
+            entry.file_type().map(|kind| kind.is_file()).unwrap_or(false)
+                && entry.file_name().to_string_lossy().starts_with(&hash_prefix)
+        })
+        .map(|entry| entry.file_name().to_string_lossy().to_string())
+        .unwrap_or_else(|| format!("{sha256}.{}", safe_extension(file_name)));
+    let relative_path = format!("{LIBRARY_ASSET_DIR}/{stored_name}");
+    let target = directory.join(&stored_name);
 
     if target.exists() {
         if sha256_hex(&fs::read(&target)?) != sha256 {
@@ -1039,7 +1047,7 @@ mod tests {
     fn content_addressed_assets_deduplicate_and_prune() {
         let root = temp_dir("assets");
         let first = store_asset(&root, LibraryAssetKind::File, "a.txt", b"same").unwrap();
-        let second = store_asset(&root, LibraryAssetKind::File, "b.txt", b"same").unwrap();
+        let second = store_asset(&root, LibraryAssetKind::File, "b.log", b"same").unwrap();
         assert_eq!(first.sha256, second.sha256);
         assert_eq!(first.relative_path, second.relative_path);
 
