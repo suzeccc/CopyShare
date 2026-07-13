@@ -17,7 +17,7 @@ export type ClipboardPreviewItem = {
   createdAt?: string;
   fileTransferId?: string;
   fileTransferStatus?: FileTransferStatus;
-  isPinned: boolean;
+  isPinned?: boolean;
   pinnedAt?: string;
 };
 

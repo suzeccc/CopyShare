@@ -5,12 +5,15 @@ import test from "node:test";
 test("recent and modal clipboard cards expose favorite and pin actions", () => {
   const page = readFileSync("src/pages/Clipboard.vue", "utf8");
   assert.match(page, /useLibraryStore/);
+  assert.match(page, /useHistoryStore/);
   assert.equal((page.match(/data-history-favorite/g) ?? []).length, 2);
   assert.equal((page.match(/data-history-pin/g) ?? []).length, 2);
   assert.match(page, /libraryStore\.isHistoryItemSaved\(item\.id\)/);
-  assert.match(page, /libraryStore\.isHistoryItemPinned\(item\.id\)/);
+  assert.match(page, /historyStore\.setPinned\(item\.id, !item\.isPinned\)/);
+  assert.doesNotMatch(page, /libraryStore\.isHistoryItemPinned\(item\.id\)/);
   assert.doesNotMatch(page, /isHistoryItem(?:Saved|Pinned)\(item\.id, item\.contentHash\)/);
-  assert.match(page, /isHistoryActionBusy\(item\)/);
+  assert.match(page, /isHistoryFavoriteBusy\(item\)/);
+  assert.match(page, /historyStore\.isPinning\(item\.id\)/);
   assert.equal((page.match(/@click\.stop="toggleHistoryFavorite\(item\)"/g) ?? []).length, 2);
   assert.equal((page.match(/@click\.stop="toggleHistoryPin\(item\)"/g) ?? []).length, 2);
   assert.equal((page.match(/clipboard-card-favorite-action/g) ?? []).length, 4);
@@ -49,7 +52,8 @@ test("recent and modal clipboard cards expose favorite and pin actions", () => {
     /\.clipboard-card-copy-action:active:not\(:disabled\)[\s\S]*?transform:\s*scale\(0\.95\)/,
   );
   assert.match(page, /libraryStore\.collectHistoryItem\(item\.id, false\)/);
-  assert.match(page, /libraryStore\.collectHistoryItem\(item\.id, true\)/);
+  assert.doesNotMatch(page, /libraryStore\.collectHistoryItem\(item\.id, true\)/);
+  assert.equal((page.match(/items-center gap-1\.5/g) ?? []).length >= 2, true);
 });
 
 test("clipboard starts the shared library subscription before awaiting initial load", () => {
