@@ -74,42 +74,6 @@ assert.deepEqual(getClipboardFileDownloadFeedback(item, progressed), {
   active: true,
 });
 
-const waiting = {
-  ...progressed,
-  status: "waitingForPeer" as const,
-};
-assert.deepEqual(getClipboardFileDownloadFeedback(item, waiting), {
-  state: "waiting",
-  label: "等待发送设备上线 · 已完成 45%",
-  percent: 45,
-  active: false,
-});
-assert.equal(getClipboardFileCardAction(item, waiting), "resume");
-
-const retrying = {
-  ...progressed,
-  status: "retrying" as const,
-};
-assert.deepEqual(getClipboardFileDownloadFeedback(item, retrying), {
-  state: "retrying",
-  label: "正在恢复 · 已完成 45%",
-  percent: 45,
-  active: true,
-});
-assert.equal(getClipboardFileCardAction(item, retrying), "downloading");
-
-const paused = {
-  ...progressed,
-  status: "paused" as const,
-};
-assert.deepEqual(getClipboardFileDownloadFeedback(item, paused), {
-  state: "paused",
-  label: "继续下载 · 已完成 45%",
-  percent: 45,
-  active: false,
-});
-assert.equal(getClipboardFileCardAction(item, paused), "resume");
-
 assert.deepEqual(
   getClipboardFileDownloadFeedback(
     { ...item, fileTransferStatus: "completed" },

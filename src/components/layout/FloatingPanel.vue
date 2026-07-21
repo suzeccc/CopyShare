@@ -26,7 +26,6 @@ import {
   openHistoryFileLocation,
   openMediaPreviewWindow,
   openTransferFolder,
-  resumeFileTransfer,
   startWindowDrag,
 } from "@/lib/tauri";
 import { startWindowDragFromMouseEvent } from "@/lib/windowDrag";
@@ -110,22 +109,6 @@ async function handleClipboardItemClick(item: ClipboardPreviewItem) {
     return;
   }
 
-  if (action === "resume") {
-    if (!item.fileTransferId) {
-      return;
-    }
-    try {
-      const task = await resumeFileTransfer(item.fileTransferId);
-      historyStore.updateFileDownloadTask(task);
-      toastStore.success(
-        task.status === "waitingForPeer" ? "已继续等待发送设备上线" : "正在继续下载",
-      );
-    } catch (error) {
-      toastStore.error(`继续下载失败：${String(error)}`);
-    }
-    return;
-  }
-
   if (action === "download") {
     historyStore.beginFileDownload(item.fileTransferId);
   }
@@ -177,7 +160,7 @@ async function openFloatingVideoPreview(item: ClipboardPreviewItem) {
       item,
       historyStore.fileDownloadActivity(item.fileTransferId),
     );
-    if (action === "download" || action === "resume") {
+    if (action === "download") {
       await handleClipboardItemClick(item);
       return;
     }

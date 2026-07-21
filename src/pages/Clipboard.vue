@@ -42,7 +42,6 @@ import {
   openExternalUrl,
   openHistoryFileLocation,
   openTransferFolder,
-  resumeFileTransfer,
 } from "@/lib/tauri";
 import { useHistoryStore } from "@/stores/history";
 import { useLibraryStore } from "@/stores/library";
@@ -251,7 +250,7 @@ async function openClipboardVideoPreview(item: ClipboardPreviewItem) {
       item,
       historyStore.fileDownloadActivity(item.fileTransferId),
     );
-    if (action === "download" || action === "resume") {
+    if (action === "download") {
       await handleClipboardItemClick(item);
       return;
     }
@@ -327,22 +326,6 @@ async function handleClipboardItemClick(item: ClipboardPreviewItem) {
   }
   if (action === "unavailable") {
     toastStore.error("文件下载已失效");
-    return;
-  }
-
-  if (action === "resume") {
-    if (!item.fileTransferId) {
-      return;
-    }
-    try {
-      const task = await resumeFileTransfer(item.fileTransferId);
-      historyStore.updateFileDownloadTask(task);
-      toastStore.success(
-        task.status === "waitingForPeer" ? "已继续等待发送设备上线" : "正在继续下载",
-      );
-    } catch (error) {
-      toastStore.error(`继续下载失败：${String(error)}`);
-    }
     return;
   }
 

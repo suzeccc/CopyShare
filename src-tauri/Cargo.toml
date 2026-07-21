@@ -1,6 +1,6 @@
 [package]
 name = "copyshare"
-version = "3.3.0"
+version = "3.4.0"
 description = "LAN clipboard sharing desktop app"
 authors = ["CopyShare"]
 edition = "2021"
@@ -21,7 +21,7 @@ chrono = { version = "0.4", features = ["serde"] }
 base64 = "0.22"
 dirs = "6"
 futures-util = "0.3"
-if-addrs = "0.15"
+get_if_addrs = "0.5"
 image = { version = "0.25", default-features = false, features = ["bmp", "gif", "jpeg", "png", "webp"] }
 local-ip-address = "0.6"
 notify-rust = "4.18"
@@ -41,9 +41,6 @@ tokio-tungstenite = "0.24"
 tracing = "0.1"
 url = "2"
 uuid = { version = "1", features = ["v4", "serde"] }
-
-[target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
-tauri-plugin-global-shortcut = "2"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.61.3", features = ["ApplicationModel_DataTransfer", "Foundation", "Foundation_Collections", "Globalization", "Graphics_Imaging", "Media_Ocr", "Storage_Streams", "Win32_Graphics_Gdi", "Win32_System_Com", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_System_Ole", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }

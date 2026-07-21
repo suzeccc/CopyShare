@@ -1,7 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
-    time::Duration,
 };
 
 use chrono::Utc;
@@ -26,8 +25,6 @@ use crate::{
 };
 
 const MAX_TRANSIENT_PEER_TRACKING: usize = 1024;
-const PEER_CONTROL_QUEUE_CAPACITY: usize = 64;
-const PEER_CONTROL_ENQUEUE_TIMEOUT: Duration = Duration::from_millis(250);
 
 #[derive(Clone)]
 pub struct AppState {
@@ -49,8 +46,6 @@ struct AppStateInner {
     manual_trust_required: Mutex<HashSet<String>>,
     peer_confirmation_requests: Mutex<HashSet<String>>,
     rejected_peer_connections: Mutex<HashSet<String>>,
-    auto_connecting_devices: Mutex<HashSet<String>>,
-    manual_auto_connect_suppressions: Mutex<HashSet<String>>,
 }
 
 struct RuntimeHandle {
@@ -60,113 +55,12 @@ struct RuntimeHandle {
 }
 
 struct PeerHandle {
-    sender: PeerOutboundSender,
+    sender: mpsc::UnboundedSender<WireMessage>,
     join: JoinHandle<()>,
     device_id: Option<String>,
     endpoint: Option<String>,
-    capabilities: HashSet<String>,
     remote_trusted: bool,
     latency_ms: Option<u64>,
-}
-
-#[derive(Clone)]
-pub(crate) enum PeerOutboundSender {
-    Bounded {
-        control: mpsc::Sender<WireMessage>,
-        clipboard: watch::Sender<Option<WireMessage>>,
-    },
-    #[cfg(test)]
-    TestUnbounded(mpsc::UnboundedSender<WireMessage>),
-}
-
-#[cfg(test)]
-impl From<mpsc::UnboundedSender<WireMessage>> for PeerOutboundSender {
-    fn from(sender: mpsc::UnboundedSender<WireMessage>) -> Self {
-        Self::TestUnbounded(sender)
-    }
-}
-
-pub(crate) struct PeerOutboundReceiver {
-    control: mpsc::Receiver<WireMessage>,
-    clipboard: watch::Receiver<Option<WireMessage>>,
-    control_closed: bool,
-    clipboard_closed: bool,
-}
-
-impl PeerOutboundSender {
-    async fn send(&self, message: WireMessage) -> bool {
-        match self {
-            Self::Bounded { control, clipboard } => {
-                if matches!(&message, WireMessage::Clipboard { .. }) {
-                    return clipboard.send(Some(message)).is_ok();
-                }
-
-                matches!(
-                    tokio::time::timeout(
-                        PEER_CONTROL_ENQUEUE_TIMEOUT,
-                        control.send(message),
-                    )
-                    .await,
-                    Ok(Ok(()))
-                )
-            }
-            #[cfg(test)]
-            Self::TestUnbounded(sender) => sender.send(message).is_ok(),
-        }
-    }
-}
-
-impl PeerOutboundReceiver {
-    pub(crate) async fn recv(&mut self) -> Option<WireMessage> {
-        loop {
-            if self.control_closed && self.clipboard_closed {
-                return None;
-            }
-
-            tokio::select! {
-                biased;
-                outbound = self.control.recv(), if !self.control_closed => {
-                    match outbound {
-                        Some(message) => return Some(message),
-                        None => self.control_closed = true,
-                    }
-                }
-                changed = self.clipboard.changed(), if !self.clipboard_closed => {
-                    match changed {
-                        Ok(()) => {
-                            if let Some(message) = self.clipboard.borrow_and_update().clone() {
-                                return Some(message);
-                            }
-                        }
-                        Err(_) => self.clipboard_closed = true,
-                    }
-                }
-            }
-        }
-    }
-}
-
-pub(crate) fn peer_outbound_channel() -> (PeerOutboundSender, PeerOutboundReceiver) {
-    peer_outbound_channel_with_capacity(PEER_CONTROL_QUEUE_CAPACITY)
-}
-
-fn peer_outbound_channel_with_capacity(
-    control_capacity: usize,
-) -> (PeerOutboundSender, PeerOutboundReceiver) {
-    let (control_sender, control_receiver) = mpsc::channel(control_capacity);
-    let (clipboard_sender, clipboard_receiver) = watch::channel(None);
-    (
-        PeerOutboundSender::Bounded {
-            control: control_sender,
-            clipboard: clipboard_sender,
-        },
-        PeerOutboundReceiver {
-            control: control_receiver,
-            clipboard: clipboard_receiver,
-            control_closed: false,
-            clipboard_closed: false,
-        },
-    )
 }
 
 struct PendingPeerIdentity {
@@ -205,8 +99,6 @@ impl AppState {
                 manual_trust_required: Mutex::new(HashSet::new()),
                 peer_confirmation_requests: Mutex::new(HashSet::new()),
                 rejected_peer_connections: Mutex::new(HashSet::new()),
-                auto_connecting_devices: Mutex::new(HashSet::new()),
-                manual_auto_connect_suppressions: Mutex::new(HashSet::new()),
             }),
         }
     }
@@ -339,55 +231,6 @@ impl AppState {
 
     pub async fn devices(&self) -> Vec<DeviceInfo> {
         self.inner.devices.read().await.values().cloned().collect()
-    }
-
-    pub async fn begin_auto_connect(&self, device_id: &str) -> bool {
-        if self
-            .inner
-            .manual_auto_connect_suppressions
-            .lock()
-            .await
-            .contains(device_id)
-        {
-            return false;
-        }
-        self.inner
-            .auto_connecting_devices
-            .lock()
-            .await
-            .insert(device_id.to_string())
-    }
-
-    pub async fn finish_auto_connect(&self, device_id: &str) {
-        self.inner
-            .auto_connecting_devices
-            .lock()
-            .await
-            .remove(device_id);
-    }
-
-    pub async fn auto_connect_suppressed(&self, device_id: &str) -> bool {
-        self.inner
-            .manual_auto_connect_suppressions
-            .lock()
-            .await
-            .contains(device_id)
-    }
-
-    pub async fn suppress_auto_connect(&self, device_key: &str) {
-        let keys = self.trust_keys_for_device(device_key).await;
-        let mut suppressed = self.inner.manual_auto_connect_suppressions.lock().await;
-        for key in keys {
-            insert_bounded_set(&mut suppressed, key, MAX_TRANSIENT_PEER_TRACKING);
-        }
-    }
-
-    pub async fn clear_auto_connect_suppression(&self, device_key: &str) {
-        let keys = self.trust_keys_for_device(device_key).await;
-        let mut suppressed = self.inner.manual_auto_connect_suppressions.lock().await;
-        for key in keys {
-            suppressed.remove(&key);
-        }
     }
 
     pub async fn connected_device_for_endpoint(
@@ -792,15 +635,12 @@ impl AppState {
         Ok(())
     }
 
-    pub(crate) async fn register_peer<S>(
+    pub async fn register_peer(
         &self,
         connection_id: String,
-        sender: S,
+        sender: mpsc::UnboundedSender<WireMessage>,
         join: JoinHandle<()>,
-    ) where
-        S: Into<PeerOutboundSender>,
-    {
-        let sender = sender.into();
+    ) {
         if self
             .inner
             .ignored_peer_connections
@@ -829,7 +669,6 @@ impl AppState {
                 join,
                 device_id: device_id.clone(),
                 endpoint: endpoint.clone(),
-                capabilities: HashSet::new(),
                 remote_trusted: false,
                 latency_ms: None,
             },
@@ -955,19 +794,10 @@ impl AppState {
     }
 
     pub async fn broadcast(&self, message: WireMessage) {
-        let senders = self
-            .inner
-            .peers
-            .lock()
-            .await
-            .values()
-            .map(|peer| peer.sender.clone())
-            .collect::<Vec<_>>();
-        let sends = senders.into_iter().map(|sender| {
-            let message = message.clone();
-            async move { sender.send(message).await }
-        });
-        let _ = futures_util::future::join_all(sends).await;
+        let peers = self.inner.peers.lock().await;
+        for peer in peers.values() {
+            let _ = peer.sender.send(message.clone());
+        }
     }
 
     #[cfg(test)]
@@ -985,39 +815,26 @@ impl AppState {
     pub async fn broadcast_trusted(&self, config: &AppConfig, message: WireMessage) -> usize {
         let peers = self.inner.peers.lock().await;
         let manual_trust_required = self.inner.manual_trust_required.lock().await;
-        let senders = peers
-            .iter()
-            .filter(|(connection_id, peer)| {
-                peer_is_trusted(config, connection_id, peer, &manual_trust_required)
-            })
-            .map(|(_, peer)| peer.sender.clone())
-            .collect::<Vec<_>>();
-        drop(manual_trust_required);
-        drop(peers);
-        let sends = senders.into_iter().map(|sender| {
-            let message = message.clone();
-            async move { sender.send(message).await }
-        });
-        futures_util::future::join_all(sends)
-            .await
-            .into_iter()
-            .filter(|sent| *sent)
-            .count()
+        let mut sent_count = 0;
+        for (connection_id, peer) in peers.iter() {
+            if peer_is_trusted(config, connection_id, peer, &manual_trust_required)
+                && peer.sender.send(message.clone()).is_ok()
+            {
+                sent_count += 1;
+            }
+        }
+        sent_count
     }
 
     pub async fn send_to_device(&self, device_id: &str, message: WireMessage) -> bool {
         let peers = self.inner.peers.lock().await;
-        let sender = peers
+        peers
             .iter()
             .find(|(connection_id, peer)| {
                 connection_id.as_str() == device_id || peer_matches_key(peer, device_id)
             })
-            .map(|(_, peer)| peer.sender.clone());
-        drop(peers);
-        match sender {
-            Some(sender) => sender.send(message).await,
-            None => false,
-        }
+            .map(|(_, peer)| peer.sender.send(message).is_ok())
+            .unwrap_or(false)
     }
 
     pub async fn record_peer_latency(&self, connection_id: &str, latency_ms: u64) {
@@ -1034,19 +851,14 @@ impl AppState {
     ) -> bool {
         let peers = self.inner.peers.lock().await;
         let manual_trust_required = self.inner.manual_trust_required.lock().await;
-        let sender = peers
+        peers
             .iter()
             .find(|(connection_id, peer)| {
                 (connection_id.as_str() == device_id || peer_matches_key(peer, device_id))
                     && peer_is_trusted(config, connection_id, peer, &manual_trust_required)
             })
-            .map(|(_, peer)| peer.sender.clone());
-        drop(manual_trust_required);
-        drop(peers);
-        match sender {
-            Some(sender) => sender.send(message).await,
-            None => false,
-        }
+            .map(|(_, peer)| peer.sender.send(message).is_ok())
+            .unwrap_or(false)
     }
 
     pub async fn peer_remote_trusted(&self, connection_id: &str, device_id: &str) -> bool {
@@ -1066,28 +878,6 @@ impl AppState {
             connection_id.to_string(),
             MAX_TRANSIENT_PEER_TRACKING,
         );
-    }
-
-    pub async fn set_peer_capabilities(
-        &self,
-        connection_id: &str,
-        capabilities: Vec<String>,
-    ) {
-        if let Some(peer) = self.inner.peers.lock().await.get_mut(connection_id) {
-            peer.capabilities = capabilities.into_iter().collect();
-        }
-    }
-
-    pub async fn peer_supports(&self, device_id: &str, capability: &str) -> bool {
-        self.inner
-            .peers
-            .lock()
-            .await
-            .iter()
-            .find(|(connection_id, peer)| {
-                connection_id.as_str() == device_id || peer_matches_key(peer, device_id)
-            })
-            .is_some_and(|(_, peer)| peer.capabilities.contains(capability))
     }
 
     pub async fn take_peer_rejected(&self, connection_id: &str) -> bool {
@@ -1500,50 +1290,6 @@ mod tests {
     fn device_id_is_stable_and_url_safe() {
         assert_eq!(device_id_from_name(" Office PC "), "office-pc");
         assert_eq!(device_id_from_name("中文设备"), "copyshare");
-    }
-
-    #[tokio::test]
-    async fn peer_capability_is_resolved_by_device_id() {
-        let state = AppState::new();
-        let (sender, _receiver) = mpsc::unbounded_channel();
-        let join = tauri::async_runtime::spawn(std::future::pending());
-        state
-            .register_peer("connection-a".to_string(), sender, join)
-            .await;
-        state
-            .attach_peer_device("connection-a", "device-a".to_string(), None)
-            .await;
-
-        state
-            .set_peer_capabilities("connection-a", vec!["file-resume-v1".to_string()])
-            .await;
-
-        assert!(state.peer_supports("device-a", "file-resume-v1").await);
-        assert!(!state.peer_supports("device-a", "other-capability").await);
-        state.remove_peer("connection-a").await;
-    }
-
-    #[tokio::test]
-    async fn automatic_connect_guard_allows_only_one_worker_per_device() {
-        let state = AppState::new();
-
-        assert!(state.begin_auto_connect("device-a").await);
-        assert!(!state.begin_auto_connect("device-a").await);
-        state.finish_auto_connect("device-a").await;
-        assert!(state.begin_auto_connect("device-a").await);
-    }
-
-    #[tokio::test]
-    async fn manual_disconnect_suppresses_until_explicitly_cleared() {
-        let state = AppState::new();
-
-        state.suppress_auto_connect("device-a").await;
-        assert!(state.auto_connect_suppressed("device-a").await);
-        assert!(!state.begin_auto_connect("device-a").await);
-
-        state.clear_auto_connect_suppression("device-a").await;
-        assert!(!state.auto_connect_suppressed("device-a").await);
-        assert!(state.begin_auto_connect("device-a").await);
     }
 }
 
@@ -2365,8 +2111,6 @@ mod trusted_broadcast_tests {
             content: "hello".to_string(),
             content_hash: "hash".to_string(),
             timestamp: 1,
-            origin_sequence: None,
-            event_version: None,
         }
     }
 
@@ -2958,82 +2702,5 @@ mod trusted_broadcast_tests {
             .expect("device B should observe its local clipboard");
         state_b.broadcast_trusted(&config_b, from_b.into()).await;
         assert!(outbound_b_to_a.try_recv().is_err());
-    }
-
-    #[tokio::test]
-    async fn slow_peer_clipboard_queue_coalesces_to_latest_content() {
-        let (sender, mut receiver) = peer_outbound_channel_with_capacity(2);
-        let clipboard = |message_id: &str, content: &str| WireMessage::Clipboard {
-            message_id: message_id.to_string(),
-            source_device_id: "device-a".to_string(),
-            source_device_name: "Laptop A".to_string(),
-            content_type: ClipboardContentType::Text,
-            content: content.to_string(),
-            content_hash: content.to_string(),
-            timestamp: 1,
-            origin_sequence: None,
-            event_version: None,
-        };
-
-        assert!(sender.send(clipboard("message-1", "first")).await);
-        assert!(sender.send(clipboard("message-2", "second")).await);
-        assert!(sender.send(clipboard("message-3", "latest")).await);
-
-        let WireMessage::Clipboard { content, .. } = receiver.recv().await.unwrap() else {
-            panic!("latest clipboard should be delivered");
-        };
-        assert_eq!(content, "latest");
-    }
-
-    #[tokio::test]
-    async fn control_messages_are_delivered_before_pending_clipboard_state() {
-        let (sender, mut receiver) = peer_outbound_channel_with_capacity(2);
-        assert!(sender
-            .send(WireMessage::Clipboard {
-                message_id: "message-1".to_string(),
-                source_device_id: "device-a".to_string(),
-                source_device_name: "Laptop A".to_string(),
-                content_type: ClipboardContentType::Text,
-                content: "latest".to_string(),
-                content_hash: "latest".to_string(),
-                timestamp: 1,
-                origin_sequence: None,
-                event_version: None,
-            })
-            .await);
-        assert!(sender
-            .send(WireMessage::Ping {
-                device_id: "device-a".to_string(),
-                timestamp: 1,
-            })
-            .await);
-
-        assert!(matches!(receiver.recv().await, Some(WireMessage::Ping { .. })));
-        assert!(matches!(
-            receiver.recv().await,
-            Some(WireMessage::Clipboard { .. })
-        ));
-    }
-
-    #[tokio::test]
-    async fn full_control_queue_reports_failure_instead_of_growing() {
-        let (sender, mut receiver) = peer_outbound_channel_with_capacity(1);
-
-        assert!(sender
-            .send(WireMessage::Ping {
-                device_id: "device-a".to_string(),
-                timestamp: 1,
-            })
-            .await);
-        assert!(!sender
-            .send(WireMessage::Ping {
-                device_id: "device-a".to_string(),
-                timestamp: 2,
-            })
-            .await);
-        assert!(matches!(
-            receiver.recv().await,
-            Some(WireMessage::Ping { timestamp: 1, .. })
-        ));
     }
 }

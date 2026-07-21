@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Clipboard, MoreHorizontal, RefreshCw, X } from "lucide-vue-next";
-import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import ClipboardFileDownloadStatus from "@/components/history/ClipboardFileDownloadStatus.vue";
@@ -28,13 +28,11 @@ import type { AppConfig, AppTheme } from "@/types/config";
 const clipboardItems = ref<ClipboardPreviewItem[]>([]);
 const loading = ref(false);
 const selectedClipboardItem = ref<ClipboardPreviewItem | null>(null);
-const activeClipboardIndex = ref(0);
 let refreshUnlisten: UnlistenFn | null = null;
 let themeUnlisten: UnlistenFn | null = null;
 let isUnmounted = false;
 
 const itemCountLabel = computed(() => `共 ${clipboardItems.value.length} 条记录`);
-const activeClipboardItem = computed(() => clipboardItems.value[activeClipboardIndex.value] ?? null);
 
 function applyFloatingClipboardTheme(theme: AppTheme) {
   document.documentElement.dataset.appTheme = theme;
@@ -79,18 +77,11 @@ function readFloatingClipboardHistoryPayload(): FloatingClipboardHistoryPayload 
 
 function applyFloatingClipboardPayload(payload: FloatingClipboardHistoryPayload) {
   const nextItems = payload.items.slice(0, FLOATING_CLIPBOARD_HISTORY_LIMIT);
-  const activeItemId = activeClipboardItem.value?.id;
   selectedClipboardItem.value = resolveFloatingClipboardSelection(
     nextItems,
     selectedClipboardItem.value,
   );
   clipboardItems.value = nextItems;
-  const refreshedIndex = activeItemId
-    ? nextItems.findIndex((item) => item.id === activeItemId)
-    : -1;
-  activeClipboardIndex.value = refreshedIndex >= 0
-    ? refreshedIndex
-    : Math.min(activeClipboardIndex.value, Math.max(nextItems.length - 1, 0));
 }
 
 function refreshFloatingClipboardItems() {
@@ -150,64 +141,11 @@ async function openClipboardLink(item: ClipboardPreviewItem) {
   await openExternalUrl(url);
 }
 
-function focusActiveClipboardRow() {
-  void nextTick(() => {
-    document
-      .querySelector<HTMLElement>('[data-floating-clipboard-history-row][data-active="true"]')
-      ?.scrollIntoView({ block: "nearest" });
-  });
-}
-
-function moveActiveClipboardItem(offset: number) {
-  if (!clipboardItems.value.length) return;
-  const itemCount = clipboardItems.value.length;
-  activeClipboardIndex.value = (activeClipboardIndex.value + offset + itemCount) % itemCount;
-  focusActiveClipboardRow();
-}
-
-function copyActiveClipboardItem() {
-  const row = document.querySelector<HTMLElement>(
-    '[data-floating-clipboard-history-row][data-active="true"]',
-  );
-  row?.querySelector<HTMLButtonElement>("[data-quick-panel-copy] button")?.click();
-}
-
-function handleQuickPanelKeydown(event: KeyboardEvent) {
-  if (event.key === "Escape") {
-    event.preventDefault();
-    if (selectedClipboardItem.value) {
-      selectedClipboardItem.value = null;
-    } else {
-      void closeWindow();
-    }
-    return;
-  }
-
-  if (selectedClipboardItem.value) return;
-  if (event.key === "ArrowDown") {
-    event.preventDefault();
-    moveActiveClipboardItem(1);
-    return;
-  }
-  if (event.key === "ArrowUp") {
-    event.preventDefault();
-    moveActiveClipboardItem(-1);
-    return;
-  }
-  if (event.key === "Enter") {
-    const target = event.target instanceof HTMLElement ? event.target : null;
-    if (target?.closest("button, input, textarea, select, a")) return;
-    event.preventDefault();
-    copyActiveClipboardItem();
-  }
-}
-
 onMounted(() => {
   isUnmounted = false;
   void bindFloatingClipboardTheme();
   void bindRefreshEvents();
   void refreshFloatingClipboardItems();
-  window.addEventListener("keydown", handleQuickPanelKeydown);
 });
 
 onUnmounted(() => {
@@ -216,7 +154,6 @@ onUnmounted(() => {
   refreshUnlisten = null;
   themeUnlisten?.();
   themeUnlisten = null;
-  window.removeEventListener("keydown", handleQuickPanelKeydown);
 });
 </script>
 
@@ -236,9 +173,7 @@ onUnmounted(() => {
         </span>
         <div class="min-w-0" data-window-drag-region>
           <p class="truncate text-sm font-semibold text-[color:var(--floating-strong-text)]">剪贴板内容</p>
-          <p class="text-[11px] font-medium text-[color:var(--floating-muted-text)]">
-            {{ itemCountLabel }} · ↑↓ 选择 · Enter 复制
-          </p>
+          <p class="text-[11px] font-medium text-[color:var(--floating-muted-text)]">{{ itemCountLabel }}</p>
         </div>
       </div>
       <div class="flex shrink-0 items-center gap-1.5">
@@ -267,14 +202,10 @@ onUnmounted(() => {
     <main class="min-h-0 flex-1 overflow-y-auto p-3">
       <div v-if="clipboardItems.length" class="space-y-1">
         <article
-          v-for="(item, index) in clipboardItems"
+          v-for="item in clipboardItems"
           :key="item.id"
           data-floating-clipboard-history-row
-          :data-active="activeClipboardIndex === index"
-          class="floating-clipboard-row grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2 rounded-md border-b border-[color:var(--floating-stat-line)] px-2 py-2.5 transition last:border-b-0"
-          :class="activeClipboardIndex === index ? 'bg-[color:var(--accent-soft)] ring-1 ring-inset ring-[color:var(--accent-line)]' : ''"
-          @mouseenter="activeClipboardIndex = index"
-          @mousedown="activeClipboardIndex = index"
+          class="floating-clipboard-row grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2 border-b border-[color:var(--floating-stat-line)] px-2 py-2.5 last:border-b-0"
         >
           <div data-floating-clipboard-history-content class="min-w-0 overflow-hidden">
             <button
@@ -332,18 +263,16 @@ onUnmounted(() => {
             >
               <MoreHorizontal class="h-3.5 w-3.5" />
             </button>
-            <span data-quick-panel-copy class="contents">
-              <CopyTextButton
-                :text="item.text"
-                :content-type="item.contentType"
-                :history-item-id="item.id"
-                :file-transfer-id="item.fileTransferId"
-                :file-transfer-status="item.fileTransferStatus"
-                icon-only
-                label="复制内容"
-                copied-label="已复制"
-              />
-            </span>
+            <CopyTextButton
+              :text="item.text"
+              :content-type="item.contentType"
+              :history-item-id="item.id"
+              :file-transfer-id="item.fileTransferId"
+              :file-transfer-status="item.fileTransferStatus"
+              icon-only
+              label="复制内容"
+              copied-label="已复制"
+            />
           </div>
         </article>
       </div>

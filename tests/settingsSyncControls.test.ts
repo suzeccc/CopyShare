@@ -10,7 +10,7 @@ assert.match(settings, /:model-value="draft\.syncImage"/);
 assert.match(settings, /@update:model-value="saveSyncImage"/);
 assert.match(settings, /:model-value="draft\.syncFiles"/);
 assert.match(settings, /@update:model-value="saveSyncFiles"/);
-assert.match(settings, /:disabled="configMutationSaving"/);
+assert.match(settings, /:disabled="syncContentSaving"/);
 assert.doesNotMatch(settings, /<Switch v-model="draft\.syncImage"/);
 assert.doesNotMatch(settings, /syncFiles:\s*false/);
 assert.doesNotMatch(settings, /getSaveFeedbackView\(configStore\.saving \? "saving" : saveFeedbackState\.value\)/);

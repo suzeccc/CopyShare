@@ -31,7 +31,6 @@ env/
 .playwright-cli/
 .superpowers/
 output/
-previews/
 video_frame_viewer.html
 video_frames/
 

@@ -1,15 +1,12 @@
 use std::{
     collections::{HashMap, HashSet},
     net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket as StdUdpSocket},
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        OnceLock,
-    },
+    sync::OnceLock,
     time::Duration,
 };
 
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
-use if_addrs::IfAddr;
+use get_if_addrs::IfAddr;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 use tokio::{net::UdpSocket, sync::Mutex};
@@ -22,10 +19,9 @@ use crate::{
     notifications,
     security,
     state::AppState,
-    sync,
 };
 
-pub const DISCOVERY_PORT: u16 = 8764;
+const DISCOVERY_PORT: u16 = 8764;
 const DISCOVERY_TYPE: &str = "copyshare-discovery";
 const DISCOVERY_VERSION: u8 = 1;
 const DISCOVERY_ANNOUNCE_INTERVAL: Duration = Duration::from_secs(8);
@@ -36,7 +32,6 @@ const SUBNET_SCAN_DELAY: Duration = Duration::from_millis(4);
 
 static DISCOVERED_DEVICES: OnceLock<Mutex<HashMap<String, DeviceInfo>>> = OnceLock::new();
 static NOTIFIED_ONLINE_DEVICES: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
-static DISCOVERY_RUNNING: AtomicBool = AtomicBool::new(false);
 
 fn discovered_devices() -> &'static Mutex<HashMap<String, DeviceInfo>> {
     DISCOVERED_DEVICES.get_or_init(|| Mutex::new(HashMap::new()))
@@ -211,16 +206,11 @@ pub fn start_discovery_runtime(app: AppHandle, state: AppState) {
     });
 }
 
-pub fn discovery_running() -> bool {
-    DISCOVERY_RUNNING.load(Ordering::Relaxed)
-}
-
 async fn run_discovery_runtime(app: AppHandle, state: AppState) -> AppResult<()> {
     let std_socket = StdUdpSocket::bind(("0.0.0.0", DISCOVERY_PORT))?;
     std_socket.set_broadcast(true)?;
     std_socket.set_nonblocking(true)?;
     let socket = UdpSocket::from_std(std_socket)?;
-    DISCOVERY_RUNNING.store(true, Ordering::Relaxed);
     let mut buffer = [0_u8; 4096];
     let mut announce = tokio::time::interval(DISCOVERY_ANNOUNCE_INTERVAL);
     let mut sweep = tokio::time::interval(DISCOVERY_SWEEP_INTERVAL);
@@ -255,11 +245,6 @@ async fn run_discovery_runtime(app: AppHandle, state: AppState) -> AppResult<()>
                     let device = state.upsert_device(device.clone()).await;
                     cache_device(device.clone()).await;
                     notify_device_online_once(&app, &device).await;
-                    sync::maybe_auto_connect_discovered_device(
-                        app.clone(),
-                        state.clone(),
-                        device.clone(),
-                    );
                     let _ = app.emit("device-discovered", device);
                 }
                 if payload.action == "request" {
@@ -648,7 +633,7 @@ fn parse_scan_cidr(input: &str) -> Option<(Ipv4Addr, u8)> {
 }
 
 fn scan_adapters() -> Vec<(String, Ipv4Addr, Ipv4Addr)> {
-    if_addrs::get_if_addrs()
+    get_if_addrs::get_if_addrs()
         .unwrap_or_default()
         .into_iter()
         .filter_map(|iface| match iface.addr {

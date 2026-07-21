@@ -69,20 +69,7 @@ export function splitClipboardFileSummary(text: string): ClipboardFileSummary {
 }
 
 export function getClipboardLinkUrl(text: string): string | null {
-  const trimmed = text.trim();
-  if (!trimmed || /\s/.test(trimmed)) {
-    return null;
-  }
-
-  try {
-    const url = new URL(trimmed);
-    if (url.protocol !== "http:" && url.protocol !== "https:") {
-      return null;
-    }
-    return trimmed;
-  } catch {
-    return null;
-  }
+  return text.match(/https?:\/\/[^\s]+/i)?.[0] ?? null;
 }
 
 export function shouldShowClipboardItemMore(

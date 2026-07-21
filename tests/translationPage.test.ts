@@ -51,7 +51,7 @@ assert.match(configTypes, /translationApiKey: string/);
 assert.match(configTypes, /translationModel: string/);
 assert.match(configTypes, /translationProxy: string/);
 
-assert.match(configStore, /configVersion: 8/);
+assert.match(configStore, /configVersion: 6/);
 assert.match(configStore, /translationEngine: "google"/);
 assert.match(configStore, /translationModel: "gpt-4o-mini"/);
 

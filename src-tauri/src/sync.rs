@@ -8,9 +8,7 @@ use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, TcpStream};
-#[cfg(test)]
-use tokio::sync::mpsc;
-use tokio::sync::{oneshot, watch};
+use tokio::sync::{mpsc, oneshot, watch};
 use tokio_tungstenite::{accept_async, connect_async, tungstenite::Message, WebSocketStream};
 use uuid::Uuid;
 
@@ -23,13 +21,13 @@ use crate::{
     history,
     mobile,
     models::{
-        ClipboardContentType, ClipboardEventVersion, ClipboardMessage, DeviceInfo, DeviceStatus,
-        HistoryDirection, SyncState, SyncStatus, WireMessage, FILE_RESUME_CAPABILITY,
+        ClipboardContentType, ClipboardMessage, DeviceInfo, DeviceStatus, HistoryDirection,
+        SyncState, SyncStatus, WireMessage,
     },
     network,
     notifications,
     security,
-    state::{peer_outbound_channel, AppState},
+    state::AppState,
 };
 use crate::models::AppConfig;
 
@@ -37,14 +35,6 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
 const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(60);
 const MAX_TRACKED_CLIPBOARD_MESSAGES: usize = 1_024;
-const AUTO_CONNECT_RETRY_DELAYS: [Duration; 6] = [
-    Duration::from_secs(0),
-    Duration::from_secs(1),
-    Duration::from_secs(2),
-    Duration::from_secs(4),
-    Duration::from_secs(8),
-    Duration::from_secs(30),
-];
 
 fn heartbeat_timed_out(
     last_seen_at: tokio::time::Instant,
@@ -78,16 +68,6 @@ pub struct SyncEngine {
     pending_remote_echo_order: VecDeque<String>,
     synchronized_content_hashes: HashSet<String>,
     synchronized_content_order: VecDeque<String>,
-    next_origin_sequence: u64,
-    hlc_physical_ms: i64,
-    hlc_logical: u32,
-    last_event_order: Option<ClipboardEventOrder>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-struct ClipboardEventOrder {
-    version: ClipboardEventVersion,
-    message_id: String,
 }
 
 impl SyncEngine {
@@ -103,10 +83,6 @@ impl SyncEngine {
             pending_remote_echo_order: VecDeque::new(),
             synchronized_content_hashes: HashSet::new(),
             synchronized_content_order: VecDeque::new(),
-            next_origin_sequence: 0,
-            hlc_physical_ms: 0,
-            hlc_logical: 0,
-            last_event_order: None,
         }
     }
 
@@ -138,15 +114,6 @@ impl SyncEngine {
         content_type: ClipboardContentType,
         content: impl Into<String>,
     ) -> Option<ClipboardMessage> {
-        self.observe_local_content_at(content_type, content, Utc::now().timestamp_millis())
-    }
-
-    fn observe_local_content_at(
-        &mut self,
-        content_type: ClipboardContentType,
-        content: impl Into<String>,
-        now_ms: i64,
-    ) -> Option<ClipboardMessage> {
         let content = content.into();
         let local_hash = content_hash(&content_type, &content);
 
@@ -161,8 +128,6 @@ impl SyncEngine {
             return None;
         }
 
-        self.next_origin_sequence = self.next_origin_sequence.saturating_add(1);
-        let event_version = self.next_local_event_version(now_ms);
         let message = ClipboardMessage {
             message_id: Uuid::new_v4().to_string(),
             source_device_id: self.device_id.clone(),
@@ -170,61 +135,15 @@ impl SyncEngine {
             content_type,
             content,
             content_hash: local_hash.clone(),
-            timestamp: now_ms.div_euclid(1000),
-            origin_sequence: Some(self.next_origin_sequence),
-            event_version: Some(event_version),
+            timestamp: Utc::now().timestamp(),
         };
         self.last_local_hash = Some(local_hash);
-        self.last_event_order = Some(event_order(&message));
         insert_bounded(
             &mut self.seen_message_ids,
             &mut self.seen_message_order,
             message.message_id.clone(),
         );
         Some(message)
-    }
-
-    fn next_local_event_version(&mut self, now_ms: i64) -> ClipboardEventVersion {
-        if now_ms > self.hlc_physical_ms {
-            self.hlc_physical_ms = now_ms;
-            self.hlc_logical = 0;
-        } else {
-            self.hlc_logical = self.hlc_logical.saturating_add(1);
-        }
-
-        ClipboardEventVersion {
-            physical_ms: self.hlc_physical_ms,
-            logical: self.hlc_logical,
-            origin_device_id: self.device_id.clone(),
-        }
-    }
-
-    fn observe_remote_event_version(&mut self, version: &ClipboardEventVersion) {
-        let now_ms = Utc::now().timestamp_millis();
-        let next_physical_ms = now_ms
-            .max(self.hlc_physical_ms)
-            .max(version.physical_ms);
-        self.hlc_logical = if next_physical_ms == self.hlc_physical_ms
-            && next_physical_ms == version.physical_ms
-        {
-            self.hlc_logical.max(version.logical).saturating_add(1)
-        } else if next_physical_ms == self.hlc_physical_ms {
-            self.hlc_logical.saturating_add(1)
-        } else if next_physical_ms == version.physical_ms {
-            version.logical.saturating_add(1)
-        } else {
-            0
-        };
-        self.hlc_physical_ms = next_physical_ms;
-    }
-
-    #[cfg(test)]
-    fn observe_local_text_at(
-        &mut self,
-        text: impl Into<String>,
-        now_ms: i64,
-    ) -> Option<ClipboardMessage> {
-        self.observe_local_content_at(ClipboardContentType::Text, text, now_ms)
     }
 
     pub fn reset_local_observation(&mut self) {
@@ -244,12 +163,12 @@ impl SyncEngine {
     }
 
     #[cfg(test)]
-    pub fn should_apply_remote_message(&mut self, message: &ClipboardMessage) -> bool {
+    pub fn should_apply_remote_message(&self, message: &ClipboardMessage) -> bool {
         self.should_apply_remote_message_with_deduplication(message, true)
     }
 
     pub fn should_apply_remote_message_with_deduplication(
-        &mut self,
+        &self,
         message: &ClipboardMessage,
         deduplicate_sync_content: bool,
     ) -> bool {
@@ -261,48 +180,24 @@ impl SyncEngine {
             return false;
         }
 
-        let incoming_order = event_order(message);
-        if self
-            .last_event_order
-            .as_ref()
-            .is_some_and(|current| incoming_order <= *current)
-        {
-            return false;
-        }
-
-        let duplicate_content = deduplicate_sync_content
-            && (self.last_remote_hash.as_deref() == Some(&message.content_hash)
-                || self.last_local_hash.as_deref() == Some(&message.content_hash));
-        if duplicate_content {
-            self.mark_remote_message_observed(message, false);
-            return false;
-        }
-
-        true
+        !deduplicate_sync_content
+            || (self.last_remote_hash.as_deref() != Some(&message.content_hash)
+                && self.last_local_hash.as_deref() != Some(&message.content_hash))
     }
 
     pub fn mark_remote_message_applied(&mut self, message: &ClipboardMessage) {
-        self.mark_remote_message_observed(message, true);
-    }
-
-    fn mark_remote_message_observed(&mut self, message: &ClipboardMessage, track_echo: bool) {
         insert_bounded(
             &mut self.seen_message_ids,
             &mut self.seen_message_order,
             message.message_id.clone(),
         );
-        let order = event_order(message);
-        self.observe_remote_event_version(&order.version);
-        self.last_event_order = Some(order);
         self.last_remote_hash = Some(message.content_hash.clone());
         self.last_local_hash = Some(message.content_hash.clone());
-        if track_echo {
-            insert_bounded(
-                &mut self.pending_remote_echo_hashes,
-                &mut self.pending_remote_echo_order,
-                message.content_hash.clone(),
-            );
-        }
+        insert_bounded(
+            &mut self.pending_remote_echo_hashes,
+            &mut self.pending_remote_echo_order,
+            message.content_hash.clone(),
+        );
     }
 
     #[cfg(test)]
@@ -417,13 +312,6 @@ async fn is_file_transfer_http_stream(stream: &TcpStream) -> bool {
     match tokio::time::timeout(Duration::from_secs(2), stream.peek(&mut buffer)).await {
         Ok(Ok(read)) => is_file_transfer_http_request_prefix(&buffer[..read]),
         _ => false,
-    }
-}
-
-fn event_order(message: &ClipboardMessage) -> ClipboardEventOrder {
-    ClipboardEventOrder {
-        version: message.effective_event_version(),
-        message_id: message.message_id.clone(),
     }
 }
 
@@ -558,19 +446,6 @@ pub async fn connect_to_peer(
     ip: String,
     port: u16,
 ) -> AppResult<DeviceInfo> {
-    let endpoint = network::normalize_peer_endpoint(&ip, port)?;
-    state.clear_auto_connect_suppression(&endpoint).await;
-    connect_to_peer_internal(app, state, ip, port, true, None).await
-}
-
-async fn connect_to_peer_internal(
-    app: AppHandle,
-    state: AppState,
-    ip: String,
-    port: u16,
-    manual_confirmation: bool,
-    known_device: Option<DeviceInfo>,
-) -> AppResult<DeviceInfo> {
     if let Some(device) = state.connected_device_for_endpoint(&ip, port).await? {
         return Ok(device);
     }
@@ -595,144 +470,31 @@ async fn connect_to_peer_internal(
         }
     };
     let connection_id = url.clone();
-    if !manual_confirmation {
-        let automatic_connection_canceled = !state.status().await.running
-            || match known_device.as_ref() {
-                Some(device) => state.auto_connect_suppressed(&device.id).await,
-                None => true,
-            };
-        if automatic_connection_canceled {
-            return Err(AppError::InvalidInput(
-                "automatic connection canceled".to_string(),
-            ));
-        }
-    }
-    if manual_confirmation {
-        state.mark_peer_confirmation_required(&connection_id).await;
-    }
+    state.mark_peer_confirmation_required(&connection_id).await;
     spawn_socket(app.clone(), state.clone(), connection_id.clone(), socket).await?;
-    if !manual_confirmation {
-        let automatic_connection_canceled = !state.status().await.running
-            || match known_device.as_ref() {
-                Some(device) => state.auto_connect_suppressed(&device.id).await,
-                None => true,
-            };
-        if automatic_connection_canceled {
-            state.remove_peer(&connection_id).await;
-            return Err(AppError::InvalidInput(
-                "automatic connection canceled".to_string(),
-            ));
-        }
-    }
 
     if let Some(local_ip) = network::preferred_local_ip_for_peer(network::peer_ip_hint(&ip, port)) {
         state.set_local_ip(Some(local_ip.to_string())).await;
     }
 
-    let device = if let Some(mut device) = known_device {
-        device.connected = true;
-        device.remote_trusted = false;
-        device.last_seen_at = Some(Utc::now());
-        device.status = DeviceStatus::Online;
-        device
-    } else {
-        let display_ip = network::display_host_from_connection_id(&connection_id);
-        DeviceInfo {
-            id: connection_id.clone(),
-            name: connection_id.clone(),
-            ip: display_ip,
-            port,
-            connected: true,
-            trusted: false,
-            remote_trusted: false,
-            has_connected_before: false,
-            last_seen_at: Some(Utc::now()),
-            status: DeviceStatus::Online,
-        }
+    let display_ip = network::display_host_from_connection_id(&connection_id);
+    let device = DeviceInfo {
+        id: connection_id.clone(),
+        name: connection_id.clone(),
+        ip: display_ip,
+        port,
+        connected: true,
+        trusted: false,
+        remote_trusted: false,
+        has_connected_before: false,
+        last_seen_at: Some(Utc::now()),
+        status: DeviceStatus::Online,
     };
     let device = state.upsert_device(device).await;
     persist_devices(&app, &state).await;
     let _ = app.emit("device-connected", device.clone());
     emit_status(&app, &state).await;
     Ok(device)
-}
-
-pub fn maybe_auto_connect_discovered_device(
-    app: AppHandle,
-    state: AppState,
-    device: DeviceInfo,
-) {
-    tauri::async_runtime::spawn(async move {
-        let config = state.config().await;
-        let status = state.status().await;
-        let suppressed = state.auto_connect_suppressed(&device.id).await;
-        if !should_auto_connect_discovered_device(
-            &config.device_id,
-            status.running,
-            &device,
-            suppressed,
-        ) || !state.begin_auto_connect(&device.id).await
-        {
-            return;
-        }
-
-        let device_id = device.id.clone();
-        for delay in AUTO_CONNECT_RETRY_DELAYS {
-            if !delay.is_zero() {
-                tokio::time::sleep(delay).await;
-            }
-
-            let current = state
-                .devices()
-                .await
-                .into_iter()
-                .find(|candidate| candidate.id == device_id);
-            let Some(current) = current else {
-                break;
-            };
-            let config = state.config().await;
-            let status = state.status().await;
-            let suppressed = state.auto_connect_suppressed(&device_id).await;
-            if !should_auto_connect_discovered_device(
-                &config.device_id,
-                status.running,
-                &current,
-                suppressed,
-            ) {
-                break;
-            }
-
-            if connect_to_peer_internal(
-                app.clone(),
-                state.clone(),
-                current.ip.clone(),
-                current.port,
-                false,
-                Some(current),
-            )
-            .await
-            .is_ok()
-            {
-                break;
-            }
-        }
-        state.finish_auto_connect(&device_id).await;
-    });
-}
-
-fn should_auto_connect_discovered_device(
-    local_device_id: &str,
-    sync_running: bool,
-    device: &DeviceInfo,
-    manually_suppressed: bool,
-) -> bool {
-    sync_running
-        && !manually_suppressed
-        && !device.connected
-        && device.status == DeviceStatus::Online
-        && device.trusted
-        && device.has_connected_before
-        && local_device_id < device.id.as_str()
 }
 
 pub async fn notify_peer_trusted(state: &AppState, config: &AppConfig, trusted_device_id: &str) {
@@ -775,7 +537,7 @@ where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     let (mut sink, mut stream) = socket.split();
-    let (sender, mut receiver) = peer_outbound_channel();
+    let (sender, mut receiver) = mpsc::unbounded_channel::<WireMessage>();
     let (start_sender, start_receiver) = oneshot::channel::<()>();
     let hello = build_hello(&state, &connection_id).await;
     let connection_id_for_task = connection_id.clone();
@@ -881,12 +643,6 @@ where
                 persist_devices(&app_for_task, &state_for_task).await;
                 let _ = app_for_task.emit("device-disconnected", device);
             }
-            file_transfer::handle_file_peer_disconnected(
-                &app_for_task,
-                &state_for_task,
-                &device_id,
-            )
-            .await;
         }
         emit_status(&app_for_task, &state_for_task).await;
     });
@@ -911,7 +667,6 @@ async fn handle_wire_text(app: &AppHandle, state: &AppState, connection_id: &str
             device_name,
             port,
             manual_trust_required,
-            capabilities,
             ..
         } => {
             let mut config = state.config().await;
@@ -919,9 +674,6 @@ async fn handle_wire_text(app: &AppHandle, state: &AppState, connection_id: &str
                 .unwrap_or_else(|_| connection_id.to_string());
             state
                 .attach_peer_device(connection_id, device_id.clone(), Some(endpoint.clone()))
-                .await;
-            state
-                .set_peer_capabilities(connection_id, capabilities)
                 .await;
             let trust_decision = resolve_hello_trust(
                 state,
@@ -964,7 +716,6 @@ async fn handle_wire_text(app: &AppHandle, state: &AppState, connection_id: &str
             if trust_decision.notify_peer_trusted {
                 notify_peer_trusted(state, &config, &device_id).await;
             }
-            file_transfer::handle_file_peer_available(app, state, &device_id).await;
             emit_status(app, state).await;
         }
         WireMessage::TrustGranted {
@@ -999,7 +750,6 @@ async fn handle_wire_text(app: &AppHandle, state: &AppState, connection_id: &str
                     notifications::notify_trust_required(app, &config, &device);
                 }
                 let _ = app.emit("device-connected", device);
-                file_transfer::handle_file_peer_available(app, state, &source_device_id).await;
                 emit_status(app, state).await;
             }
         }
@@ -1141,40 +891,6 @@ async fn handle_wire_text(app: &AppHandle, state: &AppState, connection_id: &str
             )
             .await;
         }
-        WireMessage::FileResumeRequest {
-            transfer_id,
-            receiver_device_id,
-            files,
-        } => {
-            file_transfer::handle_file_resume_request(
-                app,
-                state,
-                connection_id,
-                transfer_id,
-                receiver_device_id,
-                files,
-            )
-            .await;
-        }
-        WireMessage::FileResumeGrant {
-            transfer_id,
-            sender_device_id,
-            download_host,
-            download_port,
-            files,
-        } => {
-            file_transfer::handle_file_resume_grant(
-                app,
-                state,
-                connection_id,
-                transfer_id,
-                sender_device_id,
-                download_host,
-                download_port,
-                files,
-            )
-            .await;
-        }
         WireMessage::Clipboard { .. } => {
             let clipboard = match ClipboardMessage::try_from(message) {
                 Ok(message) => message,
@@ -1227,8 +943,7 @@ async fn handle_wire_text(app: &AppHandle, state: &AppState, connection_id: &str
                 })
                 .await;
         }
-        WireMessage::Pong { .. }
-        | WireMessage::Error { .. } => {}
+        WireMessage::Pong { .. } | WireMessage::Error { .. } => {}
     }
 }
 
@@ -1578,7 +1293,6 @@ async fn build_hello(state: &AppState, connection_id: &str) -> WireMessage {
         app_version: env!("CARGO_PKG_VERSION").to_string(),
         port: status.port,
         manual_trust_required,
-        capabilities: vec![FILE_RESUME_CAPABILITY.to_string()],
     }
 }
 
@@ -1630,8 +1344,6 @@ mod tests {
             content_type,
             content: content.to_string(),
             timestamp: 1_712_000_000,
-            origin_sequence: None,
-            event_version: None,
         }
     }
 
@@ -1645,8 +1357,6 @@ mod tests {
             content_type,
             content: content.to_string(),
             timestamp: 1_712_000_000,
-            origin_sequence: None,
-            event_version: None,
         }
     }
 
@@ -1659,60 +1369,6 @@ mod tests {
         assert_eq!(first, second);
         assert_ne!(first, image);
         assert_eq!(first.len(), 64);
-    }
-
-    #[test]
-    fn local_messages_carry_monotonic_origin_sequence_and_hlc_version() {
-        let mut engine = SyncEngine::new("device-a", "Laptop A");
-
-        let first = engine
-            .observe_local_text_at("first", 1_000)
-            .expect("first local content should be observed");
-        let second = engine
-            .observe_local_text_at("second", 1_000)
-            .expect("second local content should be observed");
-
-        assert_eq!(first.origin_sequence, Some(1));
-        assert_eq!(second.origin_sequence, Some(2));
-        assert!(second.event_version > first.event_version);
-    }
-
-    #[test]
-    fn concurrent_local_events_converge_by_version_and_device_id() {
-        let mut device_a = SyncEngine::new("device-a", "Laptop A");
-        let mut device_b = SyncEngine::new("device-b", "Laptop B");
-
-        let from_a = device_a
-            .observe_local_text_at("from A", 1_000)
-            .expect("device A should create an event");
-        let from_b = device_b
-            .observe_local_text_at("from B", 1_000)
-            .expect("device B should create an event");
-
-        assert!(device_a.apply_remote_message(&from_b));
-        assert!(!device_b.apply_remote_message(&from_a));
-        assert_eq!(device_a.last_event_order, device_b.last_event_order);
-    }
-
-    #[test]
-    fn third_devices_converge_independent_of_concurrent_delivery_order() {
-        let mut device_a = SyncEngine::new("device-a", "Laptop A");
-        let mut device_b = SyncEngine::new("device-b", "Laptop B");
-        let from_a = device_a
-            .observe_local_text_at("from A", 1_000)
-            .expect("device A should create an event");
-        let from_b = device_b
-            .observe_local_text_at("from B", 1_000)
-            .expect("device B should create an event");
-        let mut first_order = SyncEngine::new("device-c", "Laptop C");
-        let mut reverse_order = SyncEngine::new("device-d", "Laptop D");
-
-        assert!(first_order.apply_remote_message(&from_a));
-        assert!(first_order.apply_remote_message(&from_b));
-        assert!(reverse_order.apply_remote_message(&from_b));
-        assert!(!reverse_order.apply_remote_message(&from_a));
-
-        assert_eq!(first_order.last_event_order, reverse_order.last_event_order);
     }
 
     #[test]
@@ -1865,8 +1521,6 @@ mod tests {
             content_type,
             content: "echo".to_string(),
             timestamp: 1_712_000_000,
-            origin_sequence: None,
-            event_version: None,
         };
 
         assert!(!engine.apply_remote_message(&own));
@@ -2208,7 +1862,6 @@ mod tests {
                     app_version: "test".to_string(),
                     port: 8765,
                     manual_trust_required: false,
-                    capabilities: Vec::new(),
                 }
             );
             send_wire_message(
@@ -2219,7 +1872,6 @@ mod tests {
                     app_version: "test".to_string(),
                     port: 8766,
                     manual_trust_required: false,
-                    capabilities: Vec::new(),
                 },
             )
             .await;
@@ -2246,7 +1898,6 @@ mod tests {
                 app_version: "test".to_string(),
                 port: 8765,
                 manual_trust_required: false,
-                capabilities: Vec::new(),
             },
         )
         .await;
@@ -2260,7 +1911,6 @@ mod tests {
                 app_version: "test".to_string(),
                 port: 8766,
                 manual_trust_required: false,
-                capabilities: Vec::new(),
             }
         );
 
@@ -2304,7 +1954,6 @@ mod tests {
                     app_version: "test".to_string(),
                     port: 8765,
                     manual_trust_required: false,
-                    capabilities: Vec::new(),
                 },
             )
             .await;
@@ -2336,7 +1985,6 @@ mod tests {
                 app_version: "test".to_string(),
                 port: 8766,
                 manual_trust_required: false,
-                capabilities: Vec::new(),
             },
         )
         .await;
@@ -2942,82 +2590,6 @@ mod tests {
 
         config.auto_sync = false;
         assert!(!should_auto_start_sync(&config, false));
-    }
-
-    #[test]
-    fn automatic_mesh_connects_only_from_the_stable_pair_owner() {
-        let candidate = DeviceInfo {
-            id: "device-b".to_string(),
-            name: "Laptop B".to_string(),
-            ip: "10.0.0.2".to_string(),
-            port: 8765,
-            connected: false,
-            trusted: true,
-            remote_trusted: false,
-            has_connected_before: true,
-            last_seen_at: Some(Utc::now()),
-            status: DeviceStatus::Online,
-        };
-
-        assert!(should_auto_connect_discovered_device(
-            "device-a",
-            true,
-            &candidate,
-            false,
-        ));
-        assert!(!should_auto_connect_discovered_device(
-            "device-z",
-            true,
-            &candidate,
-            false,
-        ));
-    }
-
-    #[test]
-    fn automatic_mesh_requires_running_trusted_connection_history() {
-        let candidate = DeviceInfo {
-            id: "device-b".to_string(),
-            name: "Laptop B".to_string(),
-            ip: "10.0.0.2".to_string(),
-            port: 8765,
-            connected: false,
-            trusted: true,
-            remote_trusted: false,
-            has_connected_before: true,
-            last_seen_at: Some(Utc::now()),
-            status: DeviceStatus::Online,
-        };
-
-        assert!(!should_auto_connect_discovered_device(
-            "device-a",
-            false,
-            &candidate,
-            false,
-        ));
-        assert!(!should_auto_connect_discovered_device(
-            "device-a",
-            true,
-            &candidate,
-            true,
-        ));
-
-        let mut first_time = candidate.clone();
-        first_time.has_connected_before = false;
-        assert!(!should_auto_connect_discovered_device(
-            "device-a",
-            true,
-            &first_time,
-            false,
-        ));
-
-        let mut untrusted = candidate;
-        untrusted.trusted = false;
-        assert!(!should_auto_connect_discovered_device(
-            "device-a",
-            true,
-            &untrusted,
-            false,
-        ));
     }
 
     #[test]

@@ -18,37 +18,31 @@ const buildContentIndex = applyCompletedClipboardFileSync.indexOf(
   "let content = clipboard::file_paths_to_clipboard_content(&paths)?;",
 );
 const buildMessageIndex = applyCompletedClipboardFileSync.indexOf("let message = ClipboardMessage");
-const shouldApplyIndex = applyCompletedClipboardFileSync.indexOf(
-  "state.should_apply_remote_clipboard(&message).await",
-);
-const writeClipboardIndex = applyCompletedClipboardFileSync.indexOf("write(&paths)?;");
 const markRemoteAppliedIndex = applyCompletedClipboardFileSync.indexOf(
   "state.mark_remote_clipboard_applied(&message).await;",
+);
+const writeClipboardIndex = applyCompletedClipboardFileSync.indexOf(
+  "clipboard::write_clipboard_files(app, &paths)?;",
 );
 
 assert.notEqual(buildContentIndex, -1, "completed file sync must build canonical file-list content");
 assert.notEqual(buildMessageIndex, -1, "completed file sync must build a remote clipboard message");
-assert.notEqual(shouldApplyIndex, -1, "completed file sync must reject duplicate remote messages");
-assert.notEqual(writeClipboardIndex, -1, "completed file sync must write received files to clipboard");
 assert.notEqual(
   markRemoteAppliedIndex,
   -1,
-  "completed file sync must register remote echo suppression after a successful clipboard write",
+  "completed file sync must register remote echo suppression before changing the clipboard",
 );
+assert.notEqual(writeClipboardIndex, -1, "completed file sync must write received files to clipboard");
 
 assert.ok(
   buildContentIndex < buildMessageIndex,
   "file-list content must be canonicalized before building the echo-suppression message",
 );
 assert.ok(
-  buildMessageIndex < shouldApplyIndex,
-  "the remote clipboard message must exist before checking duplicate suppression",
+  buildMessageIndex < markRemoteAppliedIndex,
+  "the remote clipboard message must exist before registering echo suppression",
 );
 assert.ok(
-  shouldApplyIndex < writeClipboardIndex,
-  "duplicate suppression must be checked before writing files to the clipboard",
-);
-assert.ok(
-  writeClipboardIndex < markRemoteAppliedIndex,
-  "a failed clipboard write must not consume the remote message",
+  markRemoteAppliedIndex < writeClipboardIndex,
+  "echo suppression must be registered before writing files to the clipboard",
 );

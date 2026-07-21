@@ -727,8 +727,6 @@ mod tests {
             content: "hello".to_string(),
             content_hash: "hash".to_string(),
             timestamp: 1,
-            origin_sequence: None,
-            event_version: None,
         };
 
         for _ in 0..105 {
@@ -751,8 +749,6 @@ mod tests {
             content: "a".repeat(120),
             content_hash: "hash".to_string(),
             timestamp: 1,
-            origin_sequence: None,
-            event_version: None,
         };
 
         let item = make_history_item(HistoryDirection::Local, "Device", &message);
@@ -772,8 +768,6 @@ mod tests {
             content: content.clone(),
             content_hash: "hash".to_string(),
             timestamp: 1,
-            origin_sequence: None,
-            event_version: None,
         };
 
         let item = make_history_item(HistoryDirection::Local, "Device", &message);
@@ -793,8 +787,6 @@ mod tests {
             content,
             content_hash: "hash".to_string(),
             timestamp: 1,
-            origin_sequence: None,
-            event_version: None,
         };
 
         let item = make_history_item(HistoryDirection::Local, "Device", &message);
@@ -815,8 +807,6 @@ mod tests {
             content,
             content_hash: "hash".to_string(),
             timestamp: 1,
-            origin_sequence: None,
-            event_version: None,
         };
 
         let item = make_history_item(HistoryDirection::Local, "Device", &message);
@@ -838,8 +828,6 @@ mod tests {
             content: content.to_string(),
             content_hash: "hash".to_string(),
             timestamp: 1,
-            origin_sequence: None,
-            event_version: None,
         };
 
         let item = make_history_item(HistoryDirection::Local, "Device", &message);
@@ -1066,8 +1054,6 @@ mod tests {
             content: "first".to_string(),
             content_hash: "first".to_string(),
             timestamp: 1,
-            origin_sequence: None,
-            event_version: None,
         };
         let mut first = make_history_item(HistoryDirection::Local, "Device", &message);
         first.id = "first".to_string();
@@ -1094,8 +1080,6 @@ mod tests {
             content: "pinned".to_string(),
             content_hash: "pinned".to_string(),
             timestamp: 1,
-            origin_sequence: None,
-            event_version: None,
         };
         let mut pinned = make_history_item(HistoryDirection::Local, "Device", &message);
         pinned.id = "keep-pinned".to_string();
@@ -1124,8 +1108,6 @@ mod tests {
             content: r#"[{"path":"","name":"a.txt","size":3}]"#.to_string(),
             content_hash: "hash".to_string(),
             timestamp: 1,
-            origin_sequence: None,
-            event_version: None,
         };
         let mut item = make_history_item(HistoryDirection::Remote, "Laptop A", &message);
         item.file_transfer_id = Some("transfer-1".to_string());
@@ -1158,8 +1140,6 @@ mod tests {
             content: "same content".to_string(),
             content_hash: "hash".to_string(),
             timestamp: 1,
-            origin_sequence: None,
-            event_version: None,
         };
         let mut items = Vec::new();
 

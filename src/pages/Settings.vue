@@ -1,29 +1,15 @@
 <script setup lang="ts">
-import {
-  CheckCircle2,
-  ChevronRight,
-  Globe2,
-  Keyboard,
-  RefreshCw,
-  ShieldCheck,
-  Sparkles,
-  Wrench,
-} from "lucide-vue-next";
+import { CheckCircle2, Globe2, Sparkles } from "lucide-vue-next";
 import type { Component } from "vue";
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 
-import FileSizeLimitSlider from "@/components/settings/FileSizeLimitSlider.vue";
-import ShortcutSettingsDialog from "@/components/settings/ShortcutSettingsDialog.vue";
 import Button from "@/components/ui/Button.vue";
 import Switch from "@/components/ui/Switch.vue";
-import { clampFileSizeLimitMib } from "@/lib/fileSizeLimit";
 import { clampPort } from "@/lib/format";
 import {
   clearCache,
   getCacheSize,
-  getNetworkDiagnostics,
   openTransferFolder,
-  repairWindowsFirewall,
   resetTransferSaveDir,
   selectTransferSaveDir,
   sendTestNotification,
@@ -32,10 +18,6 @@ import { useConfigStore } from "@/stores/config";
 import { useStatusStore } from "@/stores/status";
 import { useToastStore } from "@/stores/toasts";
 import type { AppConfig, AppTheme, CloseAction, TranslationEngine } from "@/types/config";
-import type {
-  DiagnosticStatus,
-  NetworkDiagnosticReport,
-} from "@/types/networkDiagnostics";
 
 const configStore = useConfigStore();
 const statusStore = useStatusStore();
@@ -69,18 +51,6 @@ const downloadLocationSaving = ref(false);
 const cacheSizeBytes = ref<number | null>(null);
 const cacheSizeLoading = ref(false);
 const cacheClearing = ref(false);
-const shortcutDialogOpen = ref(false);
-const networkDiagnostics = ref<NetworkDiagnosticReport | null>(null);
-const networkDiagnosticsLoading = ref(false);
-const networkDiagnosticsRepairing = ref(false);
-const networkDiagnosticsError = ref("");
-const configMutationSaving = computed(() =>
-  configStore.saving
-  || basicSettingsSaving.value
-  || syncContentSaving.value
-  || notificationSettingsSaving.value
-  || downloadLocationSaving.value,
-);
 
 type BasicSettingKey =
   | "deviceName"
@@ -103,38 +73,9 @@ type NotificationSettingKey =
   | "notifySyncError"
   | "notificationClipboardPreview";
 
-const shortcutEnabledCount = computed(() => [
-  draft.quickPanelShortcutEnabled,
-  draft.ocrShortcutEnabled,
-  draft.translateShortcutEnabled,
-  draft.snippetsShortcutEnabled,
-  draft.toggleSyncShortcutEnabled,
-].filter(Boolean).length);
-
-const networkDiagnosticSummary = computed(() => {
-  if (networkDiagnosticsLoading.value) return "正在检查网络环境...";
-  if (networkDiagnosticsError.value) return "诊断未完成";
-  if (!networkDiagnostics.value) return "尚未检测";
-
-  const errorCount = networkDiagnostics.value.checks.filter(
-    (item) => item.status === "error",
-  ).length;
-  const warningCount = networkDiagnostics.value.checks.filter(
-    (item) => item.status === "warning" || item.status === "unknown",
-  ).length;
-  if (errorCount > 0) return `发现 ${errorCount} 项需要处理`;
-  if (warningCount > 0) return `${warningCount} 项需要确认`;
-  return "局域网入口检查正常";
-});
-
 function applyThemePreview(theme: AppTheme) {
   document.documentElement.dataset.appTheme = theme;
   document.body.dataset.appTheme = theme;
-}
-
-function restoreDraftFromConfig() {
-  Object.assign(draft, configStore.config);
-  applyThemePreview(configStore.config.theme);
 }
 
 function formatCacheSize(bytes: number) {
@@ -167,8 +108,6 @@ watch(
       draft.syncText = next.syncText;
       draft.syncImage = next.syncImage;
       draft.syncFiles = next.syncFiles;
-      draft.maxSendFileSizeMib = next.maxSendFileSizeMib;
-      draft.maxReceiveFileSizeMib = next.maxReceiveFileSizeMib;
       draft.deduplicateSyncContent = next.deduplicateSyncContent;
       draft.trustedDevices = next.trustedDevices;
       return;
@@ -205,10 +144,6 @@ onMounted(() => {
   void loadCacheSize();
 });
 
-onMounted(() => {
-  void loadNetworkDiagnostics();
-});
-
 async function saveBasicSettings(
   patch: Partial<Pick<AppConfig, BasicSettingKey>>,
   options: {
@@ -216,11 +151,9 @@ async function saveBasicSettings(
     silent?: boolean;
   } = {},
 ) {
-  if (configStore.saving || (basicSettingsSaving.value && !options.keepSaving)) {
-    restoreDraftFromConfig();
-    return;
-  }
+  if (configStore.saving || (basicSettingsSaving.value && !options.keepSaving)) return;
 
+  const previousConfig = { ...configStore.config };
   if (!options.keepSaving) {
     basicSettingsSaving.value = true;
   }
@@ -235,7 +168,8 @@ async function saveBasicSettings(
     });
 
     if (configStore.error) {
-      restoreDraftFromConfig();
+      Object.assign(draft, previousConfig);
+      applyThemePreview(previousConfig.theme);
       toastStore.error("保存失败");
     } else {
       if (!options.silent) {
@@ -262,10 +196,7 @@ async function saveDeviceName() {
 }
 
 async function savePort() {
-  if (configStore.saving || basicSettingsSaving.value) {
-    restoreDraftFromConfig();
-    return;
-  }
+  if (configStore.saving || basicSettingsSaving.value) return;
 
   const port = clampPort(draft.port);
   draft.port = port;
@@ -298,7 +229,6 @@ async function savePort() {
   } finally {
     basicSettingsSaving.value = false;
   }
-  void loadNetworkDiagnostics();
 }
 
 async function saveTheme(theme: AppTheme) {
@@ -385,22 +315,10 @@ async function saveAutoOpenFolderAfterSave(autoOpenFolderAfterSave: boolean) {
 }
 
 async function saveSyncSetting(
-  patch: Partial<
-    Pick<
-      AppConfig,
-      | "syncImage"
-      | "syncFiles"
-      | "maxSendFileSizeMib"
-      | "maxReceiveFileSizeMib"
-      | "deduplicateSyncContent"
-    >
-  >,
+  patch: Partial<Pick<AppConfig, "syncImage" | "syncFiles" | "deduplicateSyncContent">>,
   options: { silent?: boolean } = { silent: true },
 ) {
-  if (configStore.saving || syncContentSaving.value) {
-    restoreDraftFromConfig();
-    return;
-  }
+  if (configStore.saving || syncContentSaving.value) return;
 
   syncContentSaving.value = true;
   Object.assign(draft, patch);
@@ -413,7 +331,15 @@ async function saveSyncSetting(
     });
 
     if (configStore.error) {
-      restoreDraftFromConfig();
+      if ("syncImage" in patch) {
+        draft.syncImage = configStore.config.syncImage;
+      }
+      if ("syncFiles" in patch) {
+        draft.syncFiles = configStore.config.syncFiles;
+      }
+      if ("deduplicateSyncContent" in patch) {
+        draft.deduplicateSyncContent = configStore.config.deduplicateSyncContent;
+      }
       toastStore.error("保存失败");
     } else {
       if (!options.silent) {
@@ -431,14 +357,6 @@ async function saveSyncImage(syncImage: boolean) {
 
 async function saveSyncFiles(syncFiles: boolean) {
   await saveSyncSetting({ syncFiles });
-}
-
-async function saveMaxSendFileSize(maxSendFileSizeMib: number) {
-  await saveSyncSetting({ maxSendFileSizeMib: clampFileSizeLimitMib(maxSendFileSizeMib) });
-}
-
-async function saveMaxReceiveFileSize(maxReceiveFileSizeMib: number) {
-  await saveSyncSetting({ maxReceiveFileSizeMib: clampFileSizeLimitMib(maxReceiveFileSizeMib) });
 }
 
 async function saveDeduplicateSyncContent(deduplicateSyncContent: boolean) {
@@ -493,10 +411,7 @@ async function saveNotificationSetting(
   patch: Partial<Pick<AppConfig, NotificationSettingKey>>,
   options: { silent?: boolean } = { silent: true },
 ) {
-  if (configStore.saving || notificationSettingsSaving.value) {
-    restoreDraftFromConfig();
-    return;
-  }
+  if (configStore.saving || notificationSettingsSaving.value) return;
 
   notificationSettingsSaving.value = true;
   Object.assign(draft, patch);
@@ -509,7 +424,9 @@ async function saveNotificationSetting(
     });
 
     if (configStore.error) {
-      restoreDraftFromConfig();
+      for (const key of Object.keys(patch) as NotificationSettingKey[]) {
+        draft[key] = configStore.config[key];
+      }
       toastStore.error("保存失败");
     } else {
       if (!options.silent) {
@@ -551,55 +468,6 @@ async function testDesktopNotification() {
     toastStore.success("测试通知已发送");
   } catch (error) {
     toastStore.error(`测试通知发送失败：${String(error)}`);
-  }
-}
-
-function diagnosticStatusLabel(status: DiagnosticStatus) {
-  return {
-    pass: "正常",
-    warning: "需确认",
-    error: "需处理",
-    unknown: "未知",
-  }[status];
-}
-
-function diagnosticStatusClasses(status: DiagnosticStatus) {
-  return {
-    pass: "border-emerald-400/30 bg-emerald-400/10 text-emerald-200",
-    warning: "border-amber-400/30 bg-amber-400/10 text-amber-100",
-    error: "border-red-400/35 bg-red-400/10 text-red-100",
-    unknown: "border-slate-500/40 bg-slate-500/10 text-slate-300",
-  }[status];
-}
-
-async function loadNetworkDiagnostics(showSuccess = false) {
-  if (networkDiagnosticsLoading.value || networkDiagnosticsRepairing.value) return;
-
-  networkDiagnosticsLoading.value = true;
-  networkDiagnosticsError.value = "";
-  try {
-    networkDiagnostics.value = await getNetworkDiagnostics();
-    if (showSuccess) toastStore.success("网络诊断已刷新");
-  } catch (error) {
-    networkDiagnosticsError.value = String(error);
-  } finally {
-    networkDiagnosticsLoading.value = false;
-  }
-}
-
-async function repairFirewall() {
-  if (networkDiagnosticsLoading.value || networkDiagnosticsRepairing.value) return;
-
-  networkDiagnosticsRepairing.value = true;
-  networkDiagnosticsError.value = "";
-  try {
-    networkDiagnostics.value = await repairWindowsFirewall();
-    toastStore.success("CopyShare 专用网络防火墙规则已修复");
-  } catch (error) {
-    networkDiagnosticsError.value = String(error);
-    toastStore.error(`防火墙修复失败：${String(error)}`);
-  } finally {
-    networkDiagnosticsRepairing.value = false;
   }
 }
 
@@ -649,7 +517,7 @@ async function clearLocalCache() {
               v-model="draft.deviceName"
               data-settings-image2-field
               class="h-8 min-w-0 rounded-md border-0 bg-[color:var(--field-bg)] px-3 text-[13px] text-white"
-              :disabled="configMutationSaving"
+              :disabled="basicSettingsSaving"
               @blur="saveDeviceName"
               @keydown.enter="saveDeviceName"
             >
@@ -669,7 +537,7 @@ async function clearLocalCache() {
             type="number"
             min="1"
             max="65535"
-            :disabled="configMutationSaving"
+            :disabled="basicSettingsSaving"
             @change="savePort"
             @blur="savePort"
             @keydown.enter="savePort"
@@ -691,7 +559,7 @@ async function clearLocalCache() {
                 ? 'border-[color:var(--accent-line)] bg-[color:var(--accent-soft)] text-[color:var(--accent-text)]'
                 : 'border-[color:var(--main-line-soft)] bg-[color:var(--main-bg-muted)] text-slate-300 hover:border-[color:var(--main-line)] hover:text-white'"
               :title="option.hint"
-              :disabled="configMutationSaving"
+              :disabled="basicSettingsSaving"
               @click="saveTheme(option.value)"
             >
               {{ option.label }}
@@ -715,7 +583,7 @@ async function clearLocalCache() {
                 ? 'border-[color:var(--accent-line)] bg-[color:var(--accent-soft)] text-[color:var(--accent-text)]'
                 : 'border-[color:var(--main-line-soft)] bg-[color:var(--main-bg-muted)] text-slate-300 hover:border-[color:var(--main-line)] hover:text-white'"
               :title="option.hint"
-              :disabled="configMutationSaving"
+              :disabled="basicSettingsSaving"
               @click="saveCloseAction(option.value)"
             >
               {{ option.label }}
@@ -723,133 +591,6 @@ async function clearLocalCache() {
           </div>
         </div>
       </div>
-    </section>
-
-    <section data-network-diagnostics-settings class="grid gap-2">
-      <p class="text-[13px] font-bold text-[color:var(--subtle-text)]">局域网与防火墙</p>
-      <div
-        data-settings-image2-card
-        class="overflow-hidden rounded-[10px] border border-[color:var(--main-line)] bg-[color:var(--panel-bg)]"
-      >
-        <div class="flex min-h-[68px] flex-col gap-3 px-3 py-3 lg:flex-row lg:items-center lg:justify-between">
-          <span class="flex min-w-0 items-center gap-3">
-            <span class="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-[color:var(--main-line-soft)] bg-[color:var(--main-bg-muted)] text-[color:var(--accent-text)]">
-              <ShieldCheck class="h-5 w-5" />
-            </span>
-            <span class="grid min-w-0 gap-1">
-              <span class="text-[15px] font-bold text-white">网络诊断</span>
-              <span class="text-[13px] text-[color:var(--muted-text)]">
-                {{ networkDiagnosticSummary }}
-                <template v-if="networkDiagnostics?.preferredLocalIp">
-                  · 当前首选 {{ networkDiagnostics.preferredLocalIp }}
-                </template>
-              </span>
-            </span>
-          </span>
-          <div class="flex flex-wrap items-center gap-2 lg:justify-end">
-            <Button
-              v-if="networkDiagnostics?.repairSupported"
-              data-firewall-repair-button
-              size="sm"
-              variant="primary"
-              :disabled="networkDiagnosticsLoading || networkDiagnosticsRepairing"
-              @click="repairFirewall"
-            >
-              <Wrench class="h-4 w-4" />
-              {{ networkDiagnosticsRepairing ? "等待管理员授权..." : "修复防火墙" }}
-            </Button>
-            <Button
-              data-network-diagnostics-refresh-button
-              size="sm"
-              variant="secondary"
-              :disabled="networkDiagnosticsLoading || networkDiagnosticsRepairing"
-              @click="loadNetworkDiagnostics(true)"
-            >
-              <RefreshCw class="h-4 w-4" :class="networkDiagnosticsLoading ? 'animate-spin' : ''" />
-              重新检测
-            </Button>
-          </div>
-        </div>
-
-        <div
-          v-if="networkDiagnosticsError"
-          class="border-t border-red-500/25 bg-red-500/8 px-3 py-3 text-[13px] text-red-100"
-        >
-          网络诊断失败：{{ networkDiagnosticsError }}
-        </div>
-
-        <div
-          v-else-if="networkDiagnostics"
-          data-network-diagnostics-results
-          class="border-t border-[color:var(--main-line-soft)]"
-        >
-          <div
-            v-for="item in networkDiagnostics.checks"
-            :key="item.id"
-            class="flex flex-col gap-2 border-t border-[color:var(--main-line-soft)] px-3 py-3 first:border-t-0 lg:flex-row lg:items-start lg:justify-between"
-          >
-            <div class="grid min-w-0 gap-1.5">
-              <div class="flex flex-wrap items-center gap-2">
-                <span class="text-[14px] font-bold text-white">{{ item.title }}</span>
-                <span
-                  class="rounded-full border px-2 py-0.5 text-[12px] font-bold"
-                  :class="diagnosticStatusClasses(item.status)"
-                >
-                  {{ diagnosticStatusLabel(item.status) }}
-                </span>
-                <span
-                  v-if="item.protocol && item.port"
-                  class="rounded bg-[color:var(--field-bg)] px-2 py-0.5 font-mono text-[12px] text-slate-300"
-                >
-                  {{ item.protocol }} {{ item.port }}
-                </span>
-              </div>
-              <span class="text-[13px] leading-5 text-[color:var(--muted-text)]">{{ item.detail }}</span>
-              <span
-                v-if="item.recommendation"
-                class="text-[12px] leading-5"
-                :class="item.status === 'error' ? 'text-red-200' : 'text-amber-100/90'"
-              >
-                建议：{{ item.recommendation }}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        <div
-          v-else
-          class="border-t border-[color:var(--main-line-soft)] px-3 py-4 text-[13px] text-[color:var(--muted-text)]"
-        >
-          正在读取网卡、监听端口和防火墙规则...
-        </div>
-      </div>
-      <p class="px-1 text-[12px] leading-5 text-[color:var(--subtle-text)]">
-        修复操作仅创建当前 CopyShare 程序的 Windows“专用网络”入站规则；如果活动网络显示为公共网络，请先确认网络可信再改为专用网络。
-      </p>
-    </section>
-
-    <section data-global-shortcut-settings class="grid gap-2">
-      <p class="text-[13px] font-bold text-[color:var(--subtle-text)]">快捷键</p>
-      <button
-        data-shortcut-settings-entry
-        data-settings-image2-card
-        type="button"
-        class="group flex min-h-[64px] w-full items-center justify-between gap-4 rounded-[10px] border border-[color:var(--main-line)] bg-[color:var(--panel-bg)] px-3 py-3 text-left transition hover:border-[color:var(--accent-line)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color:var(--accent-line)]"
-        @click="shortcutDialogOpen = true"
-      >
-        <span class="flex min-w-0 items-center gap-3">
-          <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-[color:var(--main-line-soft)] bg-[color:var(--main-bg-muted)] text-[color:var(--accent-text)]">
-            <Keyboard class="h-4 w-4" />
-          </span>
-          <span class="grid min-w-0 gap-1">
-            <span class="text-[15px] font-bold text-white">快捷键设置</span>
-            <span class="text-[13px] text-[color:var(--muted-text)]">
-              已启用 {{ shortcutEnabledCount }} 个，点击统一管理
-            </span>
-          </span>
-        </span>
-        <ChevronRight class="h-4 w-4 shrink-0 text-slate-500 transition group-hover:translate-x-0.5 group-hover:text-[color:var(--accent-text)]" />
-      </button>
     </section>
 
     <section class="grid gap-2">
@@ -875,7 +616,7 @@ async function clearLocalCache() {
             <Button
               size="sm"
               variant="secondary"
-              :disabled="configMutationSaving"
+              :disabled="downloadLocationSaving"
               @click="chooseDownloadLocation"
             >
               更改位置
@@ -883,7 +624,7 @@ async function clearLocalCache() {
             <Button
               size="sm"
               variant="secondary"
-              :disabled="configMutationSaving"
+              :disabled="downloadLocationSaving"
               @click="openDownloadLocation"
             >
               打开文件夹
@@ -891,7 +632,7 @@ async function clearLocalCache() {
             <Button
               size="sm"
               variant="ghost"
-              :disabled="configMutationSaving || !draft.fileSaveDir"
+              :disabled="downloadLocationSaving || !draft.fileSaveDir"
               @click="resetDownloadLocation"
             >
               恢复默认
@@ -910,7 +651,7 @@ async function clearLocalCache() {
             control-only
             :model-value="draft.autoOpenFolderAfterSave"
             label="自动打开文件夹"
-            :disabled="configMutationSaving"
+            :disabled="basicSettingsSaving"
             @update:model-value="saveAutoOpenFolderAfterSave"
           />
         </div>
@@ -942,7 +683,7 @@ async function clearLocalCache() {
             control-only
             :model-value="draft.syncImage"
             label="同步图片"
-            :disabled="configMutationSaving"
+            :disabled="syncContentSaving"
             @update:model-value="saveSyncImage"
           />
         </div>
@@ -958,37 +699,9 @@ async function clearLocalCache() {
             control-only
             :model-value="draft.syncFiles"
             label="同步文件"
-            :disabled="configMutationSaving"
+            :disabled="syncContentSaving"
             @update:model-value="saveSyncFiles"
           />
-        </div>
-        <div
-          data-file-size-limit-settings
-          class="grid gap-3 border-t border-[color:var(--main-line-soft)] px-3 py-3"
-        >
-          <span class="grid min-w-0 gap-1">
-            <span class="text-[15px] font-bold text-white">单文件大小上限</span>
-            <span class="text-[13px] text-[color:var(--muted-text)]">
-              分别控制本机发送和接收；仅限制单文件，单任务总上限仍为 5 GiB
-            </span>
-          </span>
-          <div class="grid gap-2.5 md:grid-cols-2">
-            <FileSizeLimitSlider
-              v-model="draft.maxSendFileSizeMib"
-              direction="send"
-              :disabled="configMutationSaving"
-              @commit="saveMaxSendFileSize"
-            />
-            <FileSizeLimitSlider
-              v-model="draft.maxReceiveFileSizeMib"
-              direction="receive"
-              :disabled="configMutationSaving"
-              @commit="saveMaxReceiveFileSize"
-            />
-          </div>
-          <span class="text-[12px] text-[color:var(--subtle-text)]">
-            可拖动滑块、悬停后滚动鼠标滚轮，或聚焦后使用方向键调节
-          </span>
         </div>
         <div
           data-settings-image2-row
@@ -1002,7 +715,7 @@ async function clearLocalCache() {
             control-only
             :model-value="draft.deduplicateSyncContent"
             label="去重同步内容"
-            :disabled="configMutationSaving"
+            :disabled="syncContentSaving"
             @update:model-value="saveDeduplicateSyncContent"
           />
         </div>
@@ -1033,7 +746,7 @@ async function clearLocalCache() {
             control-only
             :model-value="draft.saveHistory"
             label="保存同步历史"
-            :disabled="configMutationSaving"
+            :disabled="basicSettingsSaving"
             @update:model-value="saveHistorySetting"
           />
         </div>
@@ -1070,7 +783,7 @@ async function clearLocalCache() {
                 : 'text-slate-300 hover:bg-[rgba(255,255,255,0.035)] hover:text-white'"
               :title="option.hint"
               :aria-pressed="draft.translationEngine === option.value"
-              :disabled="configMutationSaving"
+              :disabled="basicSettingsSaving"
               @click="saveTranslationEngine(option.value)"
             >
               <component :is="option.icon" class="h-4 w-4 shrink-0" />
@@ -1130,7 +843,7 @@ async function clearLocalCache() {
               placeholder="https://api.openai.com"
               inputmode="url"
               spellcheck="false"
-              :disabled="configMutationSaving"
+              :disabled="basicSettingsSaving"
               @blur="saveTranslationApiUrl"
               @keydown.enter.prevent="saveTranslationApiUrl"
             >
@@ -1151,7 +864,7 @@ async function clearLocalCache() {
               type="password"
               placeholder="sk-..."
               autocomplete="off"
-              :disabled="configMutationSaving"
+              :disabled="basicSettingsSaving"
               @blur="saveTranslationApiKey"
               @keydown.enter.prevent="saveTranslationApiKey"
             >
@@ -1171,7 +884,7 @@ async function clearLocalCache() {
               class="h-9 w-full rounded-md border-0 bg-[color:var(--field-bg)] px-3 text-[13px] text-white outline-none ring-1 ring-transparent transition focus:ring-[color:var(--accent-line)] lg:w-[min(300px,40vw)]"
               placeholder="gpt-4o-mini"
               spellcheck="false"
-              :disabled="configMutationSaving"
+              :disabled="basicSettingsSaving"
               @blur="saveTranslationModel"
               @keydown.enter.prevent="saveTranslationModel"
             >
@@ -1195,7 +908,7 @@ async function clearLocalCache() {
             control-only
             :model-value="draft.desktopNotifications"
             label="启用桌面通知"
-            :disabled="configMutationSaving"
+            :disabled="notificationSettingsSaving"
             @update:model-value="saveDesktopNotifications"
           />
         </div>
@@ -1208,7 +921,7 @@ async function clearLocalCache() {
             control-only
             :model-value="draft.notifyClipboard"
             label="剪贴板内容提醒"
-            :disabled="configMutationSaving || !draft.desktopNotifications"
+            :disabled="notificationSettingsSaving || !draft.desktopNotifications"
             @update:model-value="saveNotifyClipboard"
           />
         </div>
@@ -1221,7 +934,7 @@ async function clearLocalCache() {
             control-only
             :model-value="draft.notifyTrustRequired"
             label="信任确认提醒"
-            :disabled="configMutationSaving || !draft.desktopNotifications"
+            :disabled="notificationSettingsSaving || !draft.desktopNotifications"
             @update:model-value="saveNotifyTrustRequired"
           />
         </div>
@@ -1237,7 +950,7 @@ async function clearLocalCache() {
             control-only
             :model-value="draft.notifyDeviceStatus"
             label="设备上线/离线提醒"
-            :disabled="configMutationSaving || !draft.desktopNotifications"
+            :disabled="notificationSettingsSaving || !draft.desktopNotifications"
             @update:model-value="saveNotifyDeviceStatus"
           />
         </div>
@@ -1250,7 +963,7 @@ async function clearLocalCache() {
             control-only
             :model-value="draft.notifySyncError"
             label="同步异常提醒"
-            :disabled="configMutationSaving || !draft.desktopNotifications"
+            :disabled="notificationSettingsSaving || !draft.desktopNotifications"
             @update:model-value="saveNotifySyncError"
           />
         </div>
@@ -1263,7 +976,7 @@ async function clearLocalCache() {
             control-only
             :model-value="draft.notificationClipboardPreview"
             label="通知中显示剪贴板预览"
-            :disabled="configMutationSaving || !draft.desktopNotifications || !draft.notifyClipboard"
+            :disabled="notificationSettingsSaving || !draft.desktopNotifications || !draft.notifyClipboard"
             @update:model-value="saveNotificationClipboardPreview"
           />
         </div>
@@ -1275,7 +988,7 @@ async function clearLocalCache() {
           <Button
             variant="secondary"
             size="sm"
-            :disabled="configMutationSaving || !draft.desktopNotifications"
+            :disabled="!draft.desktopNotifications"
             @click="testDesktopNotification"
           >
             测试
@@ -1296,7 +1009,7 @@ async function clearLocalCache() {
             control-only
             :model-value="draft.autoStart"
             label="开机启动"
-            :disabled="configMutationSaving"
+            :disabled="basicSettingsSaving"
             @update:model-value="saveAutoStart"
           />
         </div>
@@ -1309,7 +1022,7 @@ async function clearLocalCache() {
             control-only
             :model-value="draft.autoSync"
             label="启动后自动同步"
-            :disabled="configMutationSaving"
+            :disabled="basicSettingsSaving"
             @update:model-value="saveAutoSync"
           />
         </div>
@@ -1362,10 +1075,5 @@ async function clearLocalCache() {
     <p v-if="configStore.error" class="rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-[13px] text-red-100">
       {{ configStore.error }}
     </p>
-
-    <ShortcutSettingsDialog
-      :open="shortcutDialogOpen"
-      @close="shortcutDialogOpen = false"
-    />
   </div>
 </template>

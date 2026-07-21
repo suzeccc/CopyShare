@@ -2,7 +2,6 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { emitTo, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import {
-  type CloseRequestedEvent,
   currentMonitor,
   getCurrentWindow,
   LogicalPosition,
@@ -18,7 +17,6 @@ import type { ClipboardPreviewItem } from "@/lib/historyPreview";
 import { getMediaPreviewWindowPosition } from "./mediaPreviewWindow.ts";
 import type { AppConfig } from "@/types/config";
 import type { DeviceInfo } from "@/types/device";
-import type { NetworkDiagnosticReport } from "@/types/networkDiagnostics";
 import type {
   FileTransferProgressEvent,
   FileTransferTask,
@@ -48,7 +46,6 @@ export type AppEventName =
   | "config-updated"
   | "library-updated"
   | "navigate-to-page"
-  | "global-shortcut-triggered"
   | "file-transfer-offer"
   | "file-transfer-updated"
   | "file-transfer-progress"
@@ -93,14 +90,6 @@ export function getConfig(): Promise<AppConfig> {
 
 export function updateConfig(config: AppConfig): Promise<AppConfig> {
   return invoke<AppConfig>("update_config", { config });
-}
-
-export function getNetworkDiagnostics(): Promise<NetworkDiagnosticReport> {
-  return invoke<NetworkDiagnosticReport>("get_network_diagnostics");
-}
-
-export function repairWindowsFirewall(): Promise<NetworkDiagnosticReport> {
-  return invoke<NetworkDiagnosticReport>("repair_windows_firewall");
 }
 
 export function getHistory(): Promise<HistoryItem[]> {
@@ -168,10 +157,6 @@ export function getClipboardHistory(): Promise<Array<{ id: string; text: string 
   return invoke<Array<{ id: string; text: string }>>("get_clipboard_history");
 }
 
-export function readClipboardText(): Promise<string> {
-  return invoke<string>("read_clipboard_text");
-}
-
 export function recognizeClipboardImage(): Promise<OcrResponse> {
   return invoke<OcrResponse>("recognize_clipboard_image");
 }
@@ -208,10 +193,6 @@ export function rejectFileTransfer(transferId: string): Promise<FileTransferTask
 
 export function cancelFileTransfer(transferId: string): Promise<FileTransferTask> {
   return invoke<FileTransferTask>("cancel_file_transfer", { transferId });
-}
-
-export function resumeFileTransfer(transferId: string): Promise<FileTransferTask> {
-  return invoke<FileTransferTask>("resume_file_transfer", { transferId });
 }
 
 export function getFileTransfers(): Promise<FileTransferTask[]> {
@@ -454,26 +435,6 @@ export async function openFloatingClipboardHistoryWindow(payload: FloatingClipbo
   });
 }
 
-export async function toggleFloatingClipboardHistoryWindow(
-  payload: FloatingClipboardHistoryPayload,
-): Promise<void> {
-  writeFloatingClipboardHistoryPayload(payload);
-  const existing = await WebviewWindow.getByLabel(FLOATING_CLIPBOARD_WINDOW_LABEL);
-  if (!existing) {
-    await openFloatingClipboardHistoryWindow(payload);
-    return;
-  }
-
-  if (await existing.isVisible()) {
-    await existing.hide();
-    return;
-  }
-
-  await emitTo(FLOATING_CLIPBOARD_WINDOW_LABEL, "floating-clipboard-refresh", payload);
-  await existing.show();
-  await existing.setFocus();
-}
-
 export function openExternalUrl(url: string): Promise<void> {
   return invoke<void>("open_external_url", { url });
 }
@@ -488,16 +449,6 @@ export function showMainWindow(): Promise<void> {
 
 export function hideMainWindow(): Promise<void> {
   return invoke<void>("hide_main_window");
-}
-
-export function exitApp(): Promise<void> {
-  return invoke<void>("exit_app");
-}
-
-export function onMainWindowCloseRequested(
-  handler: (event: CloseRequestedEvent) => void | Promise<void>,
-): Promise<UnlistenFn> {
-  return getCurrentWindow().onCloseRequested(handler);
 }
 
 export function sendTestNotification(): Promise<void> {
