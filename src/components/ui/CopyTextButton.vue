@@ -1,9 +1,13 @@
 <script setup lang="ts">
-import { Check, Copy, LoaderCircle, TriangleAlert } from "lucide-vue-next";
+import { Check, Copy, LoaderCircle, RotateCw, TriangleAlert } from "lucide-vue-next";
 import { computed, onBeforeUnmount, ref } from "vue";
 
 import { copyTextToClipboard, getCopyableText, type CopyTextResult } from "@/lib/clipboard";
-import { copyHistoryItem, type CopyHistoryResult } from "@/lib/tauri";
+import {
+  copyHistoryItem,
+  resumeFileTransfer,
+  type CopyHistoryResult,
+} from "@/lib/tauri";
 import { useHistoryStore } from "@/stores/history";
 import { useToastStore } from "@/stores/toasts";
 import type { FileTransferStatus } from "@/types/fileTransfer";
@@ -45,6 +49,14 @@ const fileDownloadActive = computed(() =>
   props.contentType === "fileList"
     && historyStore.isFileDownloadActive(props.fileTransferId),
 );
+const fileDownloadResumable = computed(() => {
+  if (props.contentType !== "fileList") {
+    return false;
+  }
+  const status = historyStore.fileDownloadActivity(props.fileTransferId)?.status
+    ?? props.fileTransferStatus;
+  return status === "waitingForPeer" || status === "paused";
+});
 
 const canCopy = computed(() =>
   !fileDownloadActive.value
@@ -56,6 +68,10 @@ const hasError = computed(() => result.value === "failed" || result.value === "u
 const buttonLabel = computed(() => {
   if (fileDownloadActive.value) {
     return "下载中";
+  }
+
+  if (fileDownloadResumable.value) {
+    return "继续下载";
   }
 
   if (result.value === "copied") {
@@ -78,6 +94,7 @@ const buttonLabel = computed(() => {
 });
 
 async function copyText() {
+  let resumedTransfer = false;
   if (requiresHistoryCopy.value) {
     if (!props.historyItemId) {
       result.value = "empty";
@@ -90,7 +107,14 @@ async function copyText() {
         historyStore.beginFileDownload(props.fileTransferId);
       }
       try {
-        result.value = await copyHistoryItem(props.historyItemId);
+        if (fileDownloadResumable.value && props.fileTransferId) {
+          const task = await resumeFileTransfer(props.fileTransferId);
+          historyStore.updateFileDownloadTask(task);
+          result.value = "downloading";
+          resumedTransfer = true;
+        } else {
+          result.value = await copyHistoryItem(props.historyItemId);
+        }
       } catch (error) {
         historyStore.failFileDownload(props.fileTransferId, String(error));
         result.value = "failed";
@@ -104,7 +128,9 @@ async function copyText() {
     historyStore.beginFileDownload(props.fileTransferId);
     toastStore.success("开始下载");
   } else if (result.value === "downloading") {
-    historyStore.beginFileDownload(props.fileTransferId);
+    if (!resumedTransfer) {
+      historyStore.beginFileDownload(props.fileTransferId);
+    }
     toastStore.info("文件正在下载");
   } else if (result.value === "copied") {
     toastStore.success(
@@ -143,6 +169,7 @@ onBeforeUnmount(() => {
     <Check v-if="result === 'copied'" class="h-3.5 w-3.5" />
     <LoaderCircle v-else-if="fileDownloadActive" class="h-3.5 w-3.5 animate-spin" />
     <TriangleAlert v-else-if="hasError" class="h-3.5 w-3.5" />
+    <RotateCw v-else-if="fileDownloadResumable" class="h-3.5 w-3.5" />
     <Copy v-else class="h-3.5 w-3.5" />
   </button>
 
@@ -150,6 +177,7 @@ onBeforeUnmount(() => {
     <Check v-if="result === 'copied'" class="h-4 w-4" />
     <LoaderCircle v-else-if="fileDownloadActive" class="h-4 w-4 animate-spin" />
     <TriangleAlert v-else-if="hasError" class="h-4 w-4" />
+    <RotateCw v-else-if="fileDownloadResumable" class="h-4 w-4" />
     <Copy v-else class="h-4 w-4" />
     {{ buttonLabel }}
   </Button>

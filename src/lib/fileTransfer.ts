@@ -114,7 +114,11 @@ export function formatTransferSize(size: number): string {
 }
 
 export function fileTransferStatusLabel(status: FileTransferTask["status"]): string {
-  const labels: Record<FileTransferTask["status"], string> = {
+  if (status === "waitingForPeer") return "等待发送设备上线";
+  if (status === "retrying") return "正在恢复";
+  if (status === "paused") return "传输已暂停";
+
+  const labels: Partial<Record<FileTransferTask["status"], string>> = {
     pending: "等待确认",
     accepted: "已接受",
     transferring: "传输中",
@@ -123,5 +127,5 @@ export function fileTransferStatusLabel(status: FileTransferTask["status"]): str
     canceled: "已取消",
     rejected: "已拒绝",
   };
-  return labels[status];
+  return labels[status] ?? status;
 }

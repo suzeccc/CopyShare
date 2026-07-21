@@ -531,6 +531,7 @@ fn upsert_mobile_content_item(
 
 fn mobile_clipboard_message(content: String) -> ClipboardMessage {
     let content_type = ClipboardContentType::Text;
+    let now = Utc::now();
     ClipboardMessage {
         message_id: Uuid::new_v4().to_string(),
         source_device_id: "mobile".to_string(),
@@ -538,7 +539,13 @@ fn mobile_clipboard_message(content: String) -> ClipboardMessage {
         content_hash: sync::content_hash(&content_type, &content),
         content_type,
         content,
-        timestamp: Utc::now().timestamp(),
+        timestamp: now.timestamp(),
+        origin_sequence: None,
+        event_version: Some(crate::models::ClipboardEventVersion {
+            physical_ms: now.timestamp_millis(),
+            logical: 0,
+            origin_device_id: "mobile".to_string(),
+        }),
     }
 }
 
@@ -632,6 +639,10 @@ fn mobile_runtime() -> &'static MobileRuntime {
         ))),
         server: Mutex::new(None),
     })
+}
+
+pub async fn mobile_server_running() -> bool {
+    mobile_runtime().server.lock().await.is_some()
 }
 
 async fn ensure_mobile_server(
@@ -1535,6 +1546,17 @@ mod tests {
         assert_eq!(item.content_type, crate::models::ClipboardContentType::Text);
         assert_eq!(item.content, "from phone");
         assert_eq!(item.sync_status, crate::models::SyncStatus::Synced);
+    }
+
+    #[test]
+    fn mobile_clipboard_messages_include_precise_event_ordering() {
+        let message = super::mobile_clipboard_message("from phone".to_string());
+        let version = message
+            .event_version
+            .expect("mobile clipboard should include an event version");
+
+        assert_eq!(version.origin_device_id, "mobile");
+        assert!(version.physical_ms >= message.timestamp.saturating_mul(1000));
     }
 
     #[test]

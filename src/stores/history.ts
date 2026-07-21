@@ -71,7 +71,7 @@ export const useHistoryStore = defineStore("history", {
     },
     isFileDownloadActive(transferId?: string) {
       const status = this.fileDownloadActivity(transferId)?.status;
-      return status === "accepted" || status === "transferring";
+      return status === "accepted" || status === "transferring" || status === "retrying";
     },
     beginFileDownload(transferId?: string) {
       if (!transferId) {

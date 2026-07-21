@@ -5,12 +5,14 @@ use tauri::{AppHandle, Manager};
 use crate::{
     discovery,
     error::AppResult,
-    models::{new_device_id, AppConfig},
+    models::{
+        new_device_id, AppConfig, MAX_FILE_SIZE_LIMIT_MIB, MIN_FILE_SIZE_LIMIT_MIB,
+    },
     security,
 };
 
 const CONFIG_FILE: &str = "config.json";
-const CURRENT_CONFIG_VERSION: u16 = 6;
+const CURRENT_CONFIG_VERSION: u16 = 8;
 
 pub fn load_config(app: &AppHandle) -> AppResult<AppConfig> {
     let path = config_path(app)?;
@@ -60,10 +62,12 @@ fn migrate_config(config: &mut AppConfig) -> bool {
         return false;
     }
 
-    config.sync_image = true;
-    config.sync_files = true;
-    config.notification_clipboard_preview = true;
-    config.notify_device_status = true;
+    if config.config_version < 6 {
+        config.sync_image = true;
+        config.sync_files = true;
+        config.notification_clipboard_preview = true;
+        config.notify_device_status = true;
+    }
     config.config_version = CURRENT_CONFIG_VERSION;
     true
 }
@@ -74,6 +78,25 @@ fn parse_config_text(text: &str) -> AppResult<AppConfig> {
 
 pub(crate) fn normalize_config(config: &mut AppConfig) -> bool {
     let mut changed = security::normalize_trusted_devices(config);
+    changed |= normalize_shortcut(&mut config.quick_panel_shortcut, "Alt+Shift+V");
+    changed |= normalize_shortcut(&mut config.ocr_shortcut, "Alt+Shift+O");
+    changed |= normalize_shortcut(&mut config.translate_shortcut, "Alt+Shift+T");
+    changed |= normalize_shortcut(&mut config.snippets_shortcut, "Alt+Shift+B");
+    changed |= normalize_shortcut(&mut config.toggle_sync_shortcut, "Alt+Shift+S");
+    let normalized_send_limit = config
+        .max_send_file_size_mib
+        .clamp(MIN_FILE_SIZE_LIMIT_MIB, MAX_FILE_SIZE_LIMIT_MIB);
+    if config.max_send_file_size_mib != normalized_send_limit {
+        config.max_send_file_size_mib = normalized_send_limit;
+        changed = true;
+    }
+    let normalized_receive_limit = config
+        .max_receive_file_size_mib
+        .clamp(MIN_FILE_SIZE_LIMIT_MIB, MAX_FILE_SIZE_LIMIT_MIB);
+    if config.max_receive_file_size_mib != normalized_receive_limit {
+        config.max_receive_file_size_mib = normalized_receive_limit;
+        changed = true;
+    }
     if config.notify_file_transfer {
         config.notify_file_transfer = false;
         changed = true;
@@ -96,6 +119,16 @@ pub(crate) fn normalize_config(config: &mut AppConfig) -> bool {
     changed
 }
 
+fn normalize_shortcut(shortcut: &mut String, default: &str) -> bool {
+    let normalized = shortcut.trim();
+    let next = if normalized.is_empty() { default } else { normalized };
+    if next == shortcut {
+        return false;
+    }
+    *shortcut = next.to_string();
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::ensure_config_device_id;
@@ -105,15 +138,29 @@ mod tests {
     fn default_config_matches_mvp_scope() {
         let config = AppConfig::default();
 
-        assert_eq!(config.config_version, 6);
+        assert_eq!(config.config_version, 8);
         assert_eq!(config.port, 8765);
         assert_eq!(config.theme, crate::models::AppTheme::Win11Dark);
         assert_eq!(config.close_action, crate::models::CloseAction::Ask);
         assert!(config.auto_sync);
+        assert!(config.quick_panel_shortcut_enabled);
+        assert_eq!(config.quick_panel_shortcut, "Alt+Shift+V");
+        assert!(!config.ocr_shortcut_enabled);
+        assert_eq!(config.ocr_shortcut, "Alt+Shift+O");
+        assert!(!config.translate_shortcut_enabled);
+        assert_eq!(config.translate_shortcut, "Alt+Shift+T");
+        assert!(!config.snippets_shortcut_enabled);
+        assert_eq!(config.snippets_shortcut, "Alt+Shift+B");
+        assert!(!config.toggle_sync_shortcut_enabled);
+        assert_eq!(config.toggle_sync_shortcut, "Alt+Shift+S");
         assert!(config.save_history);
         assert!(config.sync_text);
         assert!(config.sync_image);
         assert!(config.sync_files);
+        assert_eq!(config.max_send_file_size_mib, 2048);
+        assert_eq!(config.max_receive_file_size_mib, 2048);
+        assert!(config.quick_panel_shortcut_enabled);
+        assert_eq!(config.quick_panel_shortcut, "Alt+Shift+V");
         assert!(config.deduplicate_sync_content);
         assert_eq!(config.file_save_dir, None);
         assert!(!config.auto_open_folder_after_save);
@@ -152,6 +199,8 @@ mod tests {
 
         assert_eq!(config.theme, crate::models::AppTheme::Win11Dark);
         assert!(config.deduplicate_sync_content);
+        assert_eq!(config.max_send_file_size_mib, 2048);
+        assert_eq!(config.max_receive_file_size_mib, 2048);
     }
 
     #[test]
@@ -203,7 +252,7 @@ mod tests {
         let mut config: AppConfig = serde_json::from_value(json).unwrap();
 
         assert!(super::migrate_config(&mut config));
-        assert_eq!(config.config_version, 6);
+        assert_eq!(config.config_version, 8);
         assert!(config.sync_image);
         assert!(config.sync_files);
         assert!(config.notification_clipboard_preview);
@@ -214,11 +263,61 @@ mod tests {
         config.notification_clipboard_preview = false;
         config.notify_device_status = false;
         assert!(!super::migrate_config(&mut config));
-        assert_eq!(config.config_version, 6);
+        assert_eq!(config.config_version, 8);
         assert!(!config.sync_image);
         assert!(!config.sync_files);
         assert!(!config.notification_clipboard_preview);
         assert!(!config.notify_device_status);
+    }
+
+    #[test]
+    fn version_six_migration_preserves_existing_sync_choices() {
+        let mut config = AppConfig {
+            config_version: 6,
+            sync_image: false,
+            sync_files: false,
+            notification_clipboard_preview: false,
+            notify_device_status: false,
+            ..AppConfig::default()
+        };
+
+        assert!(super::migrate_config(&mut config));
+        assert_eq!(config.config_version, 8);
+        assert!(!config.sync_image);
+        assert!(!config.sync_files);
+        assert!(!config.notification_clipboard_preview);
+        assert!(!config.notify_device_status);
+    }
+
+    #[test]
+    fn version_seven_migration_preserves_existing_shortcut_choice() {
+        let mut config = AppConfig {
+            config_version: 7,
+            quick_panel_shortcut_enabled: false,
+            quick_panel_shortcut: "Alt+Shift+Q".to_string(),
+            ..AppConfig::default()
+        };
+
+        assert!(super::migrate_config(&mut config));
+        assert_eq!(config.config_version, 8);
+        assert!(!config.quick_panel_shortcut_enabled);
+        assert_eq!(config.quick_panel_shortcut, "Alt+Shift+Q");
+        assert!(!config.ocr_shortcut_enabled);
+        assert!(!config.translate_shortcut_enabled);
+        assert!(!config.snippets_shortcut_enabled);
+        assert!(!config.toggle_sync_shortcut_enabled);
+    }
+
+    #[test]
+    fn normalize_config_restores_blank_quick_panel_shortcut() {
+        let mut config = AppConfig {
+            quick_panel_shortcut: "  ".to_string(),
+            ..AppConfig::default()
+        };
+
+        assert!(super::normalize_config(&mut config));
+        assert_eq!(config.quick_panel_shortcut, "Alt+Shift+V");
+        assert!(!super::normalize_config(&mut config));
     }
 
     #[test]
@@ -234,6 +333,20 @@ mod tests {
         config.file_save_dir = Some(" C:\\Receive ".to_string());
         assert!(super::normalize_config(&mut config));
         assert_eq!(config.file_save_dir.as_deref(), Some("C:\\Receive"));
+    }
+
+    #[test]
+    fn normalize_config_clamps_file_size_limits() {
+        let mut config = AppConfig {
+            max_send_file_size_mib: 50,
+            max_receive_file_size_mib: 4096,
+            ..AppConfig::default()
+        };
+
+        assert!(super::normalize_config(&mut config));
+        assert_eq!(config.max_send_file_size_mib, 100);
+        assert_eq!(config.max_receive_file_size_mib, 2048);
+        assert!(!super::normalize_config(&mut config));
     }
 
     #[test]

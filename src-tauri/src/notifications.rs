@@ -184,13 +184,13 @@ pub fn notify_sync_error(app: &AppHandle, config: &AppConfig, message: &str) {
     );
 }
 
-pub fn notify_test(app: &AppHandle) {
+pub fn notify_test(app: &AppHandle) -> Result<(), String> {
     notify(
         app,
         "CopyShare 测试通知",
         "如果你看到这条消息，桌面右下角通知已生效。",
         SETTINGS_ROUTE,
-    );
+    )
 }
 
 fn notify_if_enabled(
@@ -210,7 +210,7 @@ fn notify_if_enabled(
         return;
     }
 
-    notify(app, title, body, route);
+    let _ = notify(app, title, body, route);
 }
 
 fn clipboard_notification_cooldown_key(_message: &ClipboardMessage) -> &'static str {
@@ -241,15 +241,20 @@ fn load_notification_config(app: &AppHandle) -> AppConfig {
     app_config::load_config(app).unwrap_or_default()
 }
 
-fn notify(app: &AppHandle, title: &str, body: &str, route: &'static str) {
+fn notify(app: &AppHandle, title: &str, body: &str, route: &'static str) -> Result<(), String> {
     let _ = (NAVIGATE_EVENT, route);
 
-    let _ = app
-        .notification()
-        .builder()
-        .title(title)
-        .body(body)
-        .show();
+    notification_result(
+        app.notification()
+            .builder()
+            .title(title)
+            .body(body)
+            .show(),
+    )
+}
+
+fn notification_result<T, E: std::fmt::Display>(result: Result<T, E>) -> Result<(), String> {
+    result.map(|_| ()).map_err(|error| error.to_string())
 }
 
 fn notification_app_id(identifier: &str) -> String {
@@ -350,7 +355,7 @@ mod tests {
     use super::{
         clipboard_notification_body, clipboard_notification_cooldown_key, compact_preview,
         file_summary, mobile_clipboard_notification_body, notification_app_id,
-        notification_response_opens_window,
+        notification_response_opens_window, notification_result,
     };
 
     fn task(files: Vec<FileTransferFile>) -> FileTransferTask {
@@ -393,6 +398,8 @@ mod tests {
             content: content.to_string(),
             content_hash: "hash-a".to_string(),
             timestamp: 1,
+            origin_sequence: None,
+            event_version: None,
         }
     }
 
@@ -424,6 +431,13 @@ mod tests {
     fn notification_app_id_uses_copyshare_identifier_instead_of_powershell_fallback() {
         assert_eq!(notification_app_id("com.copyshare.desktop"), "com.copyshare.desktop");
         assert_eq!(notification_app_id("  "), "com.copyshare.desktop");
+    }
+
+    #[test]
+    fn notification_delivery_error_is_preserved() {
+        let error = notification_result(Err::<(), _>("permission denied")).unwrap_err();
+
+        assert_eq!(error, "permission denied");
     }
 
     #[test]

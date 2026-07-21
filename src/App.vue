@@ -12,6 +12,7 @@ import router from "@/router";
 import { useConfigStore } from "@/stores/config";
 import { useDevicesStore } from "@/stores/devices";
 import { useHistoryStore } from "@/stores/history";
+import { useShortcutStore } from "@/stores/shortcuts";
 import { useStatusStore } from "@/stores/status";
 import { useToastStore } from "@/stores/toasts";
 
@@ -19,6 +20,7 @@ const statusStore = useStatusStore();
 const devicesStore = useDevicesStore();
 const configStore = useConfigStore();
 const historyStore = useHistoryStore();
+const shortcutStore = useShortcutStore();
 const toastStore = useToastStore();
 const route = useRoute();
 const STARTUP_OVERLAY_MIN_MS = 900;
@@ -96,6 +98,11 @@ onMounted(async () => {
       configStore.refresh(),
       historyStore.refresh(),
     ]);
+    const shortcutResult = await shortcutStore.apply(configStore.config);
+    if (!shortcutResult.ok) {
+      console.error("global shortcut registration failed", shortcutResult.error);
+      toastStore.error("快捷键注册失败，请在设置中更换组合键");
+    }
     await Promise.all([
       statusStore.subscribe(),
       devicesStore.subscribe(),
@@ -115,6 +122,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   navigateUnlisten?.();
   navigateUnlisten = undefined;
+  void shortcutStore.dispose();
 });
 </script>
 

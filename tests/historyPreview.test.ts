@@ -91,9 +91,37 @@ assert.equal(
 assert.equal(getClipboardLinkUrl("https://copyshare.example/download"), "https://copyshare.example/download");
 assert.equal(
   getClipboardLinkUrl("See https://copyshare.example/docs now"),
+  null,
+);
+assert.equal(
+  getClipboardLinkUrl("  https://copyshare.example/docs  "),
   "https://copyshare.example/docs",
 );
+assert.equal(
+  getClipboardLinkUrl("[项目文档](https://copyshare.example/docs)"),
+  null,
+);
+assert.equal(
+  getClipboardLinkUrl("https://one.example\nhttps://two.example"),
+  null,
+);
+assert.equal(getClipboardLinkUrl("ftp://copyshare.example/file"), null);
+assert.equal(getClipboardLinkUrl("https://"), null);
 assert.equal(getClipboardLinkUrl("plain clipboard text"), null);
+
+const markdownDocument = [
+  "# CopyShare 项目",
+  "",
+  "这是一个包含链接的 Markdown 文档。",
+  "",
+  "- 文档：https://copyshare.example/docs",
+  "- 仓库：https://copyshare.example/repository",
+  "",
+  "```bash",
+  "npm run build",
+  "```",
+].join("\n");
+assert.equal(getClipboardLinkUrl(markdownDocument), null);
 
 const items = getRecentClipboardItems([
   historyItem({ id: "1", summary: "Summary one", content: "  Full one  ", sourceDevice: "Office-PC" }),
@@ -215,6 +243,9 @@ const apiKeyItem = getRecentClipboardItems([
 const textItem = getRecentClipboardItems([
   historyItem({ id: "text", content: "plain note", summary: "plain note" }),
 ])[0];
+const markdownItem = getRecentClipboardItems([
+  historyItem({ id: "markdown", content: markdownDocument, summary: "# CopyShare 项目" }),
+])[0];
 
 assert.equal(getClipboardDisplayType(linkItem).label, "链接");
 assert.equal(getClipboardDisplayType(imageItem).label, "图片");
@@ -222,9 +253,14 @@ assert.equal(getClipboardDisplayType(fileItem).label, "文件");
 assert.equal(getClipboardDisplayType(videoItem).label, "视频");
 assert.equal(getClipboardDisplayType(apiKeyItem).label, "文本");
 assert.equal(getClipboardDisplayType(textItem).label, "文本");
+assert.equal(getClipboardDisplayType(markdownItem).label, "文本");
 
 assert.deepEqual(
   filterClipboardItems([linkItem, imageItem, fileItem, videoItem, apiKeyItem, textItem], "链接", "").map((item) => item.id),
+  ["link"],
+);
+assert.deepEqual(
+  filterClipboardItems([linkItem, markdownItem, textItem], "链接", "").map((item) => item.id),
   ["link"],
 );
 assert.deepEqual(

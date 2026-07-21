@@ -13,7 +13,14 @@ export type ClipboardFileDownloadActivity = {
 };
 
 export type ClipboardFileDownloadFeedback = {
-  state: "ready" | "downloading" | "completed" | "failed";
+  state:
+    | "ready"
+    | "downloading"
+    | "waiting"
+    | "retrying"
+    | "paused"
+    | "completed"
+    | "failed";
   label: string;
   percent: number;
   active: boolean;
@@ -23,6 +30,7 @@ export type ClipboardFileCardAction =
   | "none"
   | "copy"
   | "download"
+  | "resume"
   | "downloading"
   | "openDownloadFolder"
   | "openSourceLocation"
@@ -91,6 +99,33 @@ export function getClipboardFileDownloadFeedback(
     };
   }
 
+  if (status === "waitingForPeer") {
+    return {
+      state: "waiting",
+      label: `等待发送设备上线 · 已完成 ${percent}%`,
+      percent,
+      active: false,
+    };
+  }
+
+  if (status === "retrying") {
+    return {
+      state: "retrying",
+      label: `正在恢复 · 已完成 ${percent}%`,
+      percent,
+      active: true,
+    };
+  }
+
+  if (status === "paused") {
+    return {
+      state: "paused",
+      label: `继续下载 · 已完成 ${percent}%`,
+      percent,
+      active: false,
+    };
+  }
+
   if (status === "completed") {
     return {
       state: "completed",
@@ -130,8 +165,11 @@ export function getClipboardFileCardAction(
   }
 
   const status = activity?.status ?? item.fileTransferStatus ?? "pending";
-  if (status === "accepted" || status === "transferring") {
+  if (status === "accepted" || status === "transferring" || status === "retrying") {
     return "downloading";
+  }
+  if (status === "waitingForPeer" || status === "paused") {
+    return "resume";
   }
   if (status === "completed") {
     return "openDownloadFolder";

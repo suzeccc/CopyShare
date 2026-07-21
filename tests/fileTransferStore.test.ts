@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 
 import {
   applyFileTransferProgress,
+  fileTransferStatusLabel,
   fileTransferSendDisabled,
   pendingOfferFromTasks,
   upsertFileTransferTask,
@@ -99,3 +100,6 @@ assert.equal(progressed[0].transferredBytes, 40);
 assert.equal(progressed[0].files[0].transferredBytes, 40);
 assert.equal(progressed[0].files[0].status, "transferring");
 assert.equal(progressed[0].status, "transferring");
+assert.equal(fileTransferStatusLabel("waitingForPeer"), "等待发送设备上线");
+assert.equal(fileTransferStatusLabel("retrying"), "正在恢复");
+assert.equal(fileTransferStatusLabel("paused"), "传输已暂停");

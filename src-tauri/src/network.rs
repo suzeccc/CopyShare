@@ -359,6 +359,8 @@ mod tests {
             content: "hello".to_string(),
             content_hash: "hash".to_string(),
             timestamp: 1,
+            origin_sequence: None,
+            event_version: None,
         };
 
         let encoded = encode_wire_message(&message.clone().into()).unwrap();
