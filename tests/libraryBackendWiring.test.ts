@@ -41,7 +41,7 @@ test("library backend state and commands are registered", () => {
 test("library mutations surface prune failures after synchronizing state", () => {
   const commands = readFileSync("src-tauri/src/commands.rs", "utf8");
   const mutation = commands.match(
-    /async fn mutate_library[\s\S]*?\n}\n\n#\[tauri::command\]/,
+    /async fn mutate_library[\s\S]*?\r?\n}\r?\n\r?\n#\[tauri::command\]/,
   )?.[0] ?? "";
 
   assert.match(
@@ -58,7 +58,7 @@ test("library mutations surface prune failures after synchronizing state", () =>
 test("library file-copy cache creation is serialized with mutations", () => {
   const commands = readFileSync("src-tauri/src/commands.rs", "utf8");
   const copyCommand = commands.match(
-    /pub async fn copy_library_item[\s\S]*?\n}\n\n#\[tauri::command\]/,
+    /pub async fn copy_library_item[\s\S]*?\r?\n}\r?\n\r?\n#\[tauri::command\]/,
   )?.[0] ?? "";
 
   assert.match(copyCommand, /let _guard = state\.lock_library_mutation\(\)\.await;/);

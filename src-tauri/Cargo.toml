@@ -1,6 +1,6 @@
 [package]
 name = "copyshare"
-version = "3.4.0"
+version = "3.3.0"
 description = "LAN clipboard sharing desktop app"
 authors = ["CopyShare"]
 edition = "2021"
@@ -21,7 +21,7 @@ chrono = { version = "0.4", features = ["serde"] }
 base64 = "0.22"
 dirs = "6"
 futures-util = "0.3"
-get_if_addrs = "0.5"
+if-addrs = "0.15"
 image = { version = "0.25", default-features = false, features = ["bmp", "gif", "jpeg", "png", "webp"] }
 local-ip-address = "0.6"
 notify-rust = "4.18"

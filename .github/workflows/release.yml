@@ -1,15 +1,15 @@
 name: Release
 
 on:
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
       version:
         description: Release tag to build
         required: true
-        default: v3.4.0
-  push:
-    tags:
-      - "v*"
+        default: v3.3.0
 
 permissions:
   contents: write

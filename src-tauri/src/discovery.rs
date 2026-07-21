@@ -6,7 +6,7 @@ use std::{
 };
 
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
-use get_if_addrs::IfAddr;
+use if_addrs::IfAddr;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 use tokio::{net::UdpSocket, sync::Mutex};
@@ -633,7 +633,7 @@ fn parse_scan_cidr(input: &str) -> Option<(Ipv4Addr, u8)> {
 }
 
 fn scan_adapters() -> Vec<(String, Ipv4Addr, Ipv4Addr)> {
-    get_if_addrs::get_if_addrs()
+    if_addrs::get_if_addrs()
         .unwrap_or_default()
         .into_iter()
         .filter_map(|iface| match iface.addr {
