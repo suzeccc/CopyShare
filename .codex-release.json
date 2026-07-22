@@ -63,6 +63,7 @@
   },
   "prepare": {
     "parallel": true,
+    "localOutputDirectory": "output",
     "commands": [
       {
         "name": "Node tests",
@@ -76,7 +77,8 @@
     "artifacts": [
       {
         "source": "src-tauri/target/release/CopyShare.exe",
-        "destination": "output/{tag}-portable/CopyShare.exe",
+        "destination": "output/CopyShare.exe",
+        "localName": "CopyShare.exe",
         "verifyWindowsVersion": true,
         "sha256": true
       }
