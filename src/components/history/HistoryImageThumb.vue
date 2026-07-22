@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Image as ImageIcon } from "lucide-vue-next";
+import ImageIcon from "lucide-vue-next/dist/esm/icons/image.js";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 
 import { getHistoryImageThumbnail } from "@/lib/tauri";

@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { Minus, Square, X } from "lucide-vue-next";
+import Minus from "lucide-vue-next/dist/esm/icons/minus.js";
+import Square from "lucide-vue-next/dist/esm/icons/square.js";
+import X from "lucide-vue-next/dist/esm/icons/x.js";
 import { ref } from "vue";
 
 import Button from "@/components/ui/Button.vue";

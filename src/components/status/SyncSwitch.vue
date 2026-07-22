@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { Pause, Play } from "lucide-vue-next";
+import Pause from "lucide-vue-next/dist/esm/icons/pause.js";
+import Play from "lucide-vue-next/dist/esm/icons/play.js";
 
 import Button from "@/components/ui/Button.vue";
 

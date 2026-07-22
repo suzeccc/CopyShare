@@ -1,5 +1,10 @@
 <script setup lang="ts">
-import { Check, Copy, Image as ImageIcon, Loader2, ScanText, Trash2 } from "lucide-vue-next";
+import Check from "lucide-vue-next/dist/esm/icons/check.js";
+import Copy from "lucide-vue-next/dist/esm/icons/copy.js";
+import ImageIcon from "lucide-vue-next/dist/esm/icons/image.js";
+import Loader2 from "lucide-vue-next/dist/esm/icons/loader-circle.js";
+import ScanText from "lucide-vue-next/dist/esm/icons/scan-text.js";
+import Trash2 from "lucide-vue-next/dist/esm/icons/trash-2.js";
 import { storeToRefs } from "pinia";
 import { computed, ref } from "vue";
 

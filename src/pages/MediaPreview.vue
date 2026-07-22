@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useRoute } from "vue-router";
-import { ImageIcon, Minus, PlaySquare, X } from "lucide-vue-next";
+import ImageIcon from "lucide-vue-next/dist/esm/icons/image.js";
+import Minus from "lucide-vue-next/dist/esm/icons/minus.js";
+import PlaySquare from "lucide-vue-next/dist/esm/icons/square-play.js";
+import X from "lucide-vue-next/dist/esm/icons/x.js";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import HistoryImageThumb from "@/components/history/HistoryImageThumb.vue";

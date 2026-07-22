@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ArrowDownLeft, ArrowUpRight } from "lucide-vue-next";
+import ArrowDownLeft from "lucide-vue-next/dist/esm/icons/arrow-down-left.js";
+import ArrowUpRight from "lucide-vue-next/dist/esm/icons/arrow-up-right.js";
 import { computed } from "vue";
 
 import { formatTime } from "@/lib/format";

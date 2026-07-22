@@ -1,5 +1,12 @@
 <script setup lang="ts">
-import { Activity, Clipboard, Gauge, LayoutDashboard, Minus, MoreHorizontal, Wifi, X } from "lucide-vue-next";
+import Activity from "lucide-vue-next/dist/esm/icons/activity.js";
+import Clipboard from "lucide-vue-next/dist/esm/icons/clipboard.js";
+import Gauge from "lucide-vue-next/dist/esm/icons/gauge.js";
+import LayoutDashboard from "lucide-vue-next/dist/esm/icons/layout-dashboard.js";
+import Minus from "lucide-vue-next/dist/esm/icons/minus.js";
+import MoreHorizontal from "lucide-vue-next/dist/esm/icons/ellipsis.js";
+import Wifi from "lucide-vue-next/dist/esm/icons/wifi.js";
+import X from "lucide-vue-next/dist/esm/icons/x.js";
 import { computed, ref } from "vue";
 
 import ClipboardFileDownloadStatus from "@/components/history/ClipboardFileDownloadStatus.vue";

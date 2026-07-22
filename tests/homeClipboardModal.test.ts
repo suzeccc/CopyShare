@@ -21,6 +21,7 @@ for (const category of ["全部", "文本", "图片", "链接", "文件"]) {
 assert.doesNotMatch(historyPreview, /"API Key"/);
 assert.match(clipboardPage, /allClipboardItems\s*=\s*computed/);
 assert.match(clipboardPage, /getRecentClipboardItems\(historyStore\.items,\s*historyStore\.items\.length\)/);
+assert.match(clipboardPage, /allClipboardItems\.value\.slice\(0, CLIPBOARD_PREVIEW_LIMIT\)/);
 assert.match(clipboardPage, /filteredRecentSyncItems/);
 assert.match(clipboardPage, /filteredAllClipboardItems/);
 assert.match(clipboardPage, /filterClipboardItems\(\s*recentSyncItems\.value,\s*activeClipboardCategory\.value,\s*""\s*\)/);

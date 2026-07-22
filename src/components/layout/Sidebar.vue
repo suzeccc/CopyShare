@@ -1,15 +1,13 @@
 <script setup lang="ts">
-import {
-  Clipboard,
-  History,
-  Home,
-  Info,
-  Languages,
-  MessageSquareText,
-  MonitorSmartphone,
-  ScanText,
-  Settings,
-} from "lucide-vue-next";
+import Clipboard from "lucide-vue-next/dist/esm/icons/clipboard.js";
+import History from "lucide-vue-next/dist/esm/icons/history.js";
+import Home from "lucide-vue-next/dist/esm/icons/house.js";
+import Info from "lucide-vue-next/dist/esm/icons/info.js";
+import Languages from "lucide-vue-next/dist/esm/icons/languages.js";
+import MessageSquareText from "lucide-vue-next/dist/esm/icons/message-square-text.js";
+import MonitorSmartphone from "lucide-vue-next/dist/esm/icons/monitor-smartphone.js";
+import ScanText from "lucide-vue-next/dist/esm/icons/scan-text.js";
+import Settings from "lucide-vue-next/dist/esm/icons/settings.js";
 
 const primaryItems = [
   { label: "总览", path: "/", icon: Home },

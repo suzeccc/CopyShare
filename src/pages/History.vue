@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Trash2 } from "lucide-vue-next";
+import Trash2 from "lucide-vue-next/dist/esm/icons/trash-2.js";
 
 import HistoryItem from "@/components/history/HistoryItem.vue";
 import Button from "@/components/ui/Button.vue";

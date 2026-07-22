@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import { Clipboard, MoreHorizontal, RefreshCw, X } from "lucide-vue-next";
+import Clipboard from "lucide-vue-next/dist/esm/icons/clipboard.js";
+import MoreHorizontal from "lucide-vue-next/dist/esm/icons/ellipsis.js";
+import RefreshCw from "lucide-vue-next/dist/esm/icons/refresh-cw.js";
+import X from "lucide-vue-next/dist/esm/icons/x.js";
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 

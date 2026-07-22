@@ -18,7 +18,7 @@ test("library page, navigation, cards and dialogs expose the complete phase-one 
   const snippet = readFileSync(paths.snippet, "utf8");
   const metadata = readFileSync(paths.metadata, "utf8");
 
-  assert.match(router, /import Library from "@\/pages\/Library\.vue"/);
+  assert.match(router, /const Library = \(\) => import\("@\/pages\/Library\.vue"\)/);
   assert.match(router, /path: "\/library", name: "library", component: Library/);
   assert.match(sidebar, /MessageSquareText/);
   assert.match(sidebar, /label: "常用片段", path: "\/library", icon: MessageSquareText/);

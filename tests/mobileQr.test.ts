@@ -6,7 +6,7 @@ const sidebar = readFileSync("src/components/layout/Sidebar.vue", "utf8");
 const tauri = readFileSync("src/lib/tauri.ts", "utf8");
 const libRs = readFileSync("src-tauri/src/lib.rs", "utf8");
 
-assert.match(router, /import MobileQr from "@\/pages\/MobileQr\.vue"/);
+assert.match(router, /const MobileQr = \(\) => import\("@\/pages\/MobileQr\.vue"\)/);
 assert.match(router, /path: "\/mobile"/);
 assert.match(router, /name: "mobile"/);
 

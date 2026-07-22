@@ -1,17 +1,18 @@
 import { createRouter, createWebHashHistory } from "vue-router";
 
-import About from "@/pages/About.vue";
-import Clipboard from "@/pages/Clipboard.vue";
-import Devices from "@/pages/Devices.vue";
-import FloatingClipboardHistory from "@/pages/FloatingClipboardHistory.vue";
 import Home from "@/pages/Home.vue";
-import Library from "@/pages/Library.vue";
-import Logs from "@/pages/Logs.vue";
-import MediaPreview from "@/pages/MediaPreview.vue";
-import MobileQr from "@/pages/MobileQr.vue";
-import Ocr from "@/pages/Ocr.vue";
-import Settings from "@/pages/Settings.vue";
-import Translate from "@/pages/Translate.vue";
+
+const About = () => import("@/pages/About.vue");
+const Clipboard = () => import("@/pages/Clipboard.vue");
+const Devices = () => import("@/pages/Devices.vue");
+const FloatingClipboardHistory = () => import("@/pages/FloatingClipboardHistory.vue");
+const Library = () => import("@/pages/Library.vue");
+const Logs = () => import("@/pages/Logs.vue");
+const MediaPreview = () => import("@/pages/MediaPreview.vue");
+const MobileQr = () => import("@/pages/MobileQr.vue");
+const Ocr = () => import("@/pages/Ocr.vue");
+const Settings = () => import("@/pages/Settings.vue");
+const Translate = () => import("@/pages/Translate.vue");
 
 const router = createRouter({
   history: createWebHashHistory(),

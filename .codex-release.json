@@ -3,7 +3,7 @@
   "projectName": "CopyShare",
   "branch": "main",
   "remote": "origin",
-  "remoteUrlPattern": "github\\.com[:/]suzeccc/Copy-share(?:\\.git)?$",
+  "remoteUrlPattern": "github\\.com[:/]suzeccc/CopyShare(?:\\.git)?$",
   "tagPrefix": "v",
   "version": {
     "read": {

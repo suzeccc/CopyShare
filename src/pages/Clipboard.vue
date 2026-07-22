@@ -1,15 +1,13 @@
 <script setup lang="ts">
-import {
-  Clipboard as ClipboardIcon,
-  File,
-  Image as ImageIcon,
-  Link2,
-  Pin,
-  Search,
-  Star,
-  Video,
-  X,
-} from "lucide-vue-next";
+import ClipboardIcon from "lucide-vue-next/dist/esm/icons/clipboard.js";
+import File from "lucide-vue-next/dist/esm/icons/file.js";
+import ImageIcon from "lucide-vue-next/dist/esm/icons/image.js";
+import Link2 from "lucide-vue-next/dist/esm/icons/link-2.js";
+import Pin from "lucide-vue-next/dist/esm/icons/pin.js";
+import Search from "lucide-vue-next/dist/esm/icons/search.js";
+import Star from "lucide-vue-next/dist/esm/icons/star.js";
+import Video from "lucide-vue-next/dist/esm/icons/video.js";
+import X from "lucide-vue-next/dist/esm/icons/x.js";
 import { computed, onMounted, onUnmounted, ref } from "vue";
 
 import Button from "@/components/ui/Button.vue";
@@ -79,9 +77,11 @@ const previewImageTransform = computed(() => ({
   transform: `translate(${previewImageOffset.x.value}px, ${previewImageOffset.y.value}px) scale(${previewImageScale.value})`,
 }));
 
-const recentSyncItems = computed(() => getRecentClipboardItems(historyStore.items));
 const allClipboardItems = computed(() =>
   getRecentClipboardItems(historyStore.items, historyStore.items.length),
+);
+const recentSyncItems = computed(() =>
+  allClipboardItems.value.slice(0, CLIPBOARD_PREVIEW_LIMIT),
 );
 const filteredRecentSyncItems = computed(() =>
   filterClipboardItems(recentSyncItems.value, activeClipboardCategory.value, ""),

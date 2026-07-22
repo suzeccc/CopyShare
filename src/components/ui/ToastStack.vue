@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { CircleAlert, CircleCheck, Info } from "lucide-vue-next";
+import CircleAlert from "lucide-vue-next/dist/esm/icons/circle-alert.js";
+import CircleCheck from "lucide-vue-next/dist/esm/icons/circle-check.js";
+import Info from "lucide-vue-next/dist/esm/icons/info.js";
 
 import { useToastStore } from "@/stores/toasts";
 import type { ToastKind } from "@/lib/toasts";

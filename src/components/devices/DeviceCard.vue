@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { Monitor, RefreshCw, ShieldQuestion, ShieldX, Unplug } from "lucide-vue-next";
+import Monitor from "lucide-vue-next/dist/esm/icons/monitor.js";
+import RefreshCw from "lucide-vue-next/dist/esm/icons/refresh-cw.js";
+import ShieldQuestion from "lucide-vue-next/dist/esm/icons/shield-question-mark.js";
+import ShieldX from "lucide-vue-next/dist/esm/icons/shield-x.js";
+import Unplug from "lucide-vue-next/dist/esm/icons/unplug.js";
 
 import Button from "@/components/ui/Button.vue";
 import { deviceAddress, formatTime } from "@/lib/format";

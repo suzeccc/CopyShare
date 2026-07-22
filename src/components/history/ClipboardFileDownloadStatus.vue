@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import { CircleAlert, CircleCheck, Download, LoaderCircle } from "lucide-vue-next";
+import CircleAlert from "lucide-vue-next/dist/esm/icons/circle-alert.js";
+import CircleCheck from "lucide-vue-next/dist/esm/icons/circle-check.js";
+import Download from "lucide-vue-next/dist/esm/icons/download.js";
+import LoaderCircle from "lucide-vue-next/dist/esm/icons/loader-circle.js";
 import { computed } from "vue";
 
 import { getClipboardFileDownloadFeedback } from "@/lib/clipboardFileDownload";

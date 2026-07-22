@@ -16,7 +16,7 @@ const cargoToml = readFileSync("src-tauri/Cargo.toml", "utf8");
 assert.equal(existsSync(pagePath), true);
 const page = readFileSync(pagePath, "utf8");
 
-assert.match(router, /import Translate from "@\/pages\/Translate\.vue"/);
+assert.match(router, /const Translate = \(\) => import\("@\/pages\/Translate\.vue"\)/);
 assert.match(router, /path: "\/translate"/);
 assert.match(router, /name: "translate"/);
 

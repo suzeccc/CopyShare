@@ -1,16 +1,14 @@
 <script setup lang="ts">
-import {
-  Copy,
-  FileText,
-  Files,
-  GripVertical,
-  Image as ImageIcon,
-  MessageSquareText,
-  Pencil,
-  Pin,
-  PinOff,
-  Trash2,
-} from "lucide-vue-next";
+import Copy from "lucide-vue-next/dist/esm/icons/copy.js";
+import FileText from "lucide-vue-next/dist/esm/icons/file-text.js";
+import Files from "lucide-vue-next/dist/esm/icons/files.js";
+import GripVertical from "lucide-vue-next/dist/esm/icons/grip-vertical.js";
+import ImageIcon from "lucide-vue-next/dist/esm/icons/image.js";
+import MessageSquareText from "lucide-vue-next/dist/esm/icons/message-square-text.js";
+import Pencil from "lucide-vue-next/dist/esm/icons/pencil.js";
+import Pin from "lucide-vue-next/dist/esm/icons/pin.js";
+import PinOff from "lucide-vue-next/dist/esm/icons/pin-off.js";
+import Trash2 from "lucide-vue-next/dist/esm/icons/trash-2.js";
 import { computed, ref, watch } from "vue";
 
 import type { LibraryLayout } from "@/lib/libraryLayout";

@@ -8,7 +8,7 @@ const sidebar = readFileSync("src/components/layout/Sidebar.vue", "utf8");
 assert.equal(existsSync(pagePath), true);
 const page = readFileSync(pagePath, "utf8");
 
-assert.match(router, /import Ocr from "@\/pages\/Ocr\.vue"/);
+assert.match(router, /const Ocr = \(\) => import\("@\/pages\/Ocr\.vue"\)/);
 assert.match(router, /path: "\/ocr", name: "ocr", component: Ocr/);
 assert.match(sidebar, /ScanText/);
 assert.match(sidebar, /label: "图转文字", path: "\/ocr", icon: ScanText/);

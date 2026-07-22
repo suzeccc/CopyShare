@@ -10,7 +10,7 @@ assert.match(sidebar, /label: "关于"/);
 assert.match(sidebar, /path: "\/about"/);
 assert.match(sidebar, /Info/);
 
-assert.match(router, /import About from "@\/pages\/About\.vue"/);
+assert.match(router, /const About = \(\) => import\("@\/pages\/About\.vue"\)/);
 assert.match(router, /path: "\/about"/);
 assert.match(router, /name: "about"/);
 

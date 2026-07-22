@@ -1,14 +1,12 @@
 <script setup lang="ts">
-import {
-  Bookmark as Bookmarks,
-  Filter,
-  LayoutGrid,
-  List,
-  MessageSquareText,
-  Plus,
-  Search,
-  Sparkles,
-} from "lucide-vue-next";
+import Bookmarks from "lucide-vue-next/dist/esm/icons/bookmark.js";
+import Filter from "lucide-vue-next/dist/esm/icons/funnel.js";
+import LayoutGrid from "lucide-vue-next/dist/esm/icons/layout-grid.js";
+import List from "lucide-vue-next/dist/esm/icons/list.js";
+import MessageSquareText from "lucide-vue-next/dist/esm/icons/message-square-text.js";
+import Plus from "lucide-vue-next/dist/esm/icons/plus.js";
+import Search from "lucide-vue-next/dist/esm/icons/search.js";
+import Sparkles from "lucide-vue-next/dist/esm/icons/sparkles.js";
 import { storeToRefs } from "pinia";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 

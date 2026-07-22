@@ -28,6 +28,11 @@ export const CLIPBOARD_MORE_TEXT_LIMIT = 80;
 export const CLIPBOARD_MORE_FILE_NAME_LIMIT = 32;
 export const CLIPBOARD_CATEGORIES = ["全部", "文本", "图片", "视频", "链接", "文件"] as const;
 
+const FILE_SIZE_SUFFIX_PATTERN = /\s+\d+(?:\.\d+)?\s*(?:B|KB|MB|GB|TB)$/i;
+const FILE_SUMMARY_PATTERN = /^(.*?)\s+(\d+(?:\.\d+)?\s*(?:B|KB|MB|GB|TB))$/i;
+const HTTP_URL_PATTERN = /https?:\/\/[^\s]+/i;
+const VIDEO_FILE_PATTERN = /\.(mp4|mov|mkv|avi|webm|m4v|wmv)$/i;
+
 export type ClipboardCategory = (typeof CLIPBOARD_CATEGORIES)[number];
 
 export type ClipboardDisplayType = {
@@ -53,12 +58,12 @@ function previewText(item: HistoryItem): string {
 }
 
 export function stripSizeSuffix(text: string): string {
-  return text.replace(/\s+\d+(?:\.\d+)?\s*(?:B|KB|MB|GB|TB)$/i, "");
+  return text.replace(FILE_SIZE_SUFFIX_PATTERN, "");
 }
 
 export function splitClipboardFileSummary(text: string): ClipboardFileSummary {
   const normalized = text.trim();
-  const match = normalized.match(/^(.*?)\s+(\d+(?:\.\d+)?\s*(?:B|KB|MB|GB|TB))$/i);
+  const match = normalized.match(FILE_SUMMARY_PATTERN);
   if (!match) {
     return { name: normalized, size: null };
   }
@@ -69,7 +74,7 @@ export function splitClipboardFileSummary(text: string): ClipboardFileSummary {
 }
 
 export function getClipboardLinkUrl(text: string): string | null {
-  return text.match(/https?:\/\/[^\s]+/i)?.[0] ?? null;
+  return text.match(HTTP_URL_PATTERN)?.[0] ?? null;
 }
 
 export function shouldShowClipboardItemMore(
@@ -93,7 +98,7 @@ export function isClipboardVideoFile(item: Pick<ClipboardPreviewItem, "text" | "
   if (item.contentType !== "fileList") {
     return false;
   }
-  return /\.(mp4|mov|mkv|avi|webm|m4v|wmv)$/i.test(splitClipboardFileSummary(item.text).name);
+  return VIDEO_FILE_PATTERN.test(splitClipboardFileSummary(item.text).name);
 }
 
 function syncStatus(item: Pick<HistoryItem, "syncStatus">): HistorySyncStatus {

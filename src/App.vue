@@ -22,6 +22,14 @@ const historyStore = useHistoryStore();
 const toastStore = useToastStore();
 const route = useRoute();
 const STARTUP_OVERLAY_MIN_MS = 900;
+const ALLOWED_NAVIGATION_ROUTES = new Set([
+  "/",
+  "/devices",
+  "/mobile",
+  "/logs",
+  "/settings",
+  "/about",
+]);
 const startupUpdate = ref<StartupUpdatePrompt | null>(null);
 const isMediaPreviewRoute = computed(() => isUtilityWindowRoute(route.path) || isUtilityWindowStartupBypassed());
 const startupVisible = ref(!isUtilityWindowStartupBypassed());
@@ -43,8 +51,7 @@ function wait(ms: number) {
 }
 
 function handlePageNavigation(route: string) {
-  const allowedRoutes = new Set(["/", "/devices", "/mobile", "/logs", "/settings", "/about"]);
-  if (!allowedRoutes.has(route)) {
+  if (!ALLOWED_NAVIGATION_ROUTES.has(route)) {
     return;
   }
 

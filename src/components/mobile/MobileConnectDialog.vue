@@ -1,16 +1,14 @@
 <script setup lang="ts">
-import QRCode from "qrcode";
-import {
-  Copy,
-  Monitor,
-  QrCode,
-  RefreshCw,
-  Smartphone,
-  X,
-} from "lucide-vue-next";
+import Copy from "lucide-vue-next/dist/esm/icons/copy.js";
+import Monitor from "lucide-vue-next/dist/esm/icons/monitor.js";
+import QrCode from "lucide-vue-next/dist/esm/icons/qr-code.js";
+import RefreshCw from "lucide-vue-next/dist/esm/icons/refresh-cw.js";
+import Smartphone from "lucide-vue-next/dist/esm/icons/smartphone.js";
+import X from "lucide-vue-next/dist/esm/icons/x.js";
 import { computed, onBeforeUnmount, watch, ref } from "vue";
 
 import Button from "@/components/ui/Button.vue";
+import { createMobileQrCodeDataUrl } from "@/lib/qrCode";
 import { useMobileStore } from "@/stores/mobile";
 import { useToastStore } from "@/stores/toasts";
 import type { MobileSessionPhase } from "@/types/mobile";
@@ -64,13 +62,7 @@ onBeforeUnmount(() => {
 });
 
 async function renderQr(url: string | undefined) {
-  qr.value = url
-    ? await QRCode.toDataURL(url, {
-        margin: 1,
-        width: 232,
-        color: { dark: "#020617", light: "#ffffff" },
-      })
-    : "";
+  qr.value = await createMobileQrCodeDataUrl(url);
 }
 
 function ensurePolling() {

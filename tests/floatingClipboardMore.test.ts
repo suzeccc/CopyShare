@@ -36,9 +36,10 @@ assert.match(floatingPanel, /data-floating-clipboard-full-content/);
 assert.doesNotMatch(floatingPanel, /showClipboardHistoryModal/);
 assert.doesNotMatch(floatingPanel, /data-floating-clipboard-modal/);
 
-assert.match(appShell, /const clipboardItems = computed\(\(\) =>\s*getFloatingClipboardItems\(systemClipboardItems\.value, historyStore\.items\),\s*\)/);
+assert.match(appShell, /const clipboardItems = computed\(\(\) =>\s*clipboardHistoryItems\.value\.slice\(0, FLOATING_CLIPBOARD_PREVIEW_LIMIT\),\s*\)/);
 assert.doesNotMatch(appShell, /FLOATING_CLIPBOARD_MORE_LIMIT/);
 assert.match(appShell, /FLOATING_CLIPBOARD_HISTORY_LIMIT/);
+assert.match(appShell, /FLOATING_CLIPBOARD_PREVIEW_LIMIT/);
 assert.match(appShell, /const clipboardHistoryItems = computed\(\(\) =>\s*getFloatingClipboardItems\(\s*systemClipboardItems\.value,\s*historyStore\.items,\s*FLOATING_CLIPBOARD_HISTORY_LIMIT,\s*\),\s*\)/);
 assert.match(appShell, /updateFloatingClipboardHistoryWindow/);
 assert.match(appShell, /watch\(\s*clipboardHistoryItems,/);

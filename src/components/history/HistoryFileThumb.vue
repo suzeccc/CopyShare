@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Video } from "lucide-vue-next";
+import Video from "lucide-vue-next/dist/esm/icons/video.js";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 
 import { getHistoryFileThumbnail } from "@/lib/tauri";

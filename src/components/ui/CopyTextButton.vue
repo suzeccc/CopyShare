@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import { Check, Copy, LoaderCircle, TriangleAlert } from "lucide-vue-next";
+import Check from "lucide-vue-next/dist/esm/icons/check.js";
+import Copy from "lucide-vue-next/dist/esm/icons/copy.js";
+import LoaderCircle from "lucide-vue-next/dist/esm/icons/loader-circle.js";
+import TriangleAlert from "lucide-vue-next/dist/esm/icons/triangle-alert.js";
 import { computed, onBeforeUnmount, ref } from "vue";
 
 import { copyTextToClipboard, getCopyableText, type CopyTextResult } from "@/lib/clipboard";

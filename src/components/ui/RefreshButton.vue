@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { RefreshCw } from "lucide-vue-next";
+import RefreshCw from "lucide-vue-next/dist/esm/icons/refresh-cw.js";
 import { computed, onBeforeUnmount, ref } from "vue";
 
 import Button from "@/components/ui/Button.vue";

@@ -1,5 +1,10 @@
 <script setup lang="ts">
-import { FileText, Folder, Image as ImageIcon, Monitor, Network, Settings } from "lucide-vue-next";
+import FileText from "lucide-vue-next/dist/esm/icons/file-text.js";
+import Folder from "lucide-vue-next/dist/esm/icons/folder.js";
+import ImageIcon from "lucide-vue-next/dist/esm/icons/image.js";
+import Monitor from "lucide-vue-next/dist/esm/icons/monitor.js";
+import Network from "lucide-vue-next/dist/esm/icons/network.js";
+import Settings from "lucide-vue-next/dist/esm/icons/settings.js";
 import { computed } from "vue";
 import { RouterLink } from "vue-router";
 

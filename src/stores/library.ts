@@ -57,6 +57,15 @@ export const useLibraryStore = defineStore("library", {
       return [...new Set(state.items.flatMap((item) => item.tags))]
         .sort((left, right) => left.localeCompare(right, "zh-CN"));
     },
+    savedItemsByHistoryId(state): ReadonlyMap<string, LibraryItem> {
+      const savedItems = new Map<string, LibraryItem>();
+      for (const item of state.items) {
+        if (item.role === "saved" && item.sourceHistoryId !== null) {
+          savedItems.set(item.sourceHistoryId, item);
+        }
+      }
+      return savedItems;
+    },
   },
   actions: {
     applySnapshot(snapshot: LibrarySnapshot) {
@@ -76,9 +85,7 @@ export const useLibraryStore = defineStore("library", {
       return this.busyItemIds.has(id);
     },
     savedItemForHistory(historyId: string) {
-      return this.items.find((item) =>
-        item.role === "saved"
-        && item.sourceHistoryId === historyId);
+      return this.savedItemsByHistoryId.get(historyId);
     },
     isHistoryItemSaved(historyId: string) {
       return Boolean(this.savedItemForHistory(historyId));

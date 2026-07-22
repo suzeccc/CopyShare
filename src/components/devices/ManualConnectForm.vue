@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { Link, List } from "lucide-vue-next";
+import Link from "lucide-vue-next/dist/esm/icons/link.js";
+import List from "lucide-vue-next/dist/esm/icons/list.js";
 import { ref } from "vue";
 
 import Button from "@/components/ui/Button.vue";

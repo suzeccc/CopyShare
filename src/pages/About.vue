@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import { ExternalLink, Github, RefreshCw, UserRound } from "lucide-vue-next";
+import ExternalLink from "lucide-vue-next/dist/esm/icons/external-link.js";
+import Github from "lucide-vue-next/dist/esm/icons/github.js";
+import RefreshCw from "lucide-vue-next/dist/esm/icons/refresh-cw.js";
+import UserRound from "lucide-vue-next/dist/esm/icons/user-round.js";
 import { ref } from "vue";
 
 import Button from "@/components/ui/Button.vue";

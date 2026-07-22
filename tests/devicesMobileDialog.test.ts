@@ -32,7 +32,7 @@ assert.match(dialog, /复制链接/);
 assert.match(dialog, /结束会话/);
 assert.match(dialog, /defineModel<boolean>/);
 assert.match(dialog, /useMobileStore/);
-assert.match(dialog, /QRCode/);
+assert.match(dialog, /createMobileQrCodeDataUrl/);
 assert.match(dialog, /@click\.self="closeDialog"/);
 assert.match(dialog, /Monitor/);
 assert.match(dialog, /Smartphone/);

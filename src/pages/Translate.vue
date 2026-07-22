@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import { Check, Copy, Languages, Loader2 } from "lucide-vue-next";
+import Check from "lucide-vue-next/dist/esm/icons/check.js";
+import Copy from "lucide-vue-next/dist/esm/icons/copy.js";
+import Languages from "lucide-vue-next/dist/esm/icons/languages.js";
+import Loader2 from "lucide-vue-next/dist/esm/icons/loader-circle.js";
 import { storeToRefs } from "pinia";
 import { computed, ref } from "vue";
 

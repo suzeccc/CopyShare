@@ -32,7 +32,7 @@ assert.doesNotMatch(page, /15 分钟/);
 assert.doesNotMatch(page, /一次性 token/);
 assert.doesNotMatch(page, /countdownPercent/);
 assert.doesNotMatch(page, /linear-gradient|radial-gradient/);
-assert.match(page, /QRCode/);
+assert.match(page, /createMobileQrCodeDataUrl/);
 assert.match(page, /data-mobile-session-card/);
 assert.match(page, /data-mobile-layout="qr-left-content-right"/);
 assert.match(page, /data-mobile-qr-rail/);

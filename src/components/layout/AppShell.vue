@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { useRoute } from "vue-router";
-import { ShieldCheck, ShieldQuestion, ShieldX, WifiOff, X } from "lucide-vue-next";
+import ShieldCheck from "lucide-vue-next/dist/esm/icons/shield-check.js";
+import ShieldQuestion from "lucide-vue-next/dist/esm/icons/shield-question-mark.js";
+import ShieldX from "lucide-vue-next/dist/esm/icons/shield-x.js";
+import WifiOff from "lucide-vue-next/dist/esm/icons/wifi-off.js";
+import X from "lucide-vue-next/dist/esm/icons/x.js";
 
 import Button from "@/components/ui/Button.vue";
 import FloatingPanel from "@/components/layout/FloatingPanel.vue";
@@ -11,6 +15,7 @@ import WindowTitleBar from "@/components/layout/WindowTitleBar.vue";
 import { deviceAddress } from "@/lib/format";
 import {
   FLOATING_CLIPBOARD_HISTORY_LIMIT,
+  FLOATING_CLIPBOARD_PREVIEW_LIMIT,
   getFloatingClipboardItems,
   type ClipboardPreviewItem,
 } from "@/lib/historyPreview";
@@ -40,15 +45,15 @@ const systemClipboardItems = ref<ClipboardPreviewItem[]>([]);
 const mainScrollRef = ref<HTMLElement | null>(null);
 let clipboardHistoryTimer: number | undefined;
 
-const clipboardItems = computed(() =>
-  getFloatingClipboardItems(systemClipboardItems.value, historyStore.items),
-);
 const clipboardHistoryItems = computed(() =>
   getFloatingClipboardItems(
     systemClipboardItems.value,
     historyStore.items,
     FLOATING_CLIPBOARD_HISTORY_LIMIT,
   ),
+);
+const clipboardItems = computed(() =>
+  clipboardHistoryItems.value.slice(0, FLOATING_CLIPBOARD_PREVIEW_LIMIT),
 );
 const latencyLabel = computed(() =>
   getLatencyLabel({

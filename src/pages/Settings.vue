@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { CheckCircle2, Globe2, Sparkles } from "lucide-vue-next";
+import CheckCircle2 from "lucide-vue-next/dist/esm/icons/circle-check.js";
+import Globe2 from "lucide-vue-next/dist/esm/icons/earth.js";
+import Sparkles from "lucide-vue-next/dist/esm/icons/sparkles.js";
 import type { Component } from "vue";
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 
