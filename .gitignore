@@ -65,3 +65,26 @@ findings.md
 progress.md
 task_plan.md
 docs/superpowers/
+
+# Local design and agent artifacts
+/previews/
+/.planning/
+
+# Frontend caches and reports
+/coverage/
+/.vite/
+/.turbo/
+/.cache/
+*.tsbuildinfo
+
+# Signing keys and certificates
+*.pem
+*.key
+*.p12
+*.pfx
+*.keystore
+*.jks
+
+# IDE-local files
+/.idea/
+*.code-workspace
