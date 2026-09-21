@@ -293,8 +293,39 @@ impl AppState {
         self.inner.history.read().await.clone()
     }
 
-    pub async fn replace_history(&self, items: Vec<HistoryItem>) {
-        *self.inner.history.write().await = items;
+    pub async fn history_item(&self, id: &str) -> Option<HistoryItem> {
+        self.inner
+            .history
+            .read()
+            .await
+            .iter()
+            .find(|item| item.id == id)
+            .cloned()
+    }
+
+    pub async fn frontend_history(&self) -> Vec<HistoryItem> {
+        history::history_items_for_frontend(&self.inner.history.read().await)
+    }
+
+    pub async fn mutate_history<T: Send + 'static>(
+        &self,
+        operation: impl FnOnce(&mut Vec<HistoryItem>) -> AppResult<T> + Send + 'static,
+    ) -> AppResult<T> {
+        let inner = self.inner.clone();
+        // ponytail: serialize history I/O under its write lock; use a persistence worker if latency matters.
+        tauri::async_runtime::spawn_blocking(move || operation(&mut inner.history.blocking_write()))
+            .await
+            .map_err(|error| AppError::Tauri(format!("历史操作执行失败：{error}")))?
+    }
+
+    pub async fn save_history(&self, app: &tauri::AppHandle) -> AppResult<()> {
+        let app = app.clone();
+        self.mutate_history(move |items| {
+            history::save_history(&app, items)?;
+            history::release_image_content(items);
+            Ok(())
+        })
+        .await
     }
 
     pub async fn library(&self) -> LibrarySnapshot {
@@ -327,6 +358,23 @@ impl AppState {
     ) -> Option<HistoryItem> {
         let mut items = self.inner.history.write().await;
         history::update_file_transfer_history(&mut items, transfer_id, status, content)
+    }
+
+    pub async fn update_file_transfer_file_history(
+        &self,
+        transfer_id: &str,
+        file_id: &str,
+        status: FileTransferStatus,
+        content: Option<String>,
+    ) -> Option<HistoryItem> {
+        let mut items = self.inner.history.write().await;
+        history::update_file_transfer_file_history(
+            &mut items,
+            transfer_id,
+            file_id,
+            status,
+            content,
+        )
     }
 
     pub async fn replace_devices(&self, devices: Vec<DeviceInfo>) {
@@ -1496,6 +1544,70 @@ impl Default for AppState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn history_mutations_are_serialized_and_single_item_queries_preserve_content() {
+        let state = AppState::new();
+        let message = crate::models::ClipboardMessage {
+            message_id: "image-1".into(),
+            source_device_id: "device-1".into(),
+            source_device_name: "Device".into(),
+            content_type: crate::models::ClipboardContentType::Image,
+            content: "pending-image".into(),
+            content_hash: "hash".into(),
+            timestamp: 1,
+            origin_sequence: None,
+            event_version: None,
+        };
+        let item =
+            history::make_history_item(crate::models::HistoryDirection::Local, "Device", &message);
+        let id = item.id.clone();
+        state.push_history(item).await;
+        assert_eq!(
+            state.history_item(&id).await.unwrap().content,
+            "pending-image"
+        );
+        assert!(state.history_item("missing").await.is_none());
+        assert!(state.frontend_history().await[0].content.is_empty());
+        assert_eq!(
+            state.history_item(&id).await.unwrap().content,
+            "pending-image"
+        );
+        assert!(state
+            .mutate_history(|_| -> AppResult<()> { Err(AppError::InvalidInput("save failed".into())) })
+            .await
+            .is_err());
+        assert_eq!(
+            state.history_item(&id).await.unwrap().content,
+            "pending-image"
+        );
+        let first = state.clone();
+        let second = state.clone();
+        let (left, right) = tokio::join!(
+            first.mutate_history(|items| {
+                items[0].source_device.push('A');
+                Ok(())
+            }),
+            second.mutate_history(|items| {
+                items[0].source_device.push('B');
+                Ok(())
+            }),
+        );
+        left.unwrap();
+        right.unwrap();
+        assert_eq!(
+            state.history_item(&id).await.unwrap().source_device.len(),
+            "Device".len() + 2
+        );
+        state
+            .mutate_history(|items| {
+                history::release_image_content(items);
+                Ok(())
+            })
+            .await
+            .unwrap();
+        assert!(state.history_item(&id).await.unwrap().content.is_empty());
+    }
 
     #[test]
     fn device_id_is_stable_and_url_safe() {

@@ -14,6 +14,8 @@ export interface HistoryItem {
   contentType: ClipboardContentType;
   syncStatus: HistorySyncStatus;
   fileTransferId?: string;
+  fileTransferFileId?: string;
+  clipboardBatchId?: string;
   fileTransferStatus?: FileTransferStatus;
   isPinned: boolean;
   pinnedAt?: string;

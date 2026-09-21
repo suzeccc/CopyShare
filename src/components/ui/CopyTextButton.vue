@@ -9,7 +9,6 @@ import { computed, onBeforeUnmount, ref } from "vue";
 import { copyTextToClipboard, getCopyableText, type CopyTextResult } from "@/lib/clipboard";
 import {
   copyHistoryItem,
-  resumeFileTransfer,
   type CopyHistoryResult,
 } from "@/lib/tauri";
 import { useHistoryStore } from "@/stores/history";
@@ -30,6 +29,7 @@ const props = withDefaults(
     contentType?: ClipboardContentType;
     historyItemId?: string;
     fileTransferId?: string;
+    fileTransferFileId?: string;
     fileTransferStatus?: FileTransferStatus;
   }>(),
   {
@@ -51,13 +51,16 @@ const requiresHistoryCopy = computed(
 );
 const fileDownloadActive = computed(() =>
   props.contentType === "fileList"
-    && historyStore.isFileDownloadActive(props.fileTransferId),
+    && historyStore.isFileDownloadActive(props.fileTransferId, props.fileTransferFileId),
 );
 const fileDownloadResumable = computed(() => {
   if (props.contentType !== "fileList") {
     return false;
   }
-  const status = historyStore.fileDownloadActivity(props.fileTransferId)?.status
+  const status = historyStore.fileDownloadActivity(
+    props.fileTransferId,
+    props.fileTransferFileId,
+  )?.status
     ?? props.fileTransferStatus;
   return status === "waitingForPeer" || status === "paused";
 });
@@ -98,7 +101,6 @@ const buttonLabel = computed(() => {
 });
 
 async function copyText() {
-  let resumedTransfer = false;
   if (requiresHistoryCopy.value) {
     if (!props.historyItemId) {
       result.value = "empty";
@@ -108,19 +110,16 @@ async function copyText() {
         && props.fileTransferId
         && (props.fileTransferStatus ?? "pending") === "pending"
       ) {
-        historyStore.beginFileDownload(props.fileTransferId);
+        historyStore.beginFileDownload(props.fileTransferId, props.fileTransferFileId);
       }
       try {
-        if (fileDownloadResumable.value && props.fileTransferId) {
-          const task = await resumeFileTransfer(props.fileTransferId);
-          historyStore.updateFileDownloadTask(task);
-          result.value = "downloading";
-          resumedTransfer = true;
-        } else {
-          result.value = await copyHistoryItem(props.historyItemId);
-        }
+        result.value = await copyHistoryItem(props.historyItemId);
       } catch (error) {
-        historyStore.failFileDownload(props.fileTransferId, String(error));
+        historyStore.failFileDownload(
+          props.fileTransferId,
+          props.fileTransferFileId,
+          String(error),
+        );
         result.value = "failed";
       }
     }
@@ -129,12 +128,10 @@ async function copyText() {
   }
 
   if (result.value === "downloadStarted") {
-    historyStore.beginFileDownload(props.fileTransferId);
+    historyStore.beginFileDownload(props.fileTransferId, props.fileTransferFileId);
     toastStore.success("开始下载");
   } else if (result.value === "downloading") {
-    if (!resumedTransfer) {
-      historyStore.beginFileDownload(props.fileTransferId);
-    }
+    historyStore.beginFileDownload(props.fileTransferId, props.fileTransferFileId);
     toastStore.info("文件正在下载");
   } else if (result.value === "copied") {
     toastStore.success(

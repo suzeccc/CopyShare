@@ -32,6 +32,9 @@ import { useStatusStore } from "@/stores/status";
 import { useToastStore } from "@/stores/toasts";
 import type { DeviceInfo, LanDiscoveryProgress } from "@/types/device";
 
+const LAN_DISCOVERY_SETTLE_TIMEOUT_MS = 9000;
+const LAN_DISCOVERY_RESPONSE_GRACE_MS = 600;
+
 export const useDevicesStore = defineStore("devices", {
   state: () => ({
     connectDraft: createManualConnectDraft(),
@@ -56,6 +59,30 @@ export const useDevicesStore = defineStore("devices", {
       } catch (error) {
         this.error = String(error);
       }
+    },
+    async scanLanDevices() {
+      const knownIds = new Set(this.history.map((device) => device.id));
+      const previousScanId = this.lanDiscoveryProgress?.scanId ?? null;
+      await this.refresh();
+      if (this.error) throw new Error(this.error);
+
+      const deadline = Date.now() + LAN_DISCOVERY_SETTLE_TIMEOUT_MS;
+      let finishedAtSeenAt: number | null = null;
+      while (Date.now() < deadline) {
+        if (this.history.some((device) => !device.connected && device.status === "online" && !knownIds.has(device.id))) break;
+        const progress = this.lanDiscoveryProgress;
+        if (progress && progress.scanId !== previousScanId && !progress.running) {
+          finishedAtSeenAt ??= Date.now();
+          if (Date.now() - finishedAtSeenAt >= LAN_DISCOVERY_RESPONSE_GRACE_MS) break;
+        }
+        await new Promise<void>((resolve) => setTimeout(resolve, 120));
+      }
+
+      const discovered = this.history.filter((device) => !device.connected && device.status === "online");
+      return {
+        total: discovered.length,
+        newCount: discovered.filter((device) => !knownIds.has(device.id)).length,
+      };
     },
     async connect(ip: string, port: number) {
       this.error = null;

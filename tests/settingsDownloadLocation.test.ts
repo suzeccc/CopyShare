@@ -9,11 +9,13 @@ assert.match(configTypes, /fileSaveDir:\s*string\s*\|\s*null/);
 assert.match(tauri, /selectTransferSaveDir/);
 assert.match(tauri, /resetTransferSaveDir/);
 assert.match(tauri, /openTransferFolder/);
+assert.match(tauri, /getTransferSaveDir/);
 
 assert.match(settings, /selectTransferSaveDir/);
 assert.match(settings, /resetTransferSaveDir/);
 assert.match(settings, /openTransferFolder/);
 assert.match(settings, /draft\.fileSaveDir/);
+assert.match(settings, /displayedTransferSaveDir/);
 assert.match(settings, /data-download-location-setting/);
 assert.match(settings, /\u4e0b\u8f7d\u4f4d\u7f6e/);
 assert.match(settings, /\u66f4\u6539\u4f4d\u7f6e/);

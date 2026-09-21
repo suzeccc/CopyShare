@@ -22,3 +22,18 @@ const clipboardPage = readFileSync("src/pages/Clipboard.vue", "utf8");
 
 assert.match(clipboardPage, /data-clipboard-history-device/);
 assert.match(clipboardPage, /item\.sourceDevice/);
+
+const historyModalSource =
+  clipboardPage.match(
+    /<section\s+class="flex h-full max-h-full w-full max-w-4xl[\s\S]*?<\/section>/,
+  )?.[0] ?? "";
+
+assert.ok(historyModalSource, "clipboard history modal must keep a stable height");
+assert.match(
+  historyModalSource,
+  /v-if="filteredAllClipboardItems\.length" class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto p-5"/,
+);
+assert.match(
+  historyModalSource,
+  /v-else class="m-5 grid min-h-0 flex-1 place-items-center/,
+);

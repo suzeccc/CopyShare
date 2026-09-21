@@ -74,7 +74,7 @@ function cancelFromBackdrop(event: MouseEvent) {
       >
         <div>
           <h2 id="metadata-dialog-title" class="text-lg font-bold text-white">编辑收藏信息</h2>
-          <p class="mt-1 text-[12px] text-[color:var(--muted-text)]">正文和文件不会改变。</p>
+          <p class="mt-1 text-[12px] text-[color:var(--muted-text)]">正文和文件不会改变</p>
         </div>
 
         <label class="grid gap-1.5 text-[13px] font-medium text-slate-200">

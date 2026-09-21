@@ -16,7 +16,7 @@ assert.match(floatingPanel, /class="-mx-3 -mt-3 flex items-center justify-betwee
 assert.match(floatingPanel, /<div class="flex shrink-0 items-center gap-1">/);
 assert.doesNotMatch(floatingPanel, /<div class="flex shrink-0 items-center gap-1" data-window-control>/);
 assert.match(appShell, /hideMainWindow/);
-assert.match(appShell, /@hide="hideMainWindow"/);
+assert.match(appShell, /@hide="switchToBallMode"/);
 assert.match(appShell, /@close="handleCloseWindow"/);
 assert.doesNotMatch(appShell, /@close="hideMainWindow"/);
 assert.doesNotMatch(floatingPanel, /statusMessage/);

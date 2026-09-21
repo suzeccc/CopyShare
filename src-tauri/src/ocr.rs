@@ -21,7 +21,7 @@ struct PreparedImage {
 
 fn validate_decoded_size(size: usize) -> Result<(), String> {
     if size > MAX_IMAGE_BYTES {
-        return Err("图片尺寸过大，请缩小后重试。".to_string());
+        return Err("图片尺寸过大，请缩小后重试".to_string());
     }
     Ok(())
 }
@@ -29,10 +29,10 @@ fn validate_decoded_size(size: usize) -> Result<(), String> {
 fn validate_dimensions(width: u32, height: u32) -> Result<(), String> {
     let pixels = u64::from(width) * u64::from(height);
     if width == 0 || height == 0 {
-        return Err("无法读取剪贴板中的图片。".to_string());
+        return Err("无法读取剪贴板中的图片".to_string());
     }
     if pixels > MAX_IMAGE_PIXELS {
-        return Err("图片尺寸过大，请缩小后重试。".to_string());
+        return Err("图片尺寸过大，请缩小后重试".to_string());
     }
     Ok(())
 }
@@ -53,7 +53,7 @@ fn encode_png(image: &DynamicImage) -> Result<Vec<u8>, String> {
     let mut output = Cursor::new(Vec::new());
     image
         .write_to(&mut output, ImageFormat::Png)
-        .map_err(|_| "无法读取剪贴板中的图片。".to_string())?;
+        .map_err(|_| "无法读取剪贴板中的图片".to_string())?;
     Ok(output.into_inner())
 }
 
@@ -73,10 +73,10 @@ fn resized_png(image: &DynamicImage, max_dimension: u32) -> Result<Vec<u8>, Stri
 fn prepare_image(content: &str) -> Result<PreparedImage, String> {
     let decoded = STANDARD
         .decode(content)
-        .map_err(|_| "无法读取剪贴板中的图片。".to_string())?;
+        .map_err(|_| "无法读取剪贴板中的图片".to_string())?;
     validate_decoded_size(decoded.len())?;
     let image = image::load_from_memory(&decoded)
-        .map_err(|_| "无法读取剪贴板中的图片。".to_string())?;
+        .map_err(|_| "无法读取剪贴板中的图片".to_string())?;
     let (image_width, image_height) = image.dimensions();
     validate_dimensions(image_width, image_height)?;
     Ok(PreparedImage {
@@ -185,7 +185,7 @@ mod platform {
             .get()
             .map_err(ocr_error)?;
         let engine = OcrEngine::TryCreateFromUserProfileLanguages()
-            .map_err(|_| "Windows OCR 不可用，请安装系统语言包后重试。".to_string())?;
+            .map_err(|_| "Windows OCR 不可用，请安装系统语言包后重试".to_string())?;
         let result = engine
             .RecognizeAsync(&bitmap)
             .map_err(ocr_error)?
@@ -244,7 +244,7 @@ mod platform {
 
         let observations = request
             .results()
-            .ok_or_else(|| "Apple Vision 未返回识别结果。".to_string())?;
+            .ok_or_else(|| "Apple Vision 未返回识别结果".to_string())?;
         let mut lines = Vec::with_capacity(observations.len());
         for observation in observations.to_vec() {
             if let Some(candidate) = observation.topCandidates(1).to_vec().into_iter().next() {
@@ -267,10 +267,10 @@ mod platform {
         png: &[u8],
         tessdata_dir: Option<&std::path::Path>,
     ) -> Result<String, String> {
-        let tessdata_dir = tessdata_dir.ok_or_else(|| "未找到 Linux OCR 语言模型。".to_string())?;
+        let tessdata_dir = tessdata_dir.ok_or_else(|| "未找到 Linux OCR 语言模型".to_string())?;
         let tessdata_dir = tessdata_dir
             .to_str()
-            .ok_or_else(|| "Linux OCR 语言模型路径不是有效 UTF-8。".to_string())?;
+            .ok_or_else(|| "Linux OCR 语言模型路径不是有效 UTF-8".to_string())?;
         let mut engine = LepTess::new(Some(tessdata_dir), "chi_sim+eng").map_err(ocr_error)?;
         engine.set_image_from_mem(png).map_err(ocr_error)?;
         engine.get_utf8_text().map_err(ocr_error)
@@ -283,7 +283,7 @@ mod platform {
         _png: &[u8],
         _tessdata_dir: Option<&std::path::Path>,
     ) -> Result<String, String> {
-        Err("当前平台不支持图片转文字。".to_string())
+        Err("当前平台不支持图片转文字".to_string())
     }
 }
 

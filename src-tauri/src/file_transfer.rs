@@ -21,6 +21,9 @@ use uuid::Uuid;
 use crate::{
     clipboard, file_transfer_http, file_transfer_store, history,
     error::{AppError, AppResult},
+    file_transfer_paths::{
+        part_path_for, sanitize_file_name, transfer_save_dir, unique_save_path_with_reserved,
+    },
     models::{
         AppConfig, ClipboardContentType, ClipboardMessage, CopyHistoryResult, DeviceInfo,
         FileCompleteFile, FileOfferFile, FileResumeGrantFile, FileResumeOffset,
@@ -32,6 +35,9 @@ use crate::{
     notifications,
     state::AppState,
 };
+
+#[cfg(test)]
+use crate::file_transfer_paths::unique_save_path;
 
 const MAX_TRANSFER_FILE_COUNT: usize = 100;
 const MAX_TRANSFER_TOTAL_SIZE: u64 = 10 * 1024 * 1024 * 1024;
@@ -66,6 +72,7 @@ pub struct IncomingFileOffer {
 struct ManagedTransfer {
     task: FileTransferTask,
     files: HashMap<String, ManagedTransferFile>,
+    requested_file_ids: HashSet<String>,
     download_host: Option<String>,
     download_port: Option<u16>,
     retry_count: u8,
@@ -130,6 +137,7 @@ pub struct FileTransferManager {
     tasks: Mutex<HashMap<String, ManagedTransfer>>,
     store_root: Mutex<Option<PathBuf>>,
     active_receive_workers: Mutex<HashSet<String>>,
+    rerun_receive_workers: Mutex<HashSet<String>>,
 }
 
 pub fn manager() -> Arc<FileTransferManager> {
@@ -144,6 +152,7 @@ impl FileTransferManager {
             tasks: Mutex::new(HashMap::new()),
             store_root: Mutex::new(None),
             active_receive_workers: Mutex::new(HashSet::new()),
+            rerun_receive_workers: Mutex::new(HashSet::new()),
         })
     }
 
@@ -395,6 +404,7 @@ impl FileTransferManager {
             ManagedTransfer {
                 task: task.clone(),
                 files: managed_files,
+                requested_file_ids: HashSet::new(),
                 download_host: Some(server.advertised_host.clone()),
                 download_port: Some(server.port),
                 retry_count: 0,
@@ -921,7 +931,93 @@ impl FileTransferManager {
         state: AppState,
         transfer_id: String,
     ) -> AppResult<FileTransferTask> {
-        let task = self.mark_status(&transfer_id, FileTransferStatus::Accepted).await?;
+        let (task, _) = self.select_receive_files(&transfer_id, None).await?;
+        self.clone()
+            .start_selected_receive(app, state, transfer_id, task)
+            .await
+    }
+
+    async fn accept_receive_file(
+        self: Arc<Self>,
+        app: AppHandle,
+        state: AppState,
+        transfer_id: String,
+        file_id: String,
+    ) -> AppResult<(FileTransferTask, bool)> {
+        let requested = vec![file_id];
+        let (task, newly_selected) = self
+            .select_receive_files(&transfer_id, Some(&requested))
+            .await?;
+        if !newly_selected {
+            return Ok((task, false));
+        }
+        let task = self
+            .clone()
+            .start_selected_receive(app, state, transfer_id, task)
+            .await?;
+        Ok((task, true))
+    }
+
+    async fn select_receive_files(
+        &self,
+        transfer_id: &str,
+        file_ids: Option<&[String]>,
+    ) -> AppResult<(FileTransferTask, bool)> {
+        let (task, newly_selected) = {
+            let mut tasks = self.tasks.lock().await;
+            let entry = tasks
+                .get_mut(transfer_id)
+                .ok_or_else(|| AppError::InvalidInput("file transfer task not found".to_string()))?;
+            if entry.task.direction != FileTransferDirection::Receive
+                || is_terminal_transfer_status(&entry.task.status)
+            {
+                return Err(AppError::InvalidInput(
+                    "file transfer is not available for download".to_string(),
+                ));
+            }
+            let selected_ids = entry
+                .task
+                .files
+                .iter()
+                .filter(|file| {
+                    file.status != FileTransferFileStatus::Completed
+                        && file_ids
+                            .map(|ids| ids.iter().any(|id| id == &file.id))
+                            .unwrap_or(true)
+                })
+                .map(|file| file.id.clone())
+                .collect::<Vec<_>>();
+            if let Some(ids) = file_ids {
+                if ids
+                    .iter()
+                    .any(|id| !entry.task.files.iter().any(|file| &file.id == id))
+                {
+                    return Err(AppError::InvalidInput(
+                        "file not found in transfer".to_string(),
+                    ));
+                }
+            }
+            let mut newly_selected = false;
+            for file_id in selected_ids {
+                newly_selected |= entry.requested_file_ids.insert(file_id);
+            }
+            if newly_selected && entry.task.status == FileTransferStatus::Pending {
+                entry.task.status = FileTransferStatus::Accepted;
+            }
+            entry.last_activity_at = Utc::now();
+            (entry.task.clone(), newly_selected)
+        };
+        self.persist_transfer(transfer_id).await?;
+        Ok((task, newly_selected))
+    }
+
+    async fn start_selected_receive(
+        self: Arc<Self>,
+        app: AppHandle,
+        state: AppState,
+        transfer_id: String,
+        task: FileTransferTask,
+    ) -> AppResult<FileTransferTask> {
         let status = state.status().await;
         let sent = state
             .send_trusted_to_device(
@@ -955,29 +1051,52 @@ impl FileTransferManager {
         state: AppState,
         transfer_id: String,
     ) {
-        if !self
-            .active_receive_workers
-            .lock()
-            .await
-            .insert(transfer_id.clone())
-        {
-            return;
-        }
-        let manager = self.clone();
-        tauri::async_runtime::spawn(async move {
-            let result = manager
-                .clone()
-                .download_receive(app.clone(), state.clone(), transfer_id.clone())
-                .await;
-            manager
-                .active_receive_workers
+        let mut active_workers = self.active_receive_workers.lock().await;
+        if !active_workers.insert(transfer_id.clone()) {
+            self.rerun_receive_workers
                 .lock()
                 .await
-                .remove(&transfer_id);
-            manager
-                .handle_receive_worker_result(&app, &state, &transfer_id, result)
-                .await;
+                .insert(transfer_id);
+            return;
+        }
+        drop(active_workers);
+        let manager = self.clone();
+        tauri::async_runtime::spawn(async move {
+            loop {
+                let result = manager
+                    .clone()
+                    .download_receive(app.clone(), state.clone(), transfer_id.clone())
+                    .await;
+                manager
+                    .handle_receive_worker_result(&app, &state, &transfer_id, result)
+                    .await;
+                let has_pending = manager.has_requested_pending_file(&transfer_id).await;
+                let mut active_workers = manager.active_receive_workers.lock().await;
+                let mut rerun_workers = manager.rerun_receive_workers.lock().await;
+                let should_rerun = rerun_workers.remove(&transfer_id) && has_pending;
+                if !should_rerun {
+                    active_workers.remove(&transfer_id);
+                }
+                drop(rerun_workers);
+                drop(active_workers);
+                if !should_rerun {
+                    break;
+                }
+            }
         });
+    }
+
+    async fn has_requested_pending_file(&self, transfer_id: &str) -> bool {
+        self.tasks
+            .lock()
+            .await
+            .get(transfer_id)
+            .is_some_and(|entry| {
+                entry.task.files.iter().any(|file| {
+                    entry.requested_file_ids.contains(&file.id)
+                        && file.status != FileTransferFileStatus::Completed
+                })
+            })
     }
 
     async fn download_receive(
@@ -1066,34 +1185,40 @@ impl FileTransferManager {
             }
         }
 
-        let completed = self.mark_completed(&transfer_id).await?;
-        if completed.clipboard_sync {
-            if let Err(error) = apply_completed_clipboard_file_sync(&app, &state, &completed).await {
+        let (completed, completed_files) = self.finish_receive_selection(&transfer_id).await?;
+        if completed.clipboard_sync && !completed_files.is_empty() {
+            if let Err(error) = apply_completed_clipboard_file_selection_sync(
+                &app,
+                &state,
+                &completed,
+                &completed_files,
+            )
+            .await
+            {
                 tracing::warn!("clipboard file sync apply failed: {error}");
             }
         }
-        let completed_files = completed
-            .files
-            .iter()
-            .map(|file| FileCompleteFile {
-                file_id: file.id.clone(),
-                sha256: file.sha256.clone(),
-            })
-            .collect();
-        let _ = state
-            .send_trusted_to_device(
-                &state.config().await,
-                &completed.peer_device_id,
-                WireMessage::FileComplete {
-                    transfer_id: transfer_id.clone(),
-                    device_id: state.status().await.device_id,
-                    files: completed_files,
-                },
-            )
-            .await;
-        emit_task_completed(&app, &completed);
-        if let Err(error) = maybe_open_folder_after_save(&state.config().await, &save_dir) {
-            tracing::warn!("auto open transfer folder failed: {error}");
+        update_clipboard_file_history_status(&app, &state, &completed, None).await?;
+        if !completed_files.is_empty() {
+            let _ = state
+                .send_trusted_to_device(
+                    &state.config().await,
+                    &completed.peer_device_id,
+                    WireMessage::FileComplete {
+                        transfer_id: transfer_id.clone(),
+                        device_id: state.status().await.device_id,
+                        files: completed_files,
+                    },
+                )
+                .await;
+        }
+        if completed.status == FileTransferStatus::Completed {
+            emit_task_completed(&app, &completed);
+            if let Err(error) = maybe_open_folder_after_save(&state.config().await, &save_dir) {
+                tracing::warn!("auto open transfer folder failed: {error}");
+            }
+        } else {
+            emit_task_updated(&app, &completed);
         }
         Ok(ReceiveRunOutcome::Completed)
     }
@@ -1212,7 +1337,10 @@ impl FileTransferManager {
                 .task
                 .files
                 .iter()
-                .find(|file| file.status != FileTransferFileStatus::Completed)
+                .find(|file| {
+                    entry.requested_file_ids.contains(&file.id)
+                        && file.status != FileTransferFileStatus::Completed
+                })
                 .ok_or_else(|| AppError::InvalidInput("file transfer is already complete".to_string()))?;
             let managed = entry
                 .files
@@ -1501,7 +1629,10 @@ impl FileTransferManager {
                 .task
                 .files
                 .iter()
-                .find(|file| file.status != FileTransferFileStatus::Completed)
+                .find(|file| {
+                    entry.requested_file_ids.contains(&file.id)
+                        && file.status != FileTransferFileStatus::Completed
+                })
                 .map(|file| file.id.clone())
                 .ok_or_else(|| AppError::InvalidInput("file transfer is already complete".to_string()))?;
             if granted_files.len() != 1 || granted_files[0].file_id != current_file_id {
@@ -1562,7 +1693,10 @@ impl FileTransferManager {
             .task
             .files
             .iter()
-            .find(|file| file.status != FileTransferFileStatus::Completed)
+            .find(|file| {
+                entry.requested_file_ids.contains(&file.id)
+                    && file.status != FileTransferFileStatus::Completed
+            })
         else {
             return Ok(None);
         };
@@ -1924,6 +2058,7 @@ impl FileTransferManager {
             ManagedTransfer {
                 task: task.clone(),
                 files: managed_files,
+                requested_file_ids: HashSet::new(),
                 download_host: Some(offer.download_host),
                 download_port: Some(offer.download_port),
                 retry_count: 0,
@@ -1985,39 +2120,66 @@ impl FileTransferManager {
         transfer_id: &str,
         completed_files: &[FileCompleteFile],
     ) -> AppResult<FileTransferTask> {
-        let expected = {
-            let tasks = self.tasks.lock().await;
-            tasks
-                .get(transfer_id)
-                .map(|entry| {
-                    entry
-                        .task
-                        .files
-                        .iter()
-                        .map(|file| (file.id.clone(), file.sha256.clone()))
-                        .collect::<HashMap<_, _>>()
-                })
-                .ok_or_else(|| AppError::InvalidInput("file transfer task not found".to_string()))?
-        };
-        let received = completed_files
-            .iter()
-            .map(|file| (file.file_id.clone(), file.sha256.clone()))
-            .collect::<HashMap<_, _>>();
-        let hashes_match = expected.len() == received.len()
-            && expected
+        let (task, direction) = {
+            let mut tasks = self.tasks.lock().await;
+            let entry = tasks
+                .get_mut(transfer_id)
+                .ok_or_else(|| AppError::InvalidInput("file transfer task not found".to_string()))?;
+            let mut received_ids = HashSet::new();
+            let valid = !completed_files.is_empty()
+                && completed_files.iter().all(|completed| {
+                    received_ids.insert(completed.file_id.as_str())
+                        && entry.task.files.iter().any(|file| {
+                            file.id == completed.file_id && file.sha256 == completed.sha256
+                        })
+                });
+            if !valid {
+                return Err(AppError::InvalidInput(
+                    "peer file sha256 mismatch".to_string(),
+                ));
+            }
+            for completed in completed_files {
+                if let Some(file) = entry
+                    .task
+                    .files
+                    .iter_mut()
+                    .find(|file| file.id == completed.file_id)
+                {
+                    file.status = FileTransferFileStatus::Completed;
+                    file.transferred_bytes = file.size;
+                    file.error = None;
+                }
+            }
+            entry.task.transferred_bytes = entry
+                .task
+                .files
                 .iter()
-                .all(|(file_id, sha256)| received.get(file_id) == Some(sha256));
-
-        let task = if hashes_match {
-            self.mark_completed(transfer_id).await?
-        } else {
-            self.mark_failed(transfer_id, "peer file sha256 mismatch")
-                .await?
+                .map(|file| file.transferred_bytes.min(file.size))
+                .sum::<u64>()
+                .min(entry.task.total_size);
+            let all_completed = entry
+                .task
+                .files
+                .iter()
+                .all(|file| file.status == FileTransferFileStatus::Completed);
+            entry.task.status = if all_completed {
+                FileTransferStatus::Completed
+            } else {
+                FileTransferStatus::Pending
+            };
+            entry.task.completed_at = all_completed.then(Utc::now);
+            entry.last_activity_at = Utc::now();
+            (entry.task.clone(), entry.task.direction.clone())
         };
+        if task.status == FileTransferStatus::Completed {
+            self.remove_persisted_transfer(&direction, transfer_id).await?;
+        } else {
+            self.persist_transfer(transfer_id).await?;
+        }
         if task.status == FileTransferStatus::Completed {
             emit_task_completed(app, &task);
         } else {
-            emit_task_failed(app, &task);
+            emit_task_updated(app, &task);
         }
         Ok(task)
     }
@@ -2146,6 +2308,59 @@ impl FileTransferManager {
         Ok(task)
     }
 
+    async fn finish_receive_selection(
+        &self,
+        transfer_id: &str,
+    ) -> AppResult<(FileTransferTask, Vec<FileCompleteFile>)> {
+        let (task, completed_files, direction) = {
+            let mut tasks = self.tasks.lock().await;
+            let entry = tasks
+                .get_mut(transfer_id)
+                .ok_or_else(|| AppError::InvalidInput("file transfer task not found".to_string()))?;
+            let completed_files = entry
+                .task
+                .files
+                .iter()
+                .filter(|file| {
+                    entry.requested_file_ids.contains(&file.id)
+                        && file.status == FileTransferFileStatus::Completed
+                })
+                .map(|file| FileCompleteFile {
+                    file_id: file.id.clone(),
+                    sha256: file.sha256.clone(),
+                })
+                .collect::<Vec<_>>();
+            for file in &completed_files {
+                entry.requested_file_ids.remove(&file.file_id);
+            }
+            let all_completed = entry
+                .task
+                .files
+                .iter()
+                .all(|file| file.status == FileTransferFileStatus::Completed);
+            entry.task.status = if all_completed {
+                FileTransferStatus::Completed
+            } else {
+                FileTransferStatus::Pending
+            };
+            entry.task.completed_at = all_completed.then(Utc::now);
+            entry.task.error = None;
+            entry.last_activity_at = Utc::now();
+            (
+                entry.task.clone(),
+                completed_files,
+                entry.task.direction.clone(),
+            )
+        };
+        if task.status == FileTransferStatus::Completed {
+            self.remove_persisted_transfer(&direction, transfer_id).await?;
+        } else {
+            self.persist_transfer(transfer_id).await?;
+        }
+        Ok((task, completed_files))
+    }
+
+    #[cfg(test)]
     async fn mark_completed(&self, transfer_id: &str) -> AppResult<FileTransferTask> {
         let (task, direction) = {
             let mut tasks = self.tasks.lock().await;
@@ -2413,6 +2628,7 @@ impl FileTransferManager {
             ManagedTransfer {
                 task,
                 files: managed_files,
+                requested_file_ids: HashSet::new(),
                 download_host: None,
                 download_port: None,
                 retry_count: 0,
@@ -2475,6 +2691,7 @@ impl FileTransferManager {
                         final_path: None,
                     },
                 )]),
+                requested_file_ids: HashSet::from(["file-1".to_string()]),
                 download_host: None,
                 download_port: None,
                 retry_count: 0,
@@ -2630,12 +2847,16 @@ pub async fn initialize(app: &AppHandle, state: &AppState) -> AppResult<()> {
             }
         }
         if task.direction == FileTransferDirection::Receive
-            && task.status != FileTransferStatus::Pending
-            && !is_terminal_transfer_status(&task.status)
+            && matches!(
+                task.status,
+                FileTransferStatus::Accepted
+                    | FileTransferStatus::Transferring
+                    | FileTransferStatus::Retrying
+            )
             && task
                 .files
                 .iter()
-                .all(|file| file.status == FileTransferFileStatus::Completed)
+                .any(|file| file.status != FileTransferFileStatus::Completed)
         {
             manager
                 .clone()
@@ -2818,49 +3039,66 @@ pub async fn get_file_transfers() -> AppResult<Vec<FileTransferTask>> {
     Ok(manager().tasks().await)
 }
 
-async fn apply_completed_clipboard_file_sync(
+async fn apply_completed_clipboard_file_selection_sync(
     app: &AppHandle,
     state: &AppState,
     task: &FileTransferTask,
+    completed_files: &[FileCompleteFile],
 ) -> AppResult<()> {
-    let Some((content, message)) = apply_completed_clipboard_file_sync_core(
-        state,
-        task,
-        |paths| clipboard::write_clipboard_files(app, paths),
-    )
-    .await?
-    else {
+    let completed_ids = completed_files
+        .iter()
+        .map(|file| file.file_id.as_str())
+        .collect::<HashSet<_>>();
+    let paths = task
+        .files
+        .iter()
+        .filter(|file| completed_ids.contains(file.id.as_str()))
+        .map(|file| {
+            file.saved_path
+                .as_deref()
+                .map(PathBuf::from)
+                .ok_or_else(|| {
+                    AppError::InvalidInput("downloaded file paths are missing".to_string())
+                })
+        })
+        .collect::<AppResult<Vec<_>>>()?;
+    if paths.is_empty() {
         return Ok(());
-    };
-
-    let config = state.config().await;
-    if config.save_history {
-        let item = if let Some(item) = state
-            .update_file_transfer_history(
-                &task.transfer_id,
-                FileTransferStatus::Completed,
-                Some(content.clone()),
-            )
-            .await
-        {
-            item
-        } else {
-            let mut item = history::make_history_item(
-                HistoryDirection::Remote,
-                task.peer_device_name.clone(),
-                &message,
-            );
-            item.file_transfer_id = Some(task.transfer_id.clone());
-            item.file_transfer_status = Some(FileTransferStatus::Completed);
-            state.push_history(item.clone()).await;
-            item
-        };
-        history::save_history(app, &state.history().await)?;
-        let _ = app.emit("clipboard-synced", history::history_item_for_frontend(&item));
     }
+    let content = clipboard::file_paths_to_clipboard_content(&paths)?;
+    let now = Utc::now();
+    let message = ClipboardMessage {
+        message_id: format!(
+            "{}:{}",
+            task.transfer_id,
+            completed_files
+                .iter()
+                .map(|file| file.file_id.as_str())
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+        source_device_id: task.peer_device_id.clone(),
+        source_device_name: task.peer_device_name.clone(),
+        content_type: ClipboardContentType::FileList,
+        content_hash: clipboard_file_list_hash(&content),
+        content,
+        timestamp: now.timestamp(),
+        origin_sequence: None,
+        event_version: Some(crate::models::ClipboardEventVersion {
+            physical_ms: now.timestamp_millis(),
+            logical: 0,
+            origin_device_id: task.peer_device_id.clone(),
+        }),
+    };
+    if !state.should_apply_remote_clipboard(&message).await {
+        return Ok(());
+    }
+    clipboard::write_clipboard_files(app, &paths)?;
+    state.mark_remote_clipboard_applied(&message).await;
     Ok(())
 }
 
+#[cfg(test)]
 async fn apply_completed_clipboard_file_sync_core<F>(
     state: &AppState,
     task: &FileTransferTask,
@@ -2926,43 +3164,65 @@ async fn push_pending_clipboard_file_history(
         return Ok(());
     }
 
-    let content = pending_clipboard_file_content(task)?;
-    let message = ClipboardMessage {
-        message_id: task.transfer_id.clone(),
-        source_device_id: task.peer_device_id.clone(),
-        source_device_name: task.peer_device_name.clone(),
-        content_type: ClipboardContentType::FileList,
-        content_hash: clipboard_file_list_hash(&content),
-        content,
-        timestamp: Utc::now().timestamp(),
-        origin_sequence: None,
-        event_version: None,
-    };
-    let mut item = history::make_history_item(
-        HistoryDirection::Remote,
-        task.peer_device_name.clone(),
-        &message,
-    );
-    item.file_transfer_id = Some(task.transfer_id.clone());
-    item.file_transfer_status = Some(task.status.clone());
-    state.push_history(item.clone()).await;
-    history::save_history(app, &state.history().await)?;
-    let _ = app.emit("clipboard-synced", history::history_item_for_frontend(&item));
+    let mut items = Vec::with_capacity(task.files.len());
+    for file in &task.files {
+        let content = pending_clipboard_file_content_for_file(file, None)?;
+        let message = ClipboardMessage {
+            message_id: format!("{}:{}", task.transfer_id, file.id),
+            source_device_id: task.peer_device_id.clone(),
+            source_device_name: task.peer_device_name.clone(),
+            content_type: ClipboardContentType::FileList,
+            content_hash: clipboard_file_list_hash(&content),
+            content,
+            timestamp: Utc::now().timestamp(),
+            origin_sequence: None,
+            event_version: None,
+        };
+        let mut item = history::make_history_item(
+            HistoryDirection::Remote,
+            task.peer_device_name.clone(),
+            &message,
+        );
+        item.file_transfer_id = Some(task.transfer_id.clone());
+        item.file_transfer_file_id = Some(file.id.clone());
+        item.clipboard_batch_id = Some(task.transfer_id.clone());
+        item.file_transfer_status = Some(file_history_status(task, file));
+        state.push_history(item.clone()).await;
+        items.push(item);
+    }
+    state.save_history(app).await?;
+    for item in items {
+        let _ = app.emit("clipboard-synced", history::history_item_for_frontend(&item));
+    }
     Ok(())
 }
 
-fn pending_clipboard_file_content(task: &FileTransferTask) -> AppResult<String> {
-    let entries = task
-        .files
-        .iter()
-        .map(|file| clipboard::ClipboardFileEntry {
-            path: String::new(),
-            name: file.name.clone(),
-            size: file.size,
-            thumbnail: file.thumbnail.clone(),
-        })
-        .collect::<Vec<_>>();
-    serde_json::to_string(&entries).map_err(Into::into)
+fn pending_clipboard_file_content_for_file(
+    file: &FileTransferFile,
+    path: Option<&str>,
+) -> AppResult<String> {
+    serde_json::to_string(&[clipboard::ClipboardFileEntry {
+        path: path.unwrap_or_default().to_string(),
+        name: file.name.clone(),
+        size: file.size,
+        thumbnail: file.thumbnail.clone(),
+    }])
+    .map_err(Into::into)
+}
+
+fn file_history_status(task: &FileTransferTask, file: &FileTransferFile) -> FileTransferStatus {
+    match &file.status {
+        FileTransferFileStatus::Pending => FileTransferStatus::Pending,
+        FileTransferFileStatus::Transferring => match task.status {
+            FileTransferStatus::WaitingForPeer
+            | FileTransferStatus::Retrying
+            | FileTransferStatus::Paused => task.status.clone(),
+            _ => FileTransferStatus::Transferring,
+        },
+        FileTransferFileStatus::Completed => FileTransferStatus::Completed,
+        FileTransferFileStatus::Failed => FileTransferStatus::Failed,
+        FileTransferFileStatus::Canceled => FileTransferStatus::Canceled,
+    }
 }
 
 async fn update_clipboard_file_history_status(
@@ -2971,11 +3231,34 @@ async fn update_clipboard_file_history_status(
     task: &FileTransferTask,
     content: Option<String>,
 ) -> AppResult<()> {
+    let mut updated = Vec::new();
+    for file in &task.files {
+        let file_content = pending_clipboard_file_content_for_file(
+            file,
+            file.saved_path.as_deref(),
+        )?;
+        if let Some(item) = state
+            .update_file_transfer_file_history(
+                &task.transfer_id,
+                &file.id,
+                file_history_status(task, file),
+                Some(file_content),
+            )
+            .await
+        {
+            updated.push(item);
+        }
+    }
     if let Some(item) = state
         .update_file_transfer_history(&task.transfer_id, task.status.clone(), content)
         .await
     {
-        history::save_history(app, &state.history().await)?;
+        updated.push(item);
+    }
+    if !updated.is_empty() {
+        state.save_history(app).await?;
+    }
+    for item in updated {
         let _ = app.emit("clipboard-synced", history::history_item_for_frontend(&item));
     }
     Ok(())
@@ -2994,6 +3277,67 @@ pub async fn copy_clipboard_file_history_item(
         .task(transfer_id)
         .await
         .ok_or_else(|| AppError::InvalidInput("file sync session expired".to_string()))?;
+
+    if let Some(file_id) = item.file_transfer_file_id.as_deref() {
+        let file = task
+            .files
+            .iter()
+            .find(|file| file.id == file_id)
+            .cloned()
+            .ok_or_else(|| AppError::InvalidInput("file not found in transfer".to_string()))?;
+        return match file.status {
+            FileTransferFileStatus::Completed => {
+                let path = file
+                    .saved_path
+                    .as_deref()
+                    .map(PathBuf::from)
+                    .ok_or_else(|| {
+                        AppError::InvalidInput("downloaded file path is missing".to_string())
+                    })?;
+                clipboard::write_clipboard_files(&app, &[path])?;
+                Ok(CopyHistoryResult::Copied)
+            }
+            FileTransferFileStatus::Pending => {
+                let (task, newly_selected) = manager()
+                    .accept_receive_file(
+                        app.clone(),
+                        state.clone(),
+                        transfer_id.to_string(),
+                        file_id.to_string(),
+                    )
+                    .await?;
+                update_clipboard_file_history_status(&app, &state, &task, None).await?;
+                Ok(if newly_selected {
+                    CopyHistoryResult::DownloadStarted
+                } else {
+                    CopyHistoryResult::Downloading
+                })
+            }
+            FileTransferFileStatus::Transferring
+                if matches!(
+                    task.status,
+                    FileTransferStatus::WaitingForPeer | FileTransferStatus::Paused
+                ) =>
+            {
+                let manager = manager();
+                manager
+                    .reset_oversized_partial_if_needed(transfer_id)
+                    .await?;
+                let task = manager.reset_manual_retry(transfer_id).await?;
+                manager.emit_receive_state(&app, &state, &task).await;
+                manager
+                    .request_resume_grant(&app, &state, transfer_id)
+                    .await?;
+                Ok(CopyHistoryResult::Downloading)
+            }
+            FileTransferFileStatus::Transferring => Ok(CopyHistoryResult::Downloading),
+            FileTransferFileStatus::Failed | FileTransferFileStatus::Canceled => {
+                Err(AppError::InvalidInput(
+                    "file sync is not available anymore".to_string(),
+                ))
+            }
+        };
+    }
 
     match task.status {
         FileTransferStatus::Pending => {
@@ -3514,6 +3858,11 @@ fn transfer_snapshot(entry: &ManagedTransfer) -> file_transfer_store::TransferSn
         version: file_transfer_store::TRANSFER_SNAPSHOT_VERSION,
         task: entry.task.clone(),
         files,
+        requested_file_ids: {
+            let mut ids = entry.requested_file_ids.iter().cloned().collect::<Vec<_>>();
+            ids.sort();
+            ids
+        },
         download_host,
         download_port,
         retry_count: entry.retry_count,
@@ -3527,6 +3876,22 @@ fn managed_transfer_from_snapshot(
     let task = snapshot.task;
     let restore_download_endpoint = task.direction == FileTransferDirection::Send;
     let last_persisted_bytes = task.transferred_bytes;
+    let mut requested_file_ids = snapshot
+        .requested_file_ids
+        .into_iter()
+        .collect::<HashSet<_>>();
+    if task.direction == FileTransferDirection::Receive
+        && requested_file_ids.is_empty()
+        && task.status != FileTransferStatus::Pending
+        && !is_terminal_transfer_status(&task.status)
+    {
+        requested_file_ids.extend(
+            task.files
+                .iter()
+                .filter(|file| file.status != FileTransferFileStatus::Completed)
+                .map(|file| file.id.clone()),
+        );
+    }
     let files = snapshot
         .files
         .into_iter()
@@ -3551,6 +3916,7 @@ fn managed_transfer_from_snapshot(
     ManagedTransfer {
         task,
         files,
+        requested_file_ids,
         download_host: restore_download_endpoint
             .then_some(snapshot.download_host)
             .flatten(),
@@ -3821,103 +4187,6 @@ fn new_transfer_file(
     }
 }
 
-fn sanitize_file_name(value: &str) -> String {
-    let normalized = value.replace('\\', "/");
-    let base = normalized
-        .rsplit('/')
-        .next()
-        .unwrap_or_default()
-        .trim();
-    let mut cleaned = base
-        .chars()
-        .filter(|character| {
-            !character.is_control()
-                && !matches!(character, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')
-        })
-        .collect::<String>();
-    while cleaned.contains("..") {
-        cleaned = cleaned.replace("..", ".");
-    }
-    let cleaned = cleaned.trim_matches(|character| character == '.' || character == ' ');
-    if cleaned.is_empty() {
-        "download".to_string()
-    } else {
-        cleaned.to_string()
-    }
-}
-
-fn default_save_dir() -> AppResult<PathBuf> {
-    let downloads = dirs::download_dir()
-        .ok_or_else(|| AppError::InvalidInput("cannot locate downloads folder".to_string()))?;
-    Ok(downloads.join("Copy-Sharer"))
-}
-
-fn transfer_save_dir(config: &AppConfig) -> AppResult<PathBuf> {
-    config
-        .file_save_dir
-        .as_deref()
-        .map(str::trim)
-        .filter(|path| !path.is_empty())
-        .map(PathBuf::from)
-        .map(Ok)
-        .unwrap_or_else(default_save_dir)
-}
-
-#[cfg(test)]
-fn unique_save_path(save_dir: &Path, file_name: &str) -> PathBuf {
-    unique_save_path_with_reserved(save_dir, file_name, &HashSet::new())
-}
-
-fn unique_save_path_with_reserved(
-    save_dir: &Path,
-    file_name: &str,
-    reserved_paths: &HashSet<PathBuf>,
-) -> PathBuf {
-    let sanitized = sanitize_file_name(file_name);
-    let candidate = save_dir.join(&sanitized);
-    if !candidate.exists()
-        && !part_path_for(&candidate).exists()
-        && !reserved_paths.contains(&candidate)
-    {
-        return candidate;
-    }
-
-    let path = Path::new(&sanitized);
-    let stem = path
-        .file_stem()
-        .and_then(|value| value.to_str())
-        .unwrap_or("download");
-    let extension = path.extension().and_then(|value| value.to_str());
-
-    for index in 1.. {
-        let name = match extension {
-            Some(extension) if !extension.is_empty() => {
-                format!("{stem} ({index}).{extension}")
-            }
-            _ => format!("{stem} ({index})"),
-        };
-        let candidate = save_dir.join(name);
-        if !candidate.exists()
-            && !part_path_for(&candidate).exists()
-            && !reserved_paths.contains(&candidate)
-        {
-            return candidate;
-        }
-    }
-    unreachable!()
-}
-
-fn part_path_for(final_path: &Path) -> PathBuf {
-    final_path.with_extension(format!(
-        "{}part",
-        final_path
-            .extension()
-            .and_then(|value| value.to_str())
-            .map(|value| format!("{value}."))
-            .unwrap_or_default()
-    ))
-}
-
 fn download_request_target(
     transfer_id: &str,
     file_id: &str,
@@ -4029,7 +4298,7 @@ fn open_folder_with_system_file_manager(path: &Path) -> AppResult<()> {
 }
 
 #[cfg(target_os = "windows")]
-fn reveal_path_with_system_file_manager(path: &Path) -> AppResult<()> {
+pub(crate) fn reveal_path_with_system_file_manager(path: &Path) -> AppResult<()> {
     std::process::Command::new("explorer")
         .arg("/select,")
         .arg(path)
@@ -4044,7 +4313,7 @@ fn open_folder_with_system_file_manager(path: &Path) -> AppResult<()> {
 }
 
 #[cfg(target_os = "macos")]
-fn reveal_path_with_system_file_manager(path: &Path) -> AppResult<()> {
+pub(crate) fn reveal_path_with_system_file_manager(path: &Path) -> AppResult<()> {
     std::process::Command::new("open")
         .arg("-R")
         .arg(path)
@@ -4059,7 +4328,7 @@ fn open_folder_with_system_file_manager(path: &Path) -> AppResult<()> {
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
-fn reveal_path_with_system_file_manager(path: &Path) -> AppResult<()> {
+pub(crate) fn reveal_path_with_system_file_manager(path: &Path) -> AppResult<()> {
     let folder = path.parent().ok_or_else(|| {
         AppError::InvalidInput("source file parent folder is missing".to_string())
     })?;
@@ -4096,8 +4365,8 @@ mod tests {
     use super::{
         advertised_download_endpoint, apply_completed_clipboard_file_sync_core,
         current_transfer_save_dir, download_request_target, file_resume_control_sender_is_trusted,
-        hash_partial_file, new_transfer_file, part_path_for, pending_clipboard_file_content,
-        receive_http_to_part, sanitize_file_name,
+        hash_partial_file, new_transfer_file, part_path_for,
+        pending_clipboard_file_content_for_file, receive_http_to_part, sanitize_file_name,
         source_file_path_from_history_item, transfer_save_dir, trusted_transfer_peer,
         transfer_snapshot, unique_save_path, validate_transfer_limits, DownloadClaimError,
         FileTransferManager, ManagedTransferFile, MAX_TRANSFER_FILE_COUNT,
@@ -4138,6 +4407,8 @@ mod tests {
             content_type: ClipboardContentType::FileList,
             sync_status: SyncStatus::Synced,
             file_transfer_id: None,
+            file_transfer_file_id: None,
+            clipboard_batch_id: None,
             file_transfer_status: None,
             is_pinned: false,
             pinned_at: None,
@@ -5147,7 +5418,8 @@ mod tests {
             .await;
         let task = manager.task(&transfer_id).await.expect("task should exist");
 
-        let content = pending_clipboard_file_content(&task).expect("pending content");
+        let content = pending_clipboard_file_content_for_file(&task.files[0], None)
+            .expect("pending content");
         let entries: Vec<crate::clipboard::ClipboardFileEntry> =
             serde_json::from_str(&content).expect("metadata should parse");
 
@@ -5485,6 +5757,7 @@ mod tests {
                 None,
             ));
             transfer.task.total_size = 11;
+            transfer.requested_file_ids.insert("file-2".to_string());
             transfer.files.insert(
                 "file-2".to_string(),
                 ManagedTransferFile {
@@ -5514,6 +5787,82 @@ mod tests {
         assert_eq!(plan.token.as_deref(), Some("second-token"));
         let _ = fs::remove_file(first_part);
         let _ = fs::remove_file(second_part);
+    }
+
+    #[tokio::test]
+    async fn next_receive_plan_ignores_unrequested_batch_files() {
+        let first_part = temp_path("selected-first.part");
+        let manager = FileTransferManager::new();
+        let transfer_id = manager
+            .insert_test_receive_task(
+                "device-a",
+                "first.txt",
+                5,
+                "hash-1",
+                first_part.clone(),
+            )
+            .await;
+        {
+            let mut tasks = manager.tasks.lock().await;
+            let transfer = tasks.get_mut(&transfer_id).unwrap();
+            transfer.task.files[0].status = FileTransferFileStatus::Completed;
+            transfer.task.files[0].transferred_bytes = 5;
+            transfer.task.files.push(new_transfer_file(
+                "file-2".to_string(),
+                "second.txt".to_string(),
+                6,
+                "hash-2".to_string(),
+                None,
+            ));
+            transfer.task.total_size = 11;
+        }
+
+        assert!(manager
+            .next_receive_plan(&transfer_id)
+            .await
+            .unwrap()
+            .is_none());
+        let _ = fs::remove_file(first_part);
+    }
+
+    #[tokio::test]
+    async fn finishing_one_requested_file_keeps_the_batch_pending() {
+        let first_part = temp_path("finished-selected.part");
+        let manager = FileTransferManager::new();
+        let transfer_id = manager
+            .insert_test_receive_task(
+                "device-a",
+                "first.txt",
+                5,
+                "hash-1",
+                first_part.clone(),
+            )
+            .await;
+        {
+            let mut tasks = manager.tasks.lock().await;
+            let transfer = tasks.get_mut(&transfer_id).unwrap();
+            transfer.task.files[0].status = FileTransferFileStatus::Completed;
+            transfer.task.files[0].transferred_bytes = 5;
+            transfer.task.files.push(new_transfer_file(
+                "file-2".to_string(),
+                "second.txt".to_string(),
+                6,
+                "hash-2".to_string(),
+                None,
+            ));
+            transfer.task.total_size = 11;
+        }
+
+        let (task, completed) = manager
+            .finish_receive_selection(&transfer_id)
+            .await
+            .unwrap();
+
+        assert_eq!(task.status, FileTransferStatus::Pending);
+        assert_eq!(completed.len(), 1);
+        assert_eq!(completed[0].file_id, "file-1");
+        assert_eq!(task.files[1].status, FileTransferFileStatus::Pending);
+        let _ = fs::remove_file(first_part);
     }
 
     #[tokio::test]

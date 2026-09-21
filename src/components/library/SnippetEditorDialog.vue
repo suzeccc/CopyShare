@@ -88,7 +88,7 @@ function cancelFromBackdrop(event: MouseEvent) {
             {{ item ? "编辑常用片段" : "新建文本片段" }}
           </h2>
           <p class="mt-1 text-[12px] text-[color:var(--muted-text)]">
-            保存经常发送的回复、地址或说明，之后可一键复制。
+            保存经常发送的回复、地址或说明，之后可一键复制
           </p>
         </div>
 

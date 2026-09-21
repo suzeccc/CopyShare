@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 
 import {
   applyClipboardFileDownloadProgress,
+  clipboardFileDownloadActivityFromFile,
   clipboardFileDownloadActivityFromTask,
+  clipboardFileDownloadKey,
   getClipboardFileCardAction,
   getClipboardFileDownloadFeedback,
   limitClipboardFileDownloads,
@@ -17,6 +19,7 @@ const item: ClipboardPreviewItem = {
   direction: "remote",
   syncStatus: "synced",
   fileTransferId: "transfer-file",
+  fileTransferFileId: "file-a",
   fileTransferStatus: "pending",
 };
 
@@ -27,7 +30,22 @@ function task(status: FileTransferTask["status"]): FileTransferTask {
     peerDeviceId: "device-a",
     peerDeviceName: "Suzec",
     clipboardSync: true,
-    files: [],
+    files: [{
+      id: "file-a",
+      name: "茶话间.lnk",
+      size: 1000,
+      sha256: "hash-a",
+      savedPath: status === "completed" ? "C:/Downloads/茶话间.lnk" : null,
+      transferredBytes: status === "completed" ? 1000 : 0,
+      status: status === "completed"
+        ? "completed"
+        : status === "failed"
+          ? "failed"
+          : status === "pending"
+            ? "pending"
+            : "transferring",
+      error: status === "failed" ? "connection closed" : null,
+    }],
     totalSize: 1000,
     transferredBytes: status === "completed" ? 1000 : 0,
     status,
@@ -36,6 +54,21 @@ function task(status: FileTransferTask["status"]): FileTransferTask {
     error: status === "failed" ? "connection closed" : null,
   };
 }
+
+assert.equal(clipboardFileDownloadKey("transfer-file", "file-a"), "transfer-file:file-a");
+assert.equal(clipboardFileDownloadKey("transfer-file"), "transfer-file");
+assert.equal(clipboardFileDownloadKey(undefined, "file-a"), undefined);
+
+const pausedFileTask = task("paused");
+assert.deepEqual(
+  clipboardFileDownloadActivityFromFile(pausedFileTask, pausedFileTask.files[0]),
+  {
+    status: "paused",
+    transferredBytes: 0,
+    totalSize: 1000,
+    error: null,
+  },
+);
 
 assert.deepEqual(getClipboardFileDownloadFeedback(item), {
   state: "ready",

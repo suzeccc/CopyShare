@@ -1,6 +1,7 @@
 import type { ClipboardPreviewItem } from "@/lib/historyPreview";
 import type {
   FileTransferProgressEvent,
+  FileTransferFile,
   FileTransferStatus,
   FileTransferTask,
 } from "@/types/fileTransfer";
@@ -36,7 +37,17 @@ export type ClipboardFileCardAction =
   | "openSourceLocation"
   | "unavailable";
 
-export const CLIPBOARD_FILE_DOWNLOAD_LIMIT = 100;
+export const CLIPBOARD_FILE_DOWNLOAD_LIMIT = 500;
+
+export function clipboardFileDownloadKey(
+  transferId?: string,
+  fileId?: string,
+): string | undefined {
+  if (!transferId) {
+    return undefined;
+  }
+  return fileId ? `${transferId}:${fileId}` : transferId;
+}
 
 export function clipboardFileDownloadActivityFromTask(
   task: FileTransferTask,
@@ -46,6 +57,22 @@ export function clipboardFileDownloadActivityFromTask(
     transferredBytes: task.transferredBytes,
     totalSize: task.totalSize,
     error: task.error,
+  };
+}
+
+export function clipboardFileDownloadActivityFromFile(
+  task: FileTransferTask,
+  file: FileTransferFile,
+): ClipboardFileDownloadActivity {
+  const status = file.status === "transferring"
+    && (task.status === "waitingForPeer" || task.status === "retrying" || task.status === "paused")
+    ? task.status
+    : file.status;
+  return {
+    status,
+    transferredBytes: file.transferredBytes,
+    totalSize: file.size,
+    error: file.error ?? task.error,
   };
 }
 

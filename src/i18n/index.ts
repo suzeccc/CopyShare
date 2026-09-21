@@ -1,8 +1,10 @@
 import englishCatalog from "../../locales/en-US.json" with { type: "json" };
+import traditionalCatalog from "../../locales/zh-TW.json" with { type: "json" };
+import japaneseCatalog from "../../locales/ja-JP.json" with { type: "json" };
 
 import type { UiLanguage } from "@/types/config";
 
-export type EffectiveLocale = "zh-CN" | "en-US";
+export type EffectiveLocale = "zh-CN" | "zh-TW" | "en-US" | "ja-JP";
 
 const HAN_PATTERN = /[\u3400-\u9fff]/u;
 const LOCALIZED_ATTRIBUTES = ["aria-label", "placeholder", "title"] as const;
@@ -17,17 +19,40 @@ const TEXT_IGNORE_SELECTOR = [
 ].join(",");
 const ATTRIBUTE_IGNORE_SELECTOR = "[data-i18n-ignore]";
 const english = englishCatalog as Record<string, string>;
+const catalogs: Record<Exclude<EffectiveLocale, "zh-CN">, Record<string, string>> = {
+  "zh-TW": traditionalCatalog as Record<string, string>,
+  "en-US": english,
+  "ja-JP": { ...english, ...(japaneseCatalog as Record<string, string>) },
+};
+const nativeErrorSources: Record<string, string> = {
+  "clipboard error: ": "剪贴板错误：",
+  "the clipboard contents were not available in the requested format or the clipboard is empty.": "剪贴板为空或不包含所需格式的内容",
+  "the selected clipboard is not supported with the current system configuration.": "当前系统配置不支持此剪贴板",
+  "the native clipboard is not accessible due to being held by another party.": "剪贴板被其他程序占用，暂时无法访问",
+  "the image or the text that was about the be transferred to/from the clipboard could not be converted to the appropriate format.": "图片或文字无法转换成剪贴板支持的格式",
+  "unknown error while interacting with the clipboard: ": "访问剪贴板时发生未知错误：",
+};
+for (const source of Object.values(nativeErrorSources)) {
+  const translated = english[source.replace(/：$/u, "")];
+  if (translated) nativeErrorSources[(translated + (source.endsWith("：") ? ": " : "")).toLowerCase()] = source;
+}
+const nativeErrorPattern = new RegExp(Object.keys(nativeErrorSources).map(escapeRegExp).join("|"), "gi");
+
+function normalizeNativeError(value: string): string {
+  return value.replace(nativeErrorPattern, phrase => nativeErrorSources[phrase.toLowerCase()] ?? phrase);
+}
 const phrasePattern = new RegExp(
   Object.keys(english)
-    .filter((phrase) => english[phrase] !== phrase)
+    .filter((phrase) => Object.values(catalogs).some((catalog) => catalog[phrase] !== phrase))
     .sort((left, right) => right.length - left.length)
     .map(escapeRegExp)
     .join("|"),
   "gu",
 );
 
-const originalText = new WeakMap<Text, string>();
-const originalAttributes = new WeakMap<Element, Map<string, string>>();
+type OriginalValue = { source: string; translated: string };
+const originalText = new WeakMap<Text, OriginalValue>();
+const originalAttributes = new WeakMap<Element, Map<string, OriginalValue>>();
 
 let preference: UiLanguage = "system";
 let effectiveLocale: EffectiveLocale = resolveUiLanguage(preference);
@@ -41,10 +66,14 @@ export function resolveUiLanguage(
   language: UiLanguage,
   systemLanguage = typeof navigator === "undefined" ? "en-US" : navigator.language,
 ): EffectiveLocale {
-  if (language === "zh-CN" || language === "en-US") {
+  if (language !== "system") {
     return language;
   }
-  return systemLanguage.toLowerCase().startsWith("zh") ? "zh-CN" : "en-US";
+  const system = systemLanguage.toLowerCase();
+  if (system.startsWith("zh-tw") || system.startsWith("zh-hk") || system.startsWith("zh-mo")) return "zh-TW";
+  if (system.startsWith("zh")) return "zh-CN";
+  if (system.startsWith("ja")) return "ja-JP";
+  return "en-US";
 }
 
 export function getUiLanguage(): UiLanguage {
@@ -56,12 +85,13 @@ export function getEffectiveLocale(): EffectiveLocale {
 }
 
 export function translateSource(value: string, locale = effectiveLocale): string {
+  value = normalizeNativeError(value);
   if (locale === "zh-CN" || !HAN_PATTERN.test(value)) {
     return value;
   }
   HAN_PATTERN.lastIndex = 0;
   return value
-    .replace(phrasePattern, (phrase) => english[phrase] ?? phrase)
+    .replace(phrasePattern, (phrase) => catalogs[locale][phrase] ?? phrase)
     .replaceAll("，", ", ")
     .replaceAll("。", ".")
     .replaceAll("：", ": ")
@@ -84,21 +114,22 @@ function localizeTextNode(node: Text): void {
     return;
   }
 
+  const current = normalizeNativeError(node.data);
+  const remembered = originalText.get(node);
+  const source = remembered && current === remembered.translated ? remembered.source : current;
   if (effectiveLocale === "zh-CN") {
-    const source = originalText.get(node);
-    if (source !== undefined && node.data !== source) {
+    if (node.data !== source) {
       node.data = source;
     }
     originalText.delete(node);
     return;
   }
 
-  const current = node.data;
-  if (HAN_PATTERN.test(current)) {
+  if (HAN_PATTERN.test(source)) {
     HAN_PATTERN.lastIndex = 0;
-    originalText.set(node, current);
-    const translated = translateSource(current);
-    if (translated !== current) {
+    const translated = translateSource(source);
+    originalText.set(node, { source, translated });
+    if (node.data !== translated) {
       node.data = translated;
     }
   }
@@ -111,17 +142,22 @@ function localizeElementAttributes(element: Element): void {
 
   const stored = originalAttributes.get(element);
   if (effectiveLocale === "zh-CN") {
-    if (!stored) return;
-    for (const [name, value] of stored) {
-      element.setAttribute(name, value);
+    for (const name of LOCALIZED_ATTRIBUTES) {
+      const value = stored?.get(name)?.source ?? element.getAttribute(name);
+      if (value !== null) {
+        if (element.getAttribute(name) !== value) element.setAttribute(name, value);
+      }
     }
     originalAttributes.delete(element);
     return;
   }
 
   for (const name of LOCALIZED_ATTRIBUTES) {
-    const current = element.getAttribute(name);
-    if (!current || !HAN_PATTERN.test(current)) {
+    const value = element.getAttribute(name);
+    const current = value === null ? null : normalizeNativeError(value);
+    const remembered = stored?.get(name);
+    const source = remembered && current === remembered.translated ? remembered.source : current;
+    if (!source || !HAN_PATTERN.test(source)) {
       HAN_PATTERN.lastIndex = 0;
       continue;
     }
@@ -131,8 +167,9 @@ function localizeElementAttributes(element: Element): void {
       originals = new Map();
       originalAttributes.set(element, originals);
     }
-    originals.set(name, current);
-    element.setAttribute(name, translateSource(current));
+    const translated = translateSource(source);
+    originals.set(name, { source, translated });
+    if (value !== translated) element.setAttribute(name, translated);
   }
 }
 

@@ -69,7 +69,7 @@ assert.doesNotMatch(
   /notifications::notify_test\(&app\);\s*Ok\(\(\)\)/,
 );
 assert.match(libRs, /commands::send_test_notification/);
-assert.match(tauriTs, /sendTestNotification/);
+assert.doesNotMatch(tauriTs, /export function sendTestNotification/);
 assert.match(settingsVue, /data-desktop-notification-settings/);
 assert.doesNotMatch(settingsVue, /sendTestNotification/);
 assert.doesNotMatch(settingsVue, /发送测试通知/);
@@ -83,3 +83,8 @@ assert.match(configStoreTs, /notificationClipboardPreview:\s*true/);
 assert.match(settingsVue, /设备上线\/离线提醒/);
 assert.match(settingsVue, /发现设备上线或离线时提醒/);
 assert.match(configStoreTs, /notifyDeviceStatus:\s*true/);
+assert.match(settingsVue, /<Transition name="notification-options">/);
+assert.match(settingsVue, /v-if="draft\.desktopNotifications"/);
+assert.match(settingsVue, /data-notification-options/);
+assert.match(settingsVue, /grid-template-rows 340ms cubic-bezier\(0\.22, 1, 0\.36, 1\)/);
+assert.match(settingsVue, /notification-options-enter-from[\s\S]*grid-template-rows: 0fr/);

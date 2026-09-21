@@ -70,6 +70,10 @@ docs/superpowers/
 /previews/
 /.planning/
 /.codex-release.json
+/.workbuddy/
+/icon-design/
+/website/
+/scripts/_gen_media_preview.cjs
 
 # Frontend caches and reports
 /coverage/

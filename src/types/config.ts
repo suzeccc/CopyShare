@@ -1,15 +1,20 @@
+import type { AppWindowMode } from "../lib/windowMode";
+
 export type AppTheme = "copyBlue" | "win11Dark" | "macosLight" | "macosDark";
 export type CloseAction = "ask" | "minimize" | "exit";
 export type TranslationEngine = "google" | "ai";
-export type UiLanguage = "system" | "zh-CN" | "en-US";
+export type UiLanguage = "system" | "zh-CN" | "zh-TW" | "en-US" | "ja-JP";
+export type SyncDirection = "bidirectional" | "sendOnly" | "receiveOnly";
 
 export interface AppConfig {
   configVersion: number;
+  onboardingCompleted: boolean;
   uiLanguage: UiLanguage;
   deviceName: string;
   deviceId: string;
   theme: AppTheme;
   closeAction: CloseAction;
+  startupWindowMode: AppWindowMode;
   port: number;
   autoStart: boolean;
   autoSync: boolean;
@@ -28,6 +33,7 @@ export interface AppConfig {
   syncText: boolean;
   syncImage: boolean;
   syncFiles: boolean;
+  syncDirection: SyncDirection;
   maxSendFileSizeMib: number;
   maxReceiveFileSizeMib: number;
   deduplicateSyncContent: boolean;

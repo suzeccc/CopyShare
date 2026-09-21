@@ -1,11 +1,9 @@
-use std::collections::{HashSet, VecDeque};
 use std::path::PathBuf;
 use std::time::Duration;
 
 use chrono::Utc;
 use futures_util::{SinkExt, StreamExt};
-use sha2::{Digest, Sha256};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, TcpStream};
 #[cfg(test)]
@@ -23,7 +21,7 @@ use crate::{
     history,
     mobile,
     models::{
-        ClipboardContentType, ClipboardEventVersion, ClipboardMessage, DeviceInfo, DeviceStatus,
+        ClipboardContentType, ClipboardMessage, DeviceInfo, DeviceStatus,
         HistoryDirection, SyncState, SyncStatus, WireMessage, FILE_RESUME_CAPABILITY,
     },
     network,
@@ -36,7 +34,6 @@ use crate::models::AppConfig;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
 const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(60);
-const MAX_TRACKED_CLIPBOARD_MESSAGES: usize = 1_024;
 const AUTO_CONNECT_RETRY_DELAYS: [Duration; 6] = [
     Duration::from_secs(0),
     Duration::from_secs(1),
@@ -53,285 +50,7 @@ fn heartbeat_timed_out(
     now.duration_since(last_seen_at) >= HEARTBEAT_TIMEOUT
 }
 
-pub fn content_hash(content_type: &ClipboardContentType, content: &str) -> String {
-    let mut hasher = Sha256::new();
-    let format = match content_type {
-        ClipboardContentType::Text => "text",
-        ClipboardContentType::Image => "image",
-        ClipboardContentType::FileList => "fileList",
-    };
-    hasher.update(format.as_bytes());
-    hasher.update([0]);
-    hasher.update(content.as_bytes());
-    format!("{:x}", hasher.finalize())
-}
-
-#[derive(Debug, Clone)]
-pub struct SyncEngine {
-    device_id: String,
-    device_name: String,
-    seen_message_ids: HashSet<String>,
-    seen_message_order: VecDeque<String>,
-    last_local_hash: Option<String>,
-    last_remote_hash: Option<String>,
-    pending_remote_echo_hashes: HashSet<String>,
-    pending_remote_echo_order: VecDeque<String>,
-    synchronized_content_hashes: HashSet<String>,
-    synchronized_content_order: VecDeque<String>,
-    next_origin_sequence: u64,
-    hlc_physical_ms: i64,
-    hlc_logical: u32,
-    last_event_order: Option<ClipboardEventOrder>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-struct ClipboardEventOrder {
-    version: ClipboardEventVersion,
-    message_id: String,
-}
-
-impl SyncEngine {
-    pub fn new(device_id: impl Into<String>, device_name: impl Into<String>) -> Self {
-        Self {
-            device_id: device_id.into(),
-            device_name: device_name.into(),
-            seen_message_ids: HashSet::new(),
-            seen_message_order: VecDeque::new(),
-            last_local_hash: None,
-            last_remote_hash: None,
-            pending_remote_echo_hashes: HashSet::new(),
-            pending_remote_echo_order: VecDeque::new(),
-            synchronized_content_hashes: HashSet::new(),
-            synchronized_content_order: VecDeque::new(),
-            next_origin_sequence: 0,
-            hlc_physical_ms: 0,
-            hlc_logical: 0,
-            last_event_order: None,
-        }
-    }
-
-    pub fn set_device(&mut self, device_id: impl Into<String>, device_name: impl Into<String>) {
-        self.device_id = device_id.into();
-        self.device_name = device_name.into();
-    }
-
-    pub fn observe_local_text(&mut self, text: impl Into<String>) -> Option<ClipboardMessage> {
-        self.observe_local_content(ClipboardContentType::Text, text)
-    }
-
-    pub fn observe_local_image(
-        &mut self,
-        image_base64: impl Into<String>,
-    ) -> Option<ClipboardMessage> {
-        self.observe_local_content(ClipboardContentType::Image, image_base64)
-    }
-
-    pub fn observe_local_file_list(
-        &mut self,
-        file_list: impl Into<String>,
-    ) -> Option<ClipboardMessage> {
-        self.observe_local_content(ClipboardContentType::FileList, file_list)
-    }
-
-    fn observe_local_content(
-        &mut self,
-        content_type: ClipboardContentType,
-        content: impl Into<String>,
-    ) -> Option<ClipboardMessage> {
-        self.observe_local_content_at(content_type, content, Utc::now().timestamp_millis())
-    }
-
-    fn observe_local_content_at(
-        &mut self,
-        content_type: ClipboardContentType,
-        content: impl Into<String>,
-        now_ms: i64,
-    ) -> Option<ClipboardMessage> {
-        let content = content.into();
-        let local_hash = content_hash(&content_type, &content);
-
-        if self.pending_remote_echo_hashes.remove(&local_hash) {
-            self.pending_remote_echo_order
-                .retain(|hash| hash != &local_hash);
-            self.last_local_hash = Some(local_hash);
-            return None;
-        }
-
-        if self.last_local_hash.as_deref() == Some(&local_hash) {
-            return None;
-        }
-
-        self.next_origin_sequence = self.next_origin_sequence.saturating_add(1);
-        let event_version = self.next_local_event_version(now_ms);
-        let message = ClipboardMessage {
-            message_id: Uuid::new_v4().to_string(),
-            source_device_id: self.device_id.clone(),
-            source_device_name: self.device_name.clone(),
-            content_type,
-            content,
-            content_hash: local_hash.clone(),
-            timestamp: now_ms.div_euclid(1000),
-            origin_sequence: Some(self.next_origin_sequence),
-            event_version: Some(event_version),
-        };
-        self.last_local_hash = Some(local_hash);
-        self.last_event_order = Some(event_order(&message));
-        insert_bounded(
-            &mut self.seen_message_ids,
-            &mut self.seen_message_order,
-            message.message_id.clone(),
-        );
-        Some(message)
-    }
-
-    fn next_local_event_version(&mut self, now_ms: i64) -> ClipboardEventVersion {
-        if now_ms > self.hlc_physical_ms {
-            self.hlc_physical_ms = now_ms;
-            self.hlc_logical = 0;
-        } else {
-            self.hlc_logical = self.hlc_logical.saturating_add(1);
-        }
-
-        ClipboardEventVersion {
-            physical_ms: self.hlc_physical_ms,
-            logical: self.hlc_logical,
-            origin_device_id: self.device_id.clone(),
-        }
-    }
-
-    fn observe_remote_event_version(&mut self, version: &ClipboardEventVersion) {
-        let now_ms = Utc::now().timestamp_millis();
-        let next_physical_ms = now_ms
-            .max(self.hlc_physical_ms)
-            .max(version.physical_ms);
-        self.hlc_logical = if next_physical_ms == self.hlc_physical_ms
-            && next_physical_ms == version.physical_ms
-        {
-            self.hlc_logical.max(version.logical).saturating_add(1)
-        } else if next_physical_ms == self.hlc_physical_ms {
-            self.hlc_logical.saturating_add(1)
-        } else if next_physical_ms == version.physical_ms {
-            version.logical.saturating_add(1)
-        } else {
-            0
-        };
-        self.hlc_physical_ms = next_physical_ms;
-    }
-
-    #[cfg(test)]
-    fn observe_local_text_at(
-        &mut self,
-        text: impl Into<String>,
-        now_ms: i64,
-    ) -> Option<ClipboardMessage> {
-        self.observe_local_content_at(ClipboardContentType::Text, text, now_ms)
-    }
-
-    pub fn reset_local_observation(&mut self) {
-        self.last_local_hash = None;
-    }
-
-    pub fn should_skip_synchronized_content(&self, enabled: bool, hash: &str) -> bool {
-        enabled && self.synchronized_content_hashes.contains(hash)
-    }
-
-    pub fn mark_content_synchronized(&mut self, hash: String) {
-        insert_bounded(
-            &mut self.synchronized_content_hashes,
-            &mut self.synchronized_content_order,
-            hash,
-        );
-    }
-
-    #[cfg(test)]
-    pub fn should_apply_remote_message(&mut self, message: &ClipboardMessage) -> bool {
-        self.should_apply_remote_message_with_deduplication(message, true)
-    }
-
-    pub fn should_apply_remote_message_with_deduplication(
-        &mut self,
-        message: &ClipboardMessage,
-        deduplicate_sync_content: bool,
-    ) -> bool {
-        if message.source_device_id == self.device_id {
-            return false;
-        }
-
-        if self.seen_message_ids.contains(&message.message_id) {
-            return false;
-        }
-
-        let incoming_order = event_order(message);
-        if self
-            .last_event_order
-            .as_ref()
-            .is_some_and(|current| incoming_order <= *current)
-        {
-            return false;
-        }
-
-        let duplicate_content = deduplicate_sync_content
-            && (self.last_remote_hash.as_deref() == Some(&message.content_hash)
-                || self.last_local_hash.as_deref() == Some(&message.content_hash));
-        if duplicate_content {
-            self.mark_remote_message_observed(message, false);
-            return false;
-        }
-
-        true
-    }
-
-    pub fn mark_remote_message_applied(&mut self, message: &ClipboardMessage) {
-        self.mark_remote_message_observed(message, true);
-    }
-
-    fn mark_remote_message_observed(&mut self, message: &ClipboardMessage, track_echo: bool) {
-        insert_bounded(
-            &mut self.seen_message_ids,
-            &mut self.seen_message_order,
-            message.message_id.clone(),
-        );
-        let order = event_order(message);
-        self.observe_remote_event_version(&order.version);
-        self.last_event_order = Some(order);
-        self.last_remote_hash = Some(message.content_hash.clone());
-        self.last_local_hash = Some(message.content_hash.clone());
-        if track_echo {
-            insert_bounded(
-                &mut self.pending_remote_echo_hashes,
-                &mut self.pending_remote_echo_order,
-                message.content_hash.clone(),
-            );
-        }
-    }
-
-    #[cfg(test)]
-    pub fn apply_remote_message(&mut self, message: &ClipboardMessage) -> bool {
-        self.apply_remote_message_with_deduplication(message, true)
-    }
-
-    pub fn apply_remote_message_with_deduplication(
-        &mut self,
-        message: &ClipboardMessage,
-        deduplicate_sync_content: bool,
-    ) -> bool {
-        if !self.should_apply_remote_message_with_deduplication(
-            message,
-            deduplicate_sync_content,
-        ) {
-            return false;
-        }
-
-        self.mark_remote_message_applied(message);
-        true
-    }
-
-    #[cfg(test)]
-    pub fn should_suppress_watcher_echo(&self, content: &str) -> bool {
-        let hash = content_hash(&ClipboardContentType::Text, content);
-        self.pending_remote_echo_hashes.contains(&hash)
-    }
-}
+pub use crate::sync_engine::{content_hash, SyncEngine};
 
 pub async fn run_sync_runtime(app: AppHandle, state: AppState, mut stop_rx: watch::Receiver<bool>) {
     let config = state.config().await;
@@ -341,7 +60,14 @@ pub async fn run_sync_runtime(app: AppHandle, state: AppState, mut stop_rx: watc
     let listener = match TcpListener::bind(("0.0.0.0", config.port)).await {
         Ok(listener) => listener,
         Err(error) => {
-            let message = format!("无法监听端口 {}：{}", config.port, error);
+            eprintln!(
+                "CopyShare failed to listen on port {}: {error}",
+                config.port
+            );
+            let message = format!(
+                "无法启动同步：端口 {} 可能已被其他程序占用。请更换监听端口后重试",
+                config.port
+            );
             state.set_error(message.clone()).await;
             notifications::notify_sync_error(&app, &config, &message);
             let _ = app.emit("sync-error", message);
@@ -388,18 +114,21 @@ pub async fn run_sync_runtime(app: AppHandle, state: AppState, mut stop_rx: watc
                                     let _ = spawn_socket(app_for_task, state_for_task, connection_id, socket).await;
                                 }
                                 Err(error) => {
-                                    emit_sync_error(
-                                        &app_for_task,
-                                        &state_for_task,
-                                        format!("WebSocket 握手失败：{error}"),
-                                    )
-                                    .await;
+                                    eprintln!(
+                                        "CopyShare ignored an invalid incoming connection from {connection_id}: {error}"
+                                    );
                                 }
                             }
                         });
                     }
                     Err(error) => {
-                        emit_sync_error(&app, &state, format!("设备连接失败：{error}")).await;
+                        eprintln!("CopyShare failed to accept an incoming connection: {error}");
+                        emit_sync_error(
+                            &app,
+                            &state,
+                            "同步服务暂时无法接收新连接，请重新启动同步后再试".to_string(),
+                        )
+                        .await;
                     }
                 }
             }
@@ -420,33 +149,6 @@ async fn is_file_transfer_http_stream(stream: &TcpStream) -> bool {
     }
 }
 
-fn event_order(message: &ClipboardMessage) -> ClipboardEventOrder {
-    ClipboardEventOrder {
-        version: message.effective_event_version(),
-        message_id: message.message_id.clone(),
-    }
-}
-
-fn insert_bounded(set: &mut HashSet<String>, order: &mut VecDeque<String>, value: String) {
-    if set.insert(value.clone()) {
-        order.push_back(value);
-    }
-
-    while let Some(front) = order.front() {
-        if set.contains(front) {
-            break;
-        }
-        order.pop_front();
-    }
-
-    while set.len() > MAX_TRACKED_CLIPBOARD_MESSAGES {
-        let Some(oldest) = order.pop_front() else {
-            break;
-        };
-        set.remove(&oldest);
-    }
-}
-
 fn is_file_transfer_http_request_prefix(bytes: &[u8]) -> bool {
     let Ok(text) = std::str::from_utf8(bytes) else {
         return false;
@@ -458,8 +160,22 @@ pub fn start_clipboard_monitor(app: AppHandle, state: AppState) {
     tauri::async_runtime::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_millis(450));
         let mut last_clipboard_sequence = None;
+        let mut last_image = None;
+        let mut last_read_options = None;
         loop {
             interval.tick().await;
+            let config = state.config().await;
+            let read_options = (
+                config.sync_text,
+                config.sync_image,
+                config.sync_files,
+                config.sync_direction,
+            );
+            if last_read_options != Some(read_options) {
+                last_read_options = Some(read_options);
+                last_clipboard_sequence = None;
+                last_image = None;
+            }
             let current_clipboard_sequence = clipboard::clipboard_sequence_number();
             if !should_poll_clipboard_sequence(
                 &mut last_clipboard_sequence,
@@ -467,22 +183,34 @@ pub fn start_clipboard_monitor(app: AppHandle, state: AppState) {
             ) {
                 continue;
             }
-            let config = state.config().await;
             if should_reset_local_observation_for_sequence(
                 config.deduplicate_sync_content,
                 current_clipboard_sequence,
             ) {
                 state.reset_local_clipboard_observation().await;
             }
-            if let Err(error) = poll_local_clipboard(&app, &state).await {
+            if current_clipboard_sequence.is_some() {
+                last_image = None;
+            }
+            if let Err(error) = poll_local_clipboard(
+                &app,
+                &state,
+                &mut last_image,
+                current_clipboard_sequence.is_none(),
+            )
+            .await
+            {
+                last_clipboard_sequence = None;
+                last_image = None;
                 emit_sync_error(&app, &state, error.to_string()).await;
             }
         }
     });
 }
 
-fn should_poll_clipboard_sequence(last_sequence: &mut Option<u32>, current: Option<u32>) -> bool {
+fn should_poll_clipboard_sequence(last_sequence: &mut Option<u64>, current: Option<u64>) -> bool {
     let Some(current) = current else {
+        *last_sequence = None;
         return true;
     };
     if last_sequence.as_ref() == Some(&current) {
@@ -494,7 +222,7 @@ fn should_poll_clipboard_sequence(last_sequence: &mut Option<u32>, current: Opti
 
 fn should_reset_local_observation_for_sequence(
     deduplicate_sync_content: bool,
-    current_sequence: Option<u32>,
+    current_sequence: Option<u64>,
 ) -> bool {
     !deduplicate_sync_content && current_sequence.is_some()
 }
@@ -544,7 +272,8 @@ pub async fn wait_for_sync_ready(state: &AppState, timeout: Duration) -> AppResu
 
         if start.elapsed() >= timeout {
             return Err(AppError::ConnectionTimeout(
-                "同步启动超时：请确认端口未被占用，并允许 Windows 防火墙放行".to_string(),
+                "同步启动时间过长。请检查监听端口是否被其他程序占用，然后重新启动同步"
+                    .to_string(),
             ));
         }
 
@@ -580,6 +309,7 @@ async fn connect_to_peer_internal(
     let (socket, _) = match connect_result {
         Ok(Ok(result)) => result,
         Ok(Err(error)) => {
+            eprintln!("CopyShare connection to {ip}:{port} failed: {error}");
             return Err(AppError::ConnectionTimeout(peer_connection_failure_message(
                 &ip,
                 port,
@@ -587,6 +317,7 @@ async fn connect_to_peer_internal(
             )));
         }
         Err(_) => {
+            eprintln!("CopyShare connection to {ip}:{port} timed out");
             return Err(AppError::ConnectionTimeout(peer_connection_failure_message(
                 &ip,
                 port,
@@ -603,7 +334,7 @@ async fn connect_to_peer_internal(
             };
         if automatic_connection_canceled {
             return Err(AppError::InvalidInput(
-                "automatic connection canceled".to_string(),
+                "自动连接已取消".to_string(),
             ));
         }
     }
@@ -620,7 +351,7 @@ async fn connect_to_peer_internal(
         if automatic_connection_canceled {
             state.remove_peer(&connection_id).await;
             return Err(AppError::InvalidInput(
-                "automatic connection canceled".to_string(),
+                "自动连接已取消".to_string(),
             ));
         }
     }
@@ -1029,6 +760,20 @@ async fn handle_wire_text(app: &AppHandle, state: &AppState, connection_id: &str
             download_host,
             download_port,
         } => {
+            let config = state.config().await;
+            if !config.sync_direction.allows_receive() {
+                let _ = state
+                    .send_to_device(
+                        &sender_device_id,
+                        WireMessage::FileReject {
+                            transfer_id,
+                            receiver_device_id: config.device_id,
+                            reason: Some("本机已设置为只发送".to_string()),
+                        },
+                    )
+                    .await;
+                return;
+            }
             file_transfer::handle_file_offer(
                 app,
                 state,
@@ -1184,6 +929,9 @@ async fn handle_wire_text(app: &AppHandle, state: &AppState, connection_id: &str
                 }
             };
             let config = state.config().await;
+            if !config.sync_direction.allows_receive() {
+                return;
+            }
             if !should_accept_clipboard_type(&config, &clipboard.content_type) {
                 return;
             }
@@ -1208,7 +956,7 @@ async fn handle_wire_text(app: &AppHandle, state: &AppState, connection_id: &str
                         &clipboard,
                     );
                     state.push_history(item.clone()).await;
-                    let _ = history::save_history(app, &state.history().await);
+                    let _ = state.save_history(app).await;
                     let _ =
                         app.emit("clipboard-synced", history::history_item_for_frontend(&item));
                 }
@@ -1232,7 +980,12 @@ async fn handle_wire_text(app: &AppHandle, state: &AppState, connection_id: &str
     }
 }
 
-async fn poll_local_clipboard(app: &AppHandle, state: &AppState) -> AppResult<()> {
+async fn poll_local_clipboard(
+    app: &AppHandle,
+    state: &AppState,
+    last_image: &mut Option<[u8; 32]>,
+    compare_image_pixels: bool,
+) -> AppResult<()> {
     let config = state.config().await;
     if !should_read_local_clipboard(&config) {
         return Ok(());
@@ -1241,11 +994,15 @@ async fn poll_local_clipboard(app: &AppHandle, state: &AppState) -> AppResult<()
     let mut changed = false;
 
     if config.sync_text {
-        if let Ok(text) = clipboard::read_clipboard_text(app) {
-            if let Some(message) = state.observe_local_text(text).await {
-                record_observed_local_history(app, state, &config, &message, None).await?;
-                changed = true;
+        match clipboard::read_clipboard_text(app) {
+            Ok(text) => {
+                if let Some(message) = state.observe_local_text(text).await {
+                    record_observed_local_history(app, state, &config, &message, None, None).await?;
+                    changed = true;
+                }
             }
+            Err(error) if clipboard::clipboard_has_text_data() => return Err(error),
+            Err(_) => {}
         }
     }
 
@@ -1263,16 +1020,18 @@ async fn poll_local_clipboard(app: &AppHandle, state: &AppState) -> AppResult<()
     }
 
     if config.sync_image && !observed_file_list {
-        let image_file_summary = if config.sync_files {
-            clipboard::read_clipboard_files()
-                .ok()
-                .and_then(|files| clipboard::summarize_image_file_paths(&files).ok().flatten())
+        let image_files = clipboard::read_clipboard_files().unwrap_or_default();
+        let image_file_summary = clipboard::summarize_image_file_paths(&image_files).ok().flatten();
+        let image_source = image_files.iter().find(|path| clipboard::is_supported_image_file(path) && path.is_file());
+        let image_base64 = if compare_image_pixels {
+            clipboard::read_clipboard_image_base64_if_changed(app, last_image)?
         } else {
-            None
+            clipboard::read_clipboard_image_base64(app)?
         };
-        if let Some(image_base64) = clipboard::read_clipboard_image_base64(app)? {
+        if let Some(image_base64) = image_base64 {
             if let Some(message) = state.observe_local_image(image_base64).await {
-                record_observed_local_history(app, state, &config, &message, image_file_summary).await?;
+                record_observed_local_history(app, state, &config, &message, image_file_summary, image_source.map(|path| path.as_path()))
+                    .await?;
                 changed = true;
             }
         }
@@ -1285,7 +1044,8 @@ async fn poll_local_clipboard(app: &AppHandle, state: &AppState) -> AppResult<()
 }
 
 fn should_read_local_clipboard(config: &AppConfig) -> bool {
-    config.sync_text || config.sync_image || config.sync_files
+    config.sync_direction.allows_send()
+        && (config.sync_text || config.sync_image || config.sync_files)
 }
 
 #[cfg(test)]
@@ -1294,7 +1054,10 @@ async fn publish_local_text_if_needed(
     config: &AppConfig,
     text: String,
 ) -> Option<ClipboardMessage> {
-    if !config.sync_text || !state.has_trusted_peers(config).await {
+    if !config.sync_direction.allows_send()
+        || !config.sync_text
+        || !state.has_trusted_peers(config).await
+    {
         return None;
     }
 
@@ -1310,6 +1073,7 @@ async fn record_observed_local_history(
     config: &AppConfig,
     message: &ClipboardMessage,
     summary_override: Option<String>,
+    image_source: Option<&std::path::Path>,
 ) -> AppResult<()> {
     if state
         .should_skip_synchronized_content(config.deduplicate_sync_content, &message.content_hash)
@@ -1349,7 +1113,10 @@ async fn record_observed_local_history(
     )
     .await
     {
-        history::save_history(app, &state.history().await)?;
+        state.save_history(app).await?;
+        if let Some(path) = image_source {
+            history::save_image_source(&app.path().app_data_dir()?, &item.id, path)?;
+        }
         let _ = app.emit("clipboard-synced", history::history_item_for_frontend(&item));
     }
 
@@ -1385,17 +1152,18 @@ async fn record_observed_local_file_list(
         state.touch_last_sync().await;
     }
 
-    if let Some(item) = push_local_history_item(
+    let items = push_local_file_history_items(
         state,
         config,
         message,
         local_sync_status_from_sent_count(sent_count),
-        None,
     )
-    .await
-    {
-        history::save_history(app, &state.history().await)?;
-        let _ = app.emit("clipboard-synced", history::history_item_for_frontend(&item));
+    .await?;
+    if !items.is_empty() {
+        state.save_history(app).await?;
+        for item in items {
+            let _ = app.emit("clipboard-synced", history::history_item_for_frontend(&item));
+        }
     }
 
     Ok(())
@@ -1432,7 +1200,7 @@ fn local_sync_status_from_sent_count(sent_count: usize) -> SyncStatus {
     }
 }
 fn should_accept_clipboard_type(config: &AppConfig, content_type: &ClipboardContentType) -> bool {
-    match content_type {
+    config.sync_direction.allows_receive() && match content_type {
         ClipboardContentType::Text => config.sync_text,
         ClipboardContentType::Image => config.sync_image,
         ClipboardContentType::FileList => config.sync_files,
@@ -1443,7 +1211,7 @@ fn write_remote_clipboard(app: &AppHandle, message: &ClipboardMessage) -> AppRes
     match message.content_type {
         ClipboardContentType::Text => clipboard::write_clipboard_text(app, &message.content),
         ClipboardContentType::Image => {
-            clipboard::write_clipboard_image_base64(app, &message.content)
+            clipboard::write_clipboard_image_base64(app, &message.content, None)
         }
         ClipboardContentType::FileList => {
             let paths = clipboard::clipboard_content_to_file_paths(&message.content)?;
@@ -1587,9 +1355,58 @@ fn should_forward_applied_remote_clipboard() -> bool {
 }
 
 fn peer_connection_failure_message(ip: &str, port: u16, reason: &str) -> String {
+    let reason = reason.to_lowercase();
+    let hint = if reason.contains("handshake")
+        || reason.contains("websocket")
+        || reason.contains("protocol")
+    {
+        "对方有响应，但该端口没有完成 CopyShare 连接。通常是端口填写错误，或对方同步服务尚未准备好"
+    } else if reason.contains("refused") || reason.contains("拒绝") {
+        "对方拒绝了连接，通常是对方尚未开启同步，或端口填写错误"
+    } else if reason.contains("timed out")
+        || reason.contains("timeout")
+        || reason.contains("连接超时")
+    {
+        "没有收到对方响应，请确认双方连接的是同一个局域网"
+    } else if reason.contains("unreachable") || reason.contains("no route") {
+        "当前网络无法访问对方设备，请确认双方连接的是同一个局域网"
+    } else {
+        "暂时无法建立连接"
+    };
+
     format!(
-        "连接失败：无法连接到 {ip}:{port}。请确认对方已开启同步，并使用对方主面板显示的本机地址和端口连接；同时允许 Windows 防火墙放行端口 {port}。原因：{reason}"
+        "无法连接到 {ip}:{port}。{hint} 请确认对方已打开 CopyShare 并开启同步，然后按对方主面板显示的地址和端口重新连接"
     )
+}
+
+async fn push_local_file_history_items(
+    state: &AppState,
+    config: &AppConfig,
+    message: &ClipboardMessage,
+    sync_status: SyncStatus,
+) -> AppResult<Vec<crate::models::HistoryItem>> {
+    if !config.save_history {
+        return Ok(Vec::new());
+    }
+
+    let entries = clipboard::clipboard_content_to_file_entries(&message.content)?;
+    let mut items = Vec::with_capacity(entries.len());
+    for (index, entry) in entries.into_iter().enumerate() {
+        let content = serde_json::to_string(&[entry])?;
+        let mut file_message = message.clone();
+        file_message.message_id = format!("{}:{index}", message.message_id);
+        file_message.content_hash = content_hash(&ClipboardContentType::FileList, &content);
+        file_message.content = content;
+        let mut item = history::make_history_item_with_status(
+            HistoryDirection::Local,
+            message.source_device_name.clone(),
+            &file_message,
+            sync_status.clone(),
+        );
+        item.clipboard_batch_id = Some(message.message_id.clone());
+        items.push(state.upsert_history_by_content(item).await);
+    }
+    Ok(items)
 }
 
 async fn emit_status(app: &AppHandle, state: &AppState) {
@@ -1618,6 +1435,58 @@ mod tests {
         assert!(!should_record_synchronized_content(false, 1));
         assert!(!should_record_synchronized_content(true, 0));
         assert!(should_record_synchronized_content(true, 1));
+    }
+
+    #[tokio::test]
+    async fn local_batch_file_history_is_split_into_individual_items() {
+        let content = serde_json::to_string(&[
+            clipboard::ClipboardFileEntry {
+                path: "C:/files/a.txt".to_string(),
+                name: "a.txt".to_string(),
+                size: 3,
+                thumbnail: None,
+            },
+            clipboard::ClipboardFileEntry {
+                path: "C:/files/b.txt".to_string(),
+                name: "b.txt".to_string(),
+                size: 4,
+                thumbnail: None,
+            },
+        ])
+        .unwrap();
+        let message = ClipboardMessage {
+            message_id: "batch-1".to_string(),
+            source_device_id: "device-a".to_string(),
+            source_device_name: "Desktop".to_string(),
+            content_type: ClipboardContentType::FileList,
+            content_hash: content_hash(&ClipboardContentType::FileList, &content),
+            content,
+            timestamp: 1,
+            origin_sequence: None,
+            event_version: None,
+        };
+        let state = AppState::new();
+
+        let items = push_local_file_history_items(
+            &state,
+            &AppConfig::default(),
+            &message,
+            SyncStatus::Synced,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].summary, "a.txt 3 B");
+        assert_eq!(items[1].summary, "b.txt 4 B");
+        assert!(items
+            .iter()
+            .all(|item| item.clipboard_batch_id.as_deref() == Some("batch-1")));
+        assert!(items.iter().all(|item| {
+            clipboard::clipboard_content_to_file_entries(&item.content)
+                .map(|entries| entries.len() == 1)
+                .unwrap_or(false)
+        }));
     }
 
     fn remote_message(id: &str, content: &str) -> ClipboardMessage {
@@ -1691,7 +1560,10 @@ mod tests {
 
         assert!(device_a.apply_remote_message(&from_b));
         assert!(!device_b.apply_remote_message(&from_a));
-        assert_eq!(device_a.last_event_order, device_b.last_event_order);
+        assert_eq!(
+            device_a.last_event_order_key(),
+            device_b.last_event_order_key()
+        );
     }
 
     #[test]
@@ -1712,7 +1584,10 @@ mod tests {
         assert!(reverse_order.apply_remote_message(&from_b));
         assert!(!reverse_order.apply_remote_message(&from_a));
 
-        assert_eq!(first_order.last_event_order, reverse_order.last_event_order);
+        assert_eq!(
+            first_order.last_event_order_key(),
+            reverse_order.last_event_order_key()
+        );
     }
 
     #[test]
@@ -1737,14 +1612,14 @@ mod tests {
     fn synchronized_content_tracking_evicts_the_oldest_hash() {
         let mut engine = SyncEngine::new("device-a", "Laptop A");
 
-        for index in 0..=MAX_TRACKED_CLIPBOARD_MESSAGES {
+        for index in 0..=SyncEngine::tracking_capacity() {
             engine.mark_content_synchronized(format!("hash-{index}"));
         }
 
         assert!(!engine.should_skip_synchronized_content(true, "hash-0"));
         assert!(engine.should_skip_synchronized_content(
             true,
-            &format!("hash-{MAX_TRACKED_CLIPBOARD_MESSAGES}")
+            &format!("hash-{}", SyncEngine::tracking_capacity())
         ));
     }
 
@@ -1844,11 +1719,11 @@ mod tests {
         }
 
         assert!(
-            engine.seen_message_ids.len() <= 1_024,
+            engine.tracked_message_count() <= SyncEngine::tracking_capacity(),
             "seen message ids should not grow without bound"
         );
         assert!(
-            engine.pending_remote_echo_hashes.len() <= 1_024,
+            engine.pending_echo_count() <= SyncEngine::tracking_capacity(),
             "pending echo hashes should not grow without bound"
         );
     }
@@ -1938,6 +1813,11 @@ mod tests {
         assert!(!should_poll_clipboard_sequence(&mut last, Some(10)));
         assert!(should_poll_clipboard_sequence(&mut last, Some(11)));
         assert!(should_poll_clipboard_sequence(&mut last, None));
+        assert_eq!(last, None);
+        assert!(should_poll_clipboard_sequence(&mut last, Some(11)));
+        assert!(should_poll_clipboard_sequence(&mut last, Some(u64::from(u32::MAX) + 1)));
+        assert!(should_poll_clipboard_sequence(&mut last, Some(0)));
+        assert!(!should_poll_clipboard_sequence(&mut last, Some(0)));
     }
 
     #[test]
@@ -2803,6 +2683,18 @@ mod tests {
         assert!(should_read_local_clipboard(&config));
     }
 
+    #[test]
+    fn sync_direction_controls_local_send_and_remote_receive() {
+        let mut config = crate::models::AppConfig::default();
+        config.sync_direction = crate::models::SyncDirection::SendOnly;
+        assert!(should_read_local_clipboard(&config));
+        assert!(!should_accept_clipboard_type(&config, &ClipboardContentType::Text));
+
+        config.sync_direction = crate::models::SyncDirection::ReceiveOnly;
+        assert!(!should_read_local_clipboard(&config));
+        assert!(should_accept_clipboard_type(&config, &ClipboardContentType::Text));
+    }
+
     #[tokio::test]
     async fn trusting_connected_peer_allows_current_clipboard_to_publish() {
         let state = AppState::new();
@@ -3040,7 +2932,7 @@ mod tests {
     }
 
     #[test]
-    fn connection_failure_message_points_to_remote_sync_and_firewall() {
+    fn connection_failure_message_explains_refused_connection_without_raw_error() {
         let message = peer_connection_failure_message(
             "10.194.33.156",
             8765,
@@ -3048,10 +2940,35 @@ mod tests {
         );
 
         assert!(message.contains("10.194.33.156:8765"));
-        assert!(message.contains("对方已开启同步"));
-        assert!(message.contains("对方主面板显示的本机地址"));
-        assert!(message.contains("Windows 防火墙"));
-        assert!(message.contains("connection refused"));
+        assert!(message.contains("对方拒绝了连接"));
+        assert!(message.contains("尚未开启同步"));
+        assert!(message.contains("对方主面板显示的地址和端口"));
+        assert!(!message.contains("connection refused"));
+        assert!(!message.contains("WebSocket"));
+        assert!(!message.contains("原因："));
+    }
+
+    #[test]
+    fn connection_failure_message_explains_incomplete_handshake() {
+        let message = peer_connection_failure_message(
+            "10.194.36.96",
+            8765,
+            "WebSocket protocol error: Handshake not finished",
+        );
+
+        assert!(message.contains("对方有响应"));
+        assert!(message.contains("端口填写错误"));
+        assert!(message.contains("同步服务尚未准备好"));
+        assert!(!message.contains("Handshake"));
+        assert!(!message.contains("protocol error"));
+    }
+
+    #[test]
+    fn connection_failure_message_explains_timeout() {
+        let message = peer_connection_failure_message("10.194.36.96", 8765, "连接超时");
+
+        assert!(message.contains("没有收到对方响应"));
+        assert!(message.contains("同一个局域网"));
     }
 
     #[tokio::test]

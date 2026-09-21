@@ -7,12 +7,8 @@ const switchControl = readFileSync("src/components/ui/Switch.vue", "utf8");
 
 assert.doesNotMatch(appShell, /window-phase-/);
 assert.doesNotMatch(appShell, /is-window-mode-transitioning/);
-assert.match(style, /\.is-window-mode-transitioning\.window-phase-main-exit\.app-window-shell/);
-assert.match(style, /\.is-window-mode-transitioning\.window-phase-main-enter\.app-window-shell/);
-assert.match(style, /\.is-window-mode-transitioning\.window-phase-main-enter \.main-window-content/);
-assert.match(style, /\.is-window-mode-transitioning\.window-phase-main-exit \.main-window-content/);
-assert.doesNotMatch(style, /^\s*\.window-phase-main-enter \.main-window-content/m);
-assert.doesNotMatch(style, /^\s*\.window-phase-main-exit \.main-window-content/m);
+assert.match(style, /\.app-window-shell\[data-panel-transition="exit"\] \{\s*animation: panel-zoom-out/);
+assert.doesNotMatch(style, /window-phase-/);
 assert.match(switchControl, /@click\.stop/);
 assert.match(switchControl, /@pointerdown\.stop/);
 assert.match(switchControl, /<label\s+v-if="controlOnly"\s+class="[^"]*\brelative\b/);

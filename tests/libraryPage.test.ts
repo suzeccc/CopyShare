@@ -21,9 +21,9 @@ test("library page, navigation, cards and dialogs expose the complete phase-one 
   assert.match(router, /const Library = \(\) => import\("@\/pages\/Library\.vue"\)/);
   assert.match(router, /path: "\/library", name: "library", component: Library/);
   assert.match(sidebar, /MessageSquareText/);
-  assert.match(sidebar, /label: "常用片段", path: "\/library", icon: MessageSquareText/);
-  assert.ok(sidebar.indexOf('label: "设备连接"') < sidebar.indexOf('label: "常用片段"'));
-  assert.ok(sidebar.indexOf('label: "常用片段"') < sidebar.indexOf('label: "图转文字"'));
+  assert.match(sidebar, /label: "常用内容", path: "\/library", icon: MessageSquareText/);
+  assert.ok(sidebar.indexOf('label: "设备连接"') < sidebar.indexOf('label: "常用内容"'));
+  assert.ok(sidebar.indexOf('label: "常用内容"') < sidebar.indexOf('label: "图转文字"'));
 
   const snippetView = page.indexOf('{ value: "snippets", label: "常用片段" }');
   const allView = page.indexOf('{ value: "all", label: "全部收藏" }');
@@ -43,7 +43,7 @@ test("library page, navigation, cards and dialogs expose the complete phase-one 
   assert.match(page, /:aria-pressed="libraryLayout === 'grid'"/);
   assert.match(page, /:aria-pressed="libraryLayout === 'list'"/);
   assert.match(page, /:layout="libraryLayout"/);
-  assert.match(page, /libraryLayout === 'grid'[\s\S]*?md:grid-cols-2[\s\S]*?2xl:grid-cols-3/);
+  assert.match(page, /libraryLayout === 'grid'[\s\S]*?items-stretch[\s\S]*?repeat\(auto-fill,minmax\(min\(100%,280px\),1fr\)\)/);
   assert.match(page, /libraryLayout === 'list'[\s\S]*?'grid gap-2'/);
 
   for (const hook of [
@@ -63,6 +63,9 @@ test("library page, navigation, cards and dialogs expose the complete phase-one 
 
   for (const hook of [
     "data-library-card",
+    "data-library-card-title",
+    "data-library-card-time",
+    "data-library-card-body",
     "data-library-copy",
     "data-library-pin",
     "data-library-edit",
@@ -77,6 +80,11 @@ test("library page, navigation, cards and dialogs expose the complete phase-one 
   assert.match(card, /data-library-card-actions/);
   assert.match(card, /grid-template-columns:\s*minmax\(180px,\s*0\.8fr\)\s+minmax\(0,\s*1\.4fr\)\s+auto/);
   assert.match(card, /\.library-card--list[\s\S]*?align-items:\s*center/);
+  assert.match(card, /data-library-card-title[\s\S]*?font-semibold[\s\S]*?tracking-\[-0\.01em\]/);
+  assert.match(card, /data-library-card-time[\s\S]*?font-medium[\s\S]*?tabular-nums/);
+  assert.match(card, /data-library-card-body[\s\S]*?font-normal[\s\S]*?leading-\[1\.7\]/);
+  assert.match(card, /\.library-action\s*\{[\s\S]*?font-weight:\s*500/);
+  assert.match(card, /color-mix\(in srgb, var\(--muted-text\) 72%, transparent\)/);
   assert.doesNotMatch(card, /data-library-export/);
   assert.match(snippet, /titleError/);
   assert.match(snippet, /contentError/);

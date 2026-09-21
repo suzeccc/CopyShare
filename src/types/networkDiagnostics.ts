@@ -25,3 +25,18 @@ export interface NetworkDiagnosticReport {
   repairSupported: boolean;
   checks: NetworkDiagnosticCheck[];
 }
+
+const OPERATIONAL_NETWORK_DIAGNOSTIC_IDS = new Set([
+  "local-address",
+  "sync-listener",
+  "discovery-listener",
+  "mobile-listener",
+]);
+
+export function isOperationalNetworkDiagnostic(id: string): boolean {
+  return OPERATIONAL_NETWORK_DIAGNOSTIC_IDS.has(id);
+}
+
+export function isNetworkDiagnosticInformational(id: string): boolean {
+  return !isOperationalNetworkDiagnostic(id);
+}

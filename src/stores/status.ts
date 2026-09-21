@@ -8,6 +8,7 @@ import {
   type AppEventName,
 } from "@/lib/tauri";
 import { useDevicesStore } from "@/stores/devices";
+import { getConnectionStatusLabel } from "@/lib/statusBadge";
 import type { AppStatus } from "@/types/status";
 
 const stoppedStatus: AppStatus = {
@@ -31,15 +32,7 @@ export const useStatusStore = defineStore("status", {
     unlisten: null as (() => void) | null,
   }),
   getters: {
-    statusLabel: (state) => {
-      if (state.status.state === "running") {
-        return "同步中";
-      }
-      if (state.status.state === "error") {
-        return "连接异常";
-      }
-      return "已停止";
-    },
+    statusLabel: (state) => getConnectionStatusLabel(state.status),
   },
   actions: {
     async refresh() {

@@ -3,16 +3,25 @@ import { emitTo, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import {
   type CloseRequestedEvent,
+  availableMonitors,
   currentMonitor,
+  Effect,
   getCurrentWindow,
   LogicalPosition,
   LogicalSize,
+  PhysicalPosition,
 } from "@tauri-apps/api/window";
 
 import {
+  FLOATING_BALL_BOUNDS,
+  FLOATING_STARTUP_OFFSET,
   FLOATING_WINDOW_BOUNDS,
+  getFloatingBallDockPosition,
+  getFloatingWindowTopRightPosition,
   MAIN_WINDOW_BOUNDS,
   TRANSPARENT_WINDOW_BACKGROUND,
+  waitForWindowSize,
+  type AppWindowMode,
 } from "./windowMode.ts";
 import { translateSource } from "../i18n/index.ts";
 import type { ClipboardPreviewItem } from "@/lib/historyPreview";
@@ -20,11 +29,7 @@ import { getMediaPreviewWindowPosition } from "./mediaPreviewWindow.ts";
 import type { AppConfig } from "@/types/config";
 import type { DeviceInfo } from "@/types/device";
 import type { NetworkDiagnosticReport } from "@/types/networkDiagnostics";
-import type {
-  FileTransferProgressEvent,
-  FileTransferTask,
-  SelectedTransferFile,
-} from "@/types/fileTransfer";
+import type { FileTransferTask } from "@/types/fileTransfer";
 import type { HistoryItem } from "@/types/history";
 import type {
   CreateSnippetInput,
@@ -165,8 +170,12 @@ export function getLibraryImageThumbnail(id: string, maxSize = 200): Promise<str
   return invoke<string>("get_library_image_thumbnail", { id, maxSize });
 }
 
-export function getClipboardHistory(): Promise<Array<{ id: string; text: string }>> {
-  return invoke<Array<{ id: string; text: string }>>("get_clipboard_history");
+export function getLibraryVideoPreviewPath(id: string, assetIndex: number): Promise<string> {
+  return invoke<string>("get_library_video_preview_path", { id, assetIndex });
+}
+
+export function getClipboardHistory(): Promise<Array<{ id: string; text: string; createdAt?: string; sourceDevice?: string }>> {
+  return invoke<Array<{ id: string; text: string; createdAt?: string; sourceDevice?: string }>>("get_clipboard_history");
 }
 
 export function readClipboardText(): Promise<string> {
@@ -177,54 +186,16 @@ export function recognizeClipboardImage(): Promise<OcrResponse> {
   return invoke<OcrResponse>("recognize_clipboard_image");
 }
 
-export function selectFileForTransfer(): Promise<SelectedTransferFile | null> {
-  return invoke<SelectedTransferFile | null>("select_file_for_transfer");
-}
-
-export function selectFilesForTransfer(): Promise<SelectedTransferFile[]> {
-  return invoke<SelectedTransferFile[]>("select_files_for_transfer");
-}
-
-export function sendFileToDevice(
-  deviceId: string,
-  filePath: string,
-): Promise<FileTransferTask> {
-  return invoke<FileTransferTask>("send_file_to_device", { deviceId, filePath });
-}
-
-export function sendFilesToDevice(
-  deviceId: string,
-  filePaths: string[],
-): Promise<FileTransferTask> {
-  return invoke<FileTransferTask>("send_files_to_device", { deviceId, filePaths });
-}
-
-export function acceptFileTransfer(transferId: string): Promise<FileTransferTask> {
-  return invoke<FileTransferTask>("accept_file_transfer", { transferId });
-}
-
-export function rejectFileTransfer(transferId: string): Promise<FileTransferTask> {
-  return invoke<FileTransferTask>("reject_file_transfer", { transferId });
-}
-
-export function cancelFileTransfer(transferId: string): Promise<FileTransferTask> {
-  return invoke<FileTransferTask>("cancel_file_transfer", { transferId });
-}
-
 export function resumeFileTransfer(transferId: string): Promise<FileTransferTask> {
   return invoke<FileTransferTask>("resume_file_transfer", { transferId });
-}
-
-export function getFileTransfers(): Promise<FileTransferTask[]> {
-  return invoke<FileTransferTask[]>("get_file_transfers");
 }
 
 export function getTransferSaveDir(): Promise<string> {
   return invoke<string>("get_transfer_save_dir");
 }
 
-export function selectTransferSaveDir(): Promise<AppConfig | null> {
-  return invoke<AppConfig | null>("select_transfer_save_dir");
+export function selectTransferSaveDir(persist = true): Promise<AppConfig | null> {
+  return invoke<AppConfig | null>("select_transfer_save_dir", { persist });
 }
 
 export function resetTransferSaveDir(): Promise<AppConfig> {
@@ -291,6 +262,10 @@ export function getHistoryFilePreviewPath(historyId: string): Promise<string> {
   return invoke<string>("get_history_file_preview_path", { historyId });
 }
 
+export function saveHistoryMedia(historyId: string): Promise<boolean> {
+  return invoke<boolean>("save_history_media", { historyId });
+}
+
 export function convertLocalFileSrc(filePath: string): string {
   return convertFileSrc(filePath);
 }
@@ -313,14 +288,15 @@ export const FLOATING_CLIPBOARD_WINDOW_BOUNDS = {
 
 export const FLOATING_CLIPBOARD_HISTORY_STORAGE_KEY = "copyshare:floating-clipboard-history";
 
-export type MediaPreviewKind = "image" | "video";
-
 export type MediaPreviewPayload = {
-  kind: MediaPreviewKind;
+  kind: "image" | "video";
   historyId: string;
   title: string;
-  src?: string;
+  src: string;
+  items?: ClipboardPreviewItem[];
 };
+
+export const MEDIA_PREVIEW_ITEMS_STORAGE_KEY = "copyshare:media-preview-items";
 
 export type FloatingClipboardHistoryPayload = {
   items: ClipboardPreviewItem[];
@@ -332,9 +308,7 @@ function mediaPreviewUrl(payload: MediaPreviewPayload): string {
     historyId: payload.historyId,
     title: payload.title,
   });
-  if (payload.src) {
-    params.set("src", payload.src);
-  }
+  params.set("src", payload.src);
   return `/#/media-preview?${params.toString()}`;
 }
 
@@ -381,6 +355,7 @@ async function mediaPreviewInitialPosition(): Promise<LogicalPosition | undefine
 }
 
 export async function openMediaPreviewWindow(payload: MediaPreviewPayload): Promise<void> {
+  window.localStorage.setItem(MEDIA_PREVIEW_ITEMS_STORAGE_KEY, JSON.stringify(payload.items ?? []));
   const existing = await WebviewWindow.getByLabel(MEDIA_PREVIEW_WINDOW_LABEL);
   if (existing) {
     await emitTo(MEDIA_PREVIEW_WINDOW_LABEL, "media-preview-open", payload);
@@ -402,11 +377,12 @@ export async function openMediaPreviewWindow(payload: MediaPreviewPayload): Prom
     decorations: false,
     transparent: true,
     backgroundColor: TRANSPARENT_WINDOW_BACKGROUND,
+    windowEffects: { effects: [Effect.Acrylic, Effect.HudWindow] },
     resizable: true,
     visible: true,
     focus: true,
     alwaysOnTop: true,
-    shadow: false,
+    shadow: true,
   });
 }
 
@@ -495,6 +471,16 @@ export function hideMainWindow(): Promise<void> {
   return invoke<void>("hide_main_window");
 }
 
+export async function isMainWindowVisible(): Promise<boolean> {
+  const window = getCurrentWindow();
+  const [visible, minimized] = await Promise.all([window.isVisible(), window.isMinimized()]);
+  return visible && !minimized;
+}
+
+export function onMainWindowFocusChanged(handler: () => void): Promise<UnlistenFn> {
+  return getCurrentWindow().onFocusChanged(handler);
+}
+
 export function exitApp(): Promise<void> {
   return invoke<void>("exit_app");
 }
@@ -503,10 +489,6 @@ export function onMainWindowCloseRequested(
   handler: (event: CloseRequestedEvent) => void | Promise<void>,
 ): Promise<UnlistenFn> {
   return getCurrentWindow().onCloseRequested(handler);
-}
-
-export function sendTestNotification(): Promise<void> {
-  return invoke<void>("send_test_notification");
 }
 
 export function moveFloatingWindowToCursor(): Promise<void> {
@@ -529,33 +511,159 @@ export function startWindowDrag(): Promise<void> {
   return getCurrentWindow().startDragging();
 }
 
+export function waitForPrimaryMouseRelease(): Promise<void> {
+  return invoke<void>("wait_for_primary_mouse_release");
+}
+
 export function closeWindow(): Promise<void> {
   return getCurrentWindow().close();
 }
 
-export async function enterFloatingWindow(): Promise<void> {
+export function hideWindow(): Promise<void> {
+  return getCurrentWindow().hide();
+}
+
+type WindowGeometry = {
+  size: { width: number; height: number };
+  position: { x: number; y: number };
+  maximized?: boolean;
+};
+const savedWindowGeometry: Partial<Record<AppWindowMode, WindowGeometry>> = {};
+let activeWindowMode: AppWindowMode | null = null;
+const FLOATING_BALL_POSITION_KEY = "copyshare:floating-ball-position";
+
+async function rememberWindowGeometry(nextMode: AppWindowMode): Promise<void> {
+  if (!activeWindowMode || activeWindowMode === nextMode) return;
+  const window = getCurrentWindow();
+  const [size, position, scale, maximized] = await Promise.all([
+    window.innerSize(), window.outerPosition(), window.scaleFactor(), window.isMaximized(),
+  ]);
+  savedWindowGeometry[activeWindowMode] = {
+    size: maximized && activeWindowMode === "main"
+      ? savedWindowGeometry.main?.size ?? MAIN_WINDOW_BOUNDS
+      : { width: size.width / scale, height: size.height / scale },
+    position: { x: position.x, y: position.y },
+    maximized,
+  };
+}
+
+async function ballDockPosition(anchor: { x: number; y: number }): Promise<{ x: number; y: number } | undefined> {
+  const monitors = await availableMonitors().catch(() => []);
+  const monitor = monitors.find((item) => {
+    const position = item.workArea?.position ?? item.position;
+    const size = item.workArea?.size ?? item.size;
+    return anchor.x >= position.x && anchor.x < position.x + size.width
+      && anchor.y >= position.y && anchor.y < position.y + size.height;
+  }) ?? await currentMonitor().catch(() => null) ?? monitors[0];
+  if (!monitor) return undefined;
+  return getFloatingBallDockPosition({
+    position: monitor.workArea?.position ?? monitor.position,
+    size: monitor.workArea?.size ?? monitor.size,
+    scaleFactor: monitor.scaleFactor,
+  }, anchor);
+}
+
+export async function enterBallWindow(position: "current" | "top-right" = "current"): Promise<void> {
+  await rememberWindowGeometry("ball");
+  const window = getCurrentWindow();
+  const [sourcePosition, sourceSize, scale] = await Promise.all([
+    window.outerPosition(), window.outerSize(), window.scaleFactor(),
+  ]);
+  let saved: { x: number; y: number } | undefined;
+  try {
+    const value = JSON.parse(localStorage.getItem(FLOATING_BALL_POSITION_KEY) ?? "null");
+    if (Number.isFinite(value?.x) && Number.isFinite(value?.y)) saved = value;
+  } catch { /* Fall back to the current monitor. */ }
+  const monitor = await currentMonitor().catch(() => null);
+  const monitorPosition = monitor?.workArea?.position ?? monitor?.position;
+  const monitorSize = monitor?.workArea?.size ?? monitor?.size;
+  const anchor = saved ? {
+    x: saved.x + FLOATING_BALL_BOUNDS.width * scale / 2,
+    y: saved.y,
+  } : position === "top-right" && monitorPosition && monitorSize ? {
+    x: monitorPosition.x + monitorSize.width - 1,
+    y: monitorPosition.y + FLOATING_STARTUP_OFFSET.top * monitor!.scaleFactor,
+  } : {
+    x: sourcePosition.x + sourceSize.width / 2,
+    y: sourcePosition.y + Math.min(sourceSize.height / 2, 48 * scale),
+  };
+  await window.setBackgroundColor(TRANSPARENT_WINDOW_BACKGROUND);
+  await window.setAlwaysOnTop(true);
+  if (await window.isMaximized()) await window.toggleMaximize();
+  await window.setMaxSize(null);
+  await window.setMinSize(new LogicalSize(FLOATING_BALL_BOUNDS.width, FLOATING_BALL_BOUNDS.height));
+  await window.setResizable(false);
+  await window.setSize(new LogicalSize(FLOATING_BALL_BOUNDS.width, FLOATING_BALL_BOUNDS.height));
+  const dock = await ballDockPosition(anchor);
+  if (dock) {
+    await window.setPosition(new PhysicalPosition(dock.x, dock.y));
+    try { localStorage.setItem(FLOATING_BALL_POSITION_KEY, JSON.stringify(dock)); }
+    catch { /* Position remains usable for this session. */ }
+  }
+  await window.setShadow(false);
+  await waitForWindowSize(FLOATING_BALL_BOUNDS);
+  await invoke("set_floating_ball_shape", { enabled: true });
+  activeWindowMode = "ball";
+}
+
+export async function dockBallWindow(): Promise<void> {
+  if (activeWindowMode !== "ball") return;
+  const window = getCurrentWindow();
+  const [position, size] = await Promise.all([window.outerPosition(), window.outerSize()]);
+  const dock = await ballDockPosition({ x: position.x + size.width / 2, y: position.y });
+  if (!dock) return;
+  await window.setPosition(new PhysicalPosition(dock.x, dock.y));
+  try { localStorage.setItem(FLOATING_BALL_POSITION_KEY, JSON.stringify(dock)); }
+  catch { /* Position remains usable for this session. */ }
+}
+
+export async function enterFloatingWindow(position: "cursor" | "top-right" = "cursor"): Promise<void> {
+  await invoke("set_floating_ball_shape", { enabled: false });
+  await rememberWindowGeometry("floating");
+  const saved = savedWindowGeometry.floating;
+  const bounds = saved?.size ?? FLOATING_WINDOW_BOUNDS;
   const window = getCurrentWindow();
   const size = new LogicalSize(
-    FLOATING_WINDOW_BOUNDS.width,
-    FLOATING_WINDOW_BOUNDS.height,
+    bounds.width,
+    bounds.height,
   );
 
   await window.setBackgroundColor(TRANSPARENT_WINDOW_BACKGROUND);
   await window.setAlwaysOnTop(true);
-  await window.setResizable(false);
-  await window.setMinSize(size);
-  await window.setMaxSize(size);
+  await window.setMaxSize(null);
+  await window.setMinSize(new LogicalSize(300, 320));
+  await window.setResizable(true);
   await window.setSize(size);
   try {
-    await moveFloatingWindowToCursor();
+    if (saved) {
+      await window.setPosition(new PhysicalPosition(saved.position.x, saved.position.y));
+    } else if (position === "top-right") {
+      const monitor = await currentMonitor();
+      if (monitor) {
+        const next = getFloatingWindowTopRightPosition({
+          position: monitor.workArea?.position ?? monitor.position,
+          size: monitor.workArea?.size ?? monitor.size,
+          scaleFactor: monitor.scaleFactor,
+        });
+        await window.setPosition(new PhysicalPosition(next.x, next.y));
+      }
+    } else {
+      await moveFloatingWindowToCursor();
+    }
   } catch (error) {
-    console.warn("Unable to move floating window to cursor", error);
+    console.warn("Unable to position floating window", error);
   }
   await window.setShadow(false);
+  await waitForWindowSize(bounds);
   await window.setFocus();
+  activeWindowMode = "floating";
 }
 
 export async function restoreMainWindow(): Promise<void> {
+  await invoke("set_floating_ball_shape", { enabled: false });
+  await rememberWindowGeometry("main");
+  const saved = savedWindowGeometry.main;
+  const bounds = saved?.size ?? MAIN_WINDOW_BOUNDS;
   const window = getCurrentWindow();
 
   await window.setBackgroundColor(TRANSPARENT_WINDOW_BACKGROUND);
@@ -566,14 +674,18 @@ export async function restoreMainWindow(): Promise<void> {
   await window.setResizable(true);
   await window.setAlwaysOnTop(false);
   await window.setSize(
-    new LogicalSize(MAIN_WINDOW_BOUNDS.width, MAIN_WINDOW_BOUNDS.height),
+    new LogicalSize(bounds.width, bounds.height),
   );
   try {
-    await moveMainWindowToCenter();
+    if (saved && !saved.maximized) await window.setPosition(new PhysicalPosition(saved.position.x, saved.position.y));
+    else await moveMainWindowToCenter();
   } catch (error) {
     console.warn("Unable to move main window to center", error);
   }
+  await waitForWindowSize(bounds);
+  if (saved?.maximized) await window.toggleMaximize();
   await window.setFocus();
+  activeWindowMode = "main";
 }
 
 export function onAppEvent<T>(

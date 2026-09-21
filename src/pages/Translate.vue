@@ -78,7 +78,7 @@ async function copyResult() {
         <div class="min-w-0">
           <p class="text-lg font-bold text-white">翻译</p>
           <p class="mt-1 text-[13px] leading-5 text-[color:var(--muted-text)]">
-            输入文本后选择目标语言，默认使用 Google 免费翻译；可在设置中切换 AI 翻译。
+            输入文本后选择目标语言，默认使用 Google 免费翻译；可在设置中切换 AI 翻译
           </p>
         </div>
         <div class="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-[color:var(--accent-line)] bg-[color:var(--accent-soft)] text-[color:var(--accent-text)]">

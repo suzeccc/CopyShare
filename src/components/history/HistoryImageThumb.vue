@@ -23,12 +23,12 @@ const src = ref("");
 const failed = ref(false);
 const rootClass = computed(() =>
   props.variant === "preview"
-    ? "grid max-h-[72vh] max-w-[82vw] place-items-center overflow-hidden rounded-xl border border-white/10 bg-black/30"
+    ? "grid h-full w-full place-items-center overflow-hidden bg-transparent"
     : "grid h-14 w-20 shrink-0 place-items-center overflow-hidden rounded-lg border border-white/10 bg-black/20",
 );
 const imageClass = computed(() =>
   props.variant === "preview"
-    ? "max-h-[72vh] max-w-[82vw] object-contain"
+    ? "h-full w-full object-contain"
     : "h-full w-full object-cover",
 );
 let observer: IntersectionObserver | undefined;

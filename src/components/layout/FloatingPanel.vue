@@ -10,9 +10,11 @@ import X from "lucide-vue-next/dist/esm/icons/x.js";
 import { computed, ref } from "vue";
 
 import ClipboardFileDownloadStatus from "@/components/history/ClipboardFileDownloadStatus.vue";
+import { mediaPreviewItems } from "@/lib/mediaPreviewControls";
 import HistoryFileThumb from "@/components/history/HistoryFileThumb.vue";
 import HistoryImageThumb from "@/components/history/HistoryImageThumb.vue";
 import CopyTextButton from "@/components/ui/CopyTextButton.vue";
+import { vClipboardOverflow } from "@/lib/clipboardOverflow";
 import {
   getClipboardFileCardAction,
   isClipboardFileCardInteractive,
@@ -20,7 +22,6 @@ import {
 import {
   getClipboardLinkUrl,
   isClipboardVideoFile,
-  shouldShowClipboardItemMore,
   splitClipboardFileSummary,
   type ClipboardPreviewItem,
 } from "@/lib/historyPreview";
@@ -33,7 +34,6 @@ import {
   openHistoryFileLocation,
   openMediaPreviewWindow,
   openTransferFolder,
-  resumeFileTransfer,
   startWindowDrag,
 } from "@/lib/tauri";
 import { startWindowDragFromMouseEvent } from "@/lib/windowDrag";
@@ -85,7 +85,7 @@ async function handleClipboardItemClick(item: ClipboardPreviewItem) {
 
   const action = getClipboardFileCardAction(
     item,
-    historyStore.fileDownloadActivity(item.fileTransferId),
+    historyStore.fileDownloadActivity(item.fileTransferId, item.fileTransferFileId),
   );
   if (action === "none") {
     return;
@@ -93,7 +93,6 @@ async function handleClipboardItemClick(item: ClipboardPreviewItem) {
   if (action === "openSourceLocation") {
     try {
       await openHistoryFileLocation(item.id);
-      toastStore.success("已打开文件位置");
     } catch (error) {
       toastStore.error(`打开文件位置失败：${String(error)}`);
     }
@@ -106,7 +105,6 @@ async function handleClipboardItemClick(item: ClipboardPreviewItem) {
   if (action === "openDownloadFolder") {
     try {
       await openTransferFolder();
-      toastStore.success("已打开文件下载位置");
     } catch (error) {
       toastStore.error(`打开文件下载位置失败：${String(error)}`);
     }
@@ -122,11 +120,9 @@ async function handleClipboardItemClick(item: ClipboardPreviewItem) {
       return;
     }
     try {
-      const task = await resumeFileTransfer(item.fileTransferId);
-      historyStore.updateFileDownloadTask(task);
-      toastStore.success(
-        task.status === "waitingForPeer" ? "已继续等待发送设备上线" : "正在继续下载",
-      );
+      await copyHistoryItem(item.id);
+      historyStore.beginFileDownload(item.fileTransferId, item.fileTransferFileId);
+      toastStore.success("正在继续下载");
     } catch (error) {
       toastStore.error(`继续下载失败：${String(error)}`);
     }
@@ -134,36 +130,28 @@ async function handleClipboardItemClick(item: ClipboardPreviewItem) {
   }
 
   if (action === "download") {
-    historyStore.beginFileDownload(item.fileTransferId);
+    historyStore.beginFileDownload(item.fileTransferId, item.fileTransferFileId);
   }
 
   try {
     const result = await copyHistoryItem(item.id);
     if (result === "downloadStarted") {
-      historyStore.beginFileDownload(item.fileTransferId);
+      historyStore.beginFileDownload(item.fileTransferId, item.fileTransferFileId);
       toastStore.success("开始下载");
     } else if (result === "downloading") {
-      historyStore.beginFileDownload(item.fileTransferId);
+      historyStore.beginFileDownload(item.fileTransferId, item.fileTransferFileId);
       toastStore.info("文件正在下载");
     } else {
       toastStore.success("文件已复制");
     }
   } catch (error) {
-    historyStore.failFileDownload(item.fileTransferId, String(error));
+    historyStore.failFileDownload(
+      item.fileTransferId,
+      item.fileTransferFileId,
+      String(error),
+    );
     toastStore.error("文件下载失败");
   }
-}
-
-async function openFloatingImagePreview(item: ClipboardPreviewItem) {
-  if (item.contentType !== "image") {
-    return;
-  }
-
-  await openMediaPreviewWindow({
-    kind: "image",
-    historyId: item.id,
-    title: item.text || "图片预览",
-  });
 }
 
 async function openFloatingVideoPreview(item: ClipboardPreviewItem) {
@@ -178,11 +166,12 @@ async function openFloatingVideoPreview(item: ClipboardPreviewItem) {
       historyId: item.id,
       title: clipboardFileSummary(item).name || "视频预览",
       src: convertLocalFileSrc(filePath),
+      items: mediaPreviewItems(props.clipboardHistoryItems, "video"),
     });
   } catch (error) {
     const action = getClipboardFileCardAction(
       item,
-      historyStore.fileDownloadActivity(item.fileTransferId),
+      historyStore.fileDownloadActivity(item.fileTransferId, item.fileTransferFileId),
     );
     if (action === "download" || action === "resume") {
       await handleClipboardItemClick(item);
@@ -193,6 +182,18 @@ async function openFloatingVideoPreview(item: ClipboardPreviewItem) {
       return;
     }
     toastStore.error(`无法预览视频：${String(error)}`);
+  }
+}
+
+async function openFloatingImagePreview(item: ClipboardPreviewItem) {
+  if (item.contentType !== "image") return;
+  try {
+    await openMediaPreviewWindow({
+      kind: "image", historyId: item.id, title: clipboardFileSummary(item).name || "图片预览", src: "",
+      items: mediaPreviewItems(props.clipboardHistoryItems, "image"),
+    });
+  } catch (error) {
+    toastStore.error(`无法预览图片：${String(error)}`);
   }
 }
 
@@ -213,7 +214,7 @@ function isFloatingClipboardItemInteractive(item: ClipboardPreviewItem) {
     || isClipboardVideoFile(item)
     || isClipboardFileCardInteractive(
       item,
-      historyStore.fileDownloadActivity(item.fileTransferId),
+      historyStore.fileDownloadActivity(item.fileTransferId, item.fileTransferFileId),
     );
 }
 
@@ -232,10 +233,6 @@ async function openClipboardLink(item: ClipboardPreviewItem) {
 
 function clipboardFileSummary(item: ClipboardPreviewItem) {
   return splitClipboardFileSummary(item.text);
-}
-
-function shouldShowFloatingClipboardItemMore(item: ClipboardPreviewItem) {
-  return shouldShowClipboardItemMore(item, { textLimit: 18 });
 }
 
 function openFullClipboardItem(item: ClipboardPreviewItem) {
@@ -262,8 +259,8 @@ function openFullClipboardItem(item: ClipboardPreviewItem) {
         <button
           class="grid h-7 w-7 place-items-center rounded-md border border-[color:var(--floating-control-line)] bg-[color:var(--floating-control-bg)] text-[color:var(--floating-control-text)] transition hover:bg-[color:var(--floating-control-bg-hover)]"
           type="button"
-          aria-label="隐藏窗口"
-          title="隐藏窗口"
+          aria-label="收为浮窗球"
+          title="收为浮窗球"
           data-window-control
           @click="emit('hide')"
         >
@@ -332,10 +329,11 @@ function openFullClipboardItem(item: ClipboardPreviewItem) {
         <div
           v-for="item in clipboardItems"
           :key="item.id"
+          v-clipboard-overflow
           class="floating-clipboard-row group flex min-h-6 items-center gap-2 border-b border-[color:var(--main-line-soft)] px-1 py-0.5 last:border-b-0"
           :class="{
             'cursor-pointer': isFloatingClipboardItemInteractive(item),
-            'cursor-wait': isFloatingClipboardItemInteractive(item) && historyStore.isFileDownloadActive(item.fileTransferId),
+            'cursor-wait': isFloatingClipboardItemInteractive(item) && historyStore.isFileDownloadActive(item.fileTransferId, item.fileTransferFileId),
           }"
           @click="handleFloatingClipboardItemClick(item)"
         >
@@ -421,6 +419,7 @@ function openFullClipboardItem(item: ClipboardPreviewItem) {
             v-else-if="getClipboardLinkUrl(item.text)"
             data-floating-clipboard-content
             data-i18n-ignore
+            data-clipboard-preview-text
             data-floating-clipboard-link-button
             class="floating-link-chip block min-w-0 flex-1 cursor-pointer select-none overflow-hidden text-ellipsis whitespace-nowrap text-left text-xs font-semibold leading-4 text-[color:var(--floating-strong-text)] underline-offset-2 transition-colors duration-150 hover:text-[color:var(--accent-text)] hover:underline"
             type="button"
@@ -433,7 +432,8 @@ function openFullClipboardItem(item: ClipboardPreviewItem) {
             data-floating-clipboard-content
             data-i18n-ignore
             data-floating-clipboard-text
-            class="line-clamp-1 min-w-0 flex-1 overflow-hidden break-words text-xs font-semibold leading-4 text-[color:var(--floating-strong-text)]"
+            data-clipboard-preview-text
+            class="min-w-0 flex-1 truncate text-xs font-semibold leading-4 text-[color:var(--floating-strong-text)]"
           >
             {{ item.text }}
           </p>
@@ -444,7 +444,8 @@ function openFullClipboardItem(item: ClipboardPreviewItem) {
               compact
             />
             <button
-              v-if="shouldShowFloatingClipboardItemMore(item)"
+              v-if="item.contentType === 'text'"
+              style="display: none"
               data-floating-clipboard-item-more-button
               class="grid h-7 w-7 shrink-0 place-items-center rounded-md border border-[color:var(--floating-control-line)] bg-[color:var(--floating-control-bg)] text-[color:var(--floating-control-text)] transition hover:bg-[color:var(--floating-control-bg-hover)]"
               type="button"
@@ -458,6 +459,7 @@ function openFullClipboardItem(item: ClipboardPreviewItem) {
               :content-type="item.contentType"
               :history-item-id="item.id"
               :file-transfer-id="item.fileTransferId"
+              :file-transfer-file-id="item.fileTransferFileId"
               :file-transfer-status="item.fileTransferStatus"
               icon-only
               label="复制内容"
@@ -477,7 +479,11 @@ function openFullClipboardItem(item: ClipboardPreviewItem) {
         data-floating-clipboard-full-content
         class="absolute inset-2 z-30 flex flex-col overflow-hidden rounded-lg border border-[color:var(--floating-control-line)] bg-[color:var(--floating-surface-bg)] p-3 shadow-[0_18px_46px_rgba(0,0,0,0.45)] backdrop-blur-xl"
       >
-        <div class="mb-2 flex items-center justify-between gap-2">
+        <header
+          class="mb-2 flex cursor-move select-none items-center justify-between gap-2"
+          data-window-drag-region
+          @mousedown.capture="handleWindowDrag"
+        >
           <p class="min-w-0 truncate text-sm font-semibold text-[color:var(--floating-strong-text)]">完整内容</p>
           <button
             class="grid h-7 w-7 shrink-0 place-items-center rounded-md border border-[color:var(--floating-control-line)] bg-[color:var(--floating-control-bg)] text-[color:var(--floating-control-text)] transition hover:bg-[color:var(--floating-control-bg-hover)]"
@@ -487,8 +493,8 @@ function openFullClipboardItem(item: ClipboardPreviewItem) {
           >
             <X class="h-3.5 w-3.5" />
           </button>
-        </div>
-        <pre data-i18n-ignore class="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-black/30 p-3 text-xs leading-5 text-[color:var(--floating-strong-text)]">{{ selectedClipboardItem.text }}</pre>
+        </header>
+        <pre data-floating-clipboard-full-text data-i18n-ignore class="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-black/30 p-3 text-xs leading-5 text-[color:var(--floating-strong-text)]">{{ selectedClipboardItem.text }}</pre>
         <div class="mt-2 flex justify-end">
           <CopyTextButton
             :text="selectedClipboardItem.text"

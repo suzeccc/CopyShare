@@ -38,6 +38,36 @@ pub fn move_main_window_to_center(app: &AppHandle) -> AppResult<()> {
     center_window_on_current_monitor(window)
 }
 
+pub fn set_floating_ball_shape(app: &AppHandle, enabled: bool) -> AppResult<()> {
+    let Some(window) = app.get_webview_window("main") else {
+        return Ok(());
+    };
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::Graphics::Gdi::{CreateEllipticRgn, DeleteObject, SetWindowRgn};
+
+        let hwnd = window.hwnd().map_err(AppError::from)?;
+        let size = window.outer_size().map_err(AppError::from)?;
+        unsafe {
+            let region = enabled.then(|| CreateEllipticRgn(0, 0, size.width as i32, size.height as i32));
+            if region.is_some_and(|region| region.is_invalid()) {
+                return Err(AppError::Tauri("failed to create floating ball region".into()));
+            }
+            if SetWindowRgn(hwnd, region, true) == 0 {
+                if let Some(region) = region {
+                    let _ = DeleteObject(region.into());
+                }
+                return Err(AppError::Tauri("failed to set floating ball region".into()));
+            }
+        }
+    }
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    window.set_skip_taskbar(enabled).map_err(AppError::from)?;
+    #[cfg(target_os = "macos")]
+    let _ = (window, enabled);
+    Ok(())
+}
+
 pub fn floating_position_near_cursor(
     work_area: NativeRect,
     window_size: NativeSize,

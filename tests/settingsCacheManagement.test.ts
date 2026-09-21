@@ -7,7 +7,7 @@ const tauriApi = readFileSync("src/lib/tauri.ts", "utf8");
 const tauriLib = readFileSync("src-tauri/src/lib.rs", "utf8");
 const commands = readFileSync("src-tauri/src/commands.rs", "utf8");
 
-test("settings page places startup first and groups cache management inside storage", () => {
+test("settings page groups startup inside basic settings and cache management inside storage", () => {
   assert.match(settings, /data-cache-management-settings/);
   assert.match(settings, />缓存管理</);
   assert.match(settings, /缓存大小计算中/);
@@ -25,7 +25,7 @@ test("settings page places startup first and groups cache management inside stor
   assert.equal(storageStart >= 0, true);
   assert.equal(cacheStart >= 0, true);
   assert.equal(syncStart >= 0, true);
-  assert.equal(startupStart < basicStart, true);
+  assert.equal(basicStart < startupStart && startupStart < storageStart, true);
   assert.equal(storageStart < cacheStart, true);
   assert.equal(cacheStart < syncStart, true);
   assert.match(
@@ -44,7 +44,7 @@ test("cache management uses dedicated Tauri commands and refreshes after clearin
   assert.match(settings, /async function clearLocalCache\(\)/);
   assert.match(settings, /cacheSizeBytes\.value = await getCacheSize\(\)/);
   assert.match(settings, /cacheSizeBytes\.value = await clearCache\(\)/);
-  assert.match(settings, /onMounted\(\(\) => \{\s*void loadCacheSize\(\);\s*\}\)/);
+  assert.match(settings, /onMounted\(\(\) => \{[^}]*\bloadCacheSize\(\)/);
 });
 
 test("Tauri API exposes cache commands", () => {
@@ -54,7 +54,7 @@ test("Tauri API exposes cache commands", () => {
   assert.match(tauriApi, /invoke<number>\("clear_cache"\)/);
 
   assert.match(commands, /pub async fn get_cache_size\(app: AppHandle\) -> AppResult<u64>/);
-  assert.match(commands, /pub async fn clear_cache\(app: AppHandle\) -> AppResult<u64>/);
+  assert.match(commands, /pub async fn clear_cache\(app: AppHandle, state: State<'_, AppState>\) -> AppResult<u64>/);
   assert.match(tauriLib, /commands::get_cache_size/);
   assert.match(tauriLib, /commands::clear_cache/);
 });

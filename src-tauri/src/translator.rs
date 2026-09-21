@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{sync::Mutex, time::Duration};
 
 use serde_json::Value;
 
@@ -6,6 +6,35 @@ use crate::{
     error::{AppError, AppResult},
     models::{AppConfig, TranslateResponse, TranslationEngine},
 };
+
+static AI_CLIENT: Mutex<Option<(String, reqwest::Client)>> = Mutex::new(None);
+static GOOGLE_CLIENT: Mutex<Option<(String, reqwest::Client)>> = Mutex::new(None);
+
+fn cached_translation_client(
+    cache: &Mutex<Option<(String, reqwest::Client)>>,
+    proxy_url: &str,
+    timeout: Duration,
+) -> AppResult<reqwest::Client> {
+    let proxy_url = proxy_url.trim();
+    let mut cached = cache.lock().unwrap_or_else(|error| error.into_inner());
+    if let Some((key, client)) = cached.as_ref() {
+        if key == proxy_url {
+            return Ok(client.clone());
+        }
+    }
+    let mut builder = reqwest::Client::builder().timeout(timeout);
+    if !proxy_url.is_empty() {
+        let proxy = reqwest::Proxy::all(proxy_url).map_err(|error| {
+            AppError::InvalidInput(format!("代理配置无效（{proxy_url}）：{error}"))
+        })?;
+        builder = builder.proxy(proxy);
+    }
+    let client = builder
+        .build()
+        .map_err(|error| AppError::InvalidInput(format!("创建 HTTP 客户端失败：{error}")))?;
+    *cached = Some((proxy_url.to_string(), client.clone()));
+    Ok(client)
+}
 
 pub async fn translate_text_with_config(
     config: &AppConfig,
@@ -43,15 +72,16 @@ async fn translate_ai(
     } else {
         format!("{}/v1/chat/completions", api_url.trim_end_matches('/'))
     };
-    let model = if model.is_empty() { "gpt-4o-mini" } else { model };
+    let model = if model.is_empty() {
+        "gpt-4o-mini"
+    } else {
+        model
+    };
     let prompt = format!(
         "Translate the following text to {target_lang}. Only output the translated text, nothing else.\n\nText: {text}",
     );
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(30))
-        .build()
-        .map_err(|error| AppError::InvalidInput(format!("创建 HTTP 客户端失败：{error}")))?;
+    let client = cached_translation_client(&AI_CLIENT, "", Duration::from_secs(30))?;
 
     let response = client
         .post(&full_url)
@@ -94,9 +124,7 @@ async fn translate_ai(
     let translated = json["choices"][0]["message"]["content"]
         .as_str()
         .ok_or_else(|| {
-            AppError::InvalidInput(
-                "AI 响应格式异常，未找到 choices[0].message.content".to_string(),
-            )
+            AppError::InvalidInput("AI 响应格式异常，未找到 choices[0].message.content".to_string())
         })?
         .trim()
         .to_string();
@@ -113,17 +141,11 @@ async fn translate_google(
     text: &str,
     target_lang: &str,
 ) -> AppResult<TranslateResponse> {
-    let mut builder = reqwest::Client::builder().timeout(Duration::from_secs(15));
-    let proxy_url = config.translation_proxy.trim();
-    if !proxy_url.is_empty() {
-        let proxy = reqwest::Proxy::all(proxy_url)
-            .map_err(|error| AppError::InvalidInput(format!("代理配置无效（{proxy_url}）：{error}")))?;
-        builder = builder.proxy(proxy);
-    }
-
-    let client = builder
-        .build()
-        .map_err(|error| AppError::InvalidInput(format!("创建 HTTP 客户端失败：{error}")))?;
+    let client = cached_translation_client(
+        &GOOGLE_CLIENT,
+        &config.translation_proxy,
+        Duration::from_secs(15),
+    )?;
 
     let response = client
         .get("https://translate.googleapis.com/translate_a/single")
@@ -182,4 +204,81 @@ fn format_google_error(error: reqwest::Error) -> AppError {
 
 fn truncate_for_error(text: &str) -> String {
     text.chars().take(120).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpListener,
+    };
+
+    #[tokio::test]
+    async fn cached_client_reuses_connections_and_rebuilds_for_proxy_changes() {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = tokio::spawn(async move {
+                for (connection, requests) in [2, 1].into_iter().enumerate() {
+                    let (mut stream, _) = listener.accept().await.unwrap();
+                    for request in 0..requests {
+                        let mut header = Vec::new();
+                        while !header.ends_with(b"\r\n\r\n") {
+                            header.push(stream.read_u8().await.unwrap());
+                            assert!(header.len() < 8192);
+                        }
+                        let header = String::from_utf8(header).unwrap();
+                        let expected = if connection == 0 {
+                            format!("GET /{request} HTTP/1.1")
+                        } else {
+                            "GET http://translation.invalid/proxy HTTP/1.1".to_string()
+                        };
+                        assert!(header.starts_with(&expected), "{header}");
+                        stream
+                            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+                            .await
+                            .unwrap();
+                    }
+                }
+            });
+            let cache = Mutex::new(None);
+            for request in 0..2 {
+                let client =
+                    cached_translation_client(&cache, "  ", Duration::from_secs(2)).unwrap();
+                assert_eq!(
+                    client
+                        .get(format!("http://{address}/{request}"))
+                        .send()
+                        .await
+                        .unwrap()
+                        .text()
+                        .await
+                        .unwrap(),
+                    "ok"
+                );
+            }
+            assert!(cached_translation_client(&cache, "http://[", Duration::from_secs(2)).is_err());
+            assert_eq!(cache.lock().unwrap().as_ref().unwrap().0, "");
+            let proxy = format!("http://{address}");
+            let client = cached_translation_client(&cache, &proxy, Duration::from_secs(2)).unwrap();
+            assert_eq!(
+                client
+                    .get("http://translation.invalid/proxy")
+                    .send()
+                    .await
+                    .unwrap()
+                    .text()
+                    .await
+                    .unwrap(),
+                "ok"
+            );
+            assert_eq!(cache.lock().unwrap().as_ref().unwrap().0, proxy);
+            server.await.unwrap();
+            cached_translation_client(&cache, "", Duration::from_secs(2)).unwrap();
+            assert_eq!(cache.lock().unwrap().as_ref().unwrap().0, "");
+        })
+        .await
+        .expect("connection reuse or proxy selection failed");
+    }
 }

@@ -2,20 +2,30 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 const logsPage = readFileSync("src/pages/Logs.vue", "utf8");
-const deviceCard = readFileSync("src/components/devices/DeviceCard.vue", "utf8");
+const activityItem = readFileSync("src/components/activity/ActivityLogItem.vue", "utf8");
+const activityStore = readFileSync("src/stores/activityLog.ts", "utf8");
+const app = readFileSync("src/App.vue", "utf8");
+const sidebar = readFileSync("src/components/layout/Sidebar.vue", "utf8");
 
-assert.match(logsPage, /连接状态/);
-assert.match(logsPage, /连接失败和断开状态会同步到设备列表/);
-assert.match(logsPage, /devicesStore\.devices/);
-assert.match(logsPage, /historyStore\.items/);
-assert.match(logsPage, /DeviceCard/);
-assert.match(logsPage, /mode="status"/);
-assert.match(logsPage, /v-for="device in devicesStore\.devices"/);
-assert.match(logsPage, /v-for="item in historyStore\.items"/);
+assert.match(logsPage, />日志</);
+assert.match(logsPage, /不保存或展示剪贴板正文/);
+assert.match(logsPage, /data-activity-log-filters/);
+assert.match(logsPage, /仅异常/);
+assert.match(logsPage, /设备事件/);
+assert.match(logsPage, /文件传输/);
+assert.match(logsPage, /activityLogStore\.clear\(\)/);
+assert.doesNotMatch(logsPage, /useHistoryStore/);
+assert.doesNotMatch(logsPage, /HistoryItem/);
+assert.doesNotMatch(logsPage, /CopyTextButton/);
 
-assert.match(deviceCard, /已离线/);
-assert.match(deviceCard, /设备已断开连接/);
-assert.match(deviceCard, /const status = computed/);
-assert.match(deviceCard, /Monitor/);
-assert.match(deviceCard, /data-device-status-detail/);
-assert.match(deviceCard, /data-device-status-detail[\s\S]*<Monitor class="h-4 w-4/);
+assert.match(activityItem, /data-activity-log-item/);
+assert.match(activityItem, /继续传输/);
+assert.doesNotMatch(activityItem, /item\.summary/);
+assert.doesNotMatch(activityItem, /item\.content/);
+
+assert.match(activityStore, /onAppEvent<DeviceInfo>\("device-connected"/);
+assert.match(activityStore, /onAppEvent<DeviceInfo>\("device-disconnected"/);
+assert.match(activityStore, /onAppEvent<string>\("sync-error"/);
+assert.match(app, /activityLogStore\.initialize\(historyStore\.items, statusStore\.status\)/);
+assert.match(app, /activityLogStore\.subscribe\(\)/);
+assert.match(sidebar, /label: "日志", path: "\/logs"/);

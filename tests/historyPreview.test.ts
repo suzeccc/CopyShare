@@ -23,10 +23,13 @@ function historyItem(partial: Partial<HistoryItem>): HistoryItem {
     sourceDevice: partial.sourceDevice ?? "Device",
     summary: partial.summary ?? "",
     content: partial.content,
+    contentHash: partial.contentHash,
     contentType: partial.contentType ?? "text",
     syncStatus: partial.syncStatus ?? "synced",
     success: true,
     createdAt: partial.createdAt ?? new Date().toISOString(),
+    isPinned: partial.isPinned,
+    pinnedAt: partial.pinnedAt,
   };
 }
 
@@ -56,35 +59,33 @@ assert.deepEqual(splitClipboardFileSummary("安装包.zip 1.25 GB"), {
   name: "安装包.zip",
   size: "1.25 GB",
 });
+assert.deepEqual(splitClipboardFileSummary("3 个文件 · 119.3 MB"), {
+  name: "3 个文件",
+  size: "119.3 MB",
+});
+assert.deepEqual(splitClipboardFileSummary("3 \u6d93\ue045\u6783\u6d60?119.3 MB"), {
+  name: "3 个文件",
+  size: "119.3 MB",
+});
 assert.deepEqual(splitClipboardFileSummary("没有大小的文件.txt"), {
   name: "没有大小的文件.txt",
   size: null,
 });
 
 assert.equal(
-  shouldShowClipboardItemMore({ id: "short", text: "短文本", contentType: "text", syncStatus: "synced" }),
+  shouldShowClipboardItemMore({ scrollHeight: 40, clientHeight: 40, scrollWidth: 250, clientWidth: 250 }),
   false,
 );
 assert.equal(
-  shouldShowClipboardItemMore({ id: "multi", text: "第一行\n第二行", contentType: "text", syncStatus: "synced" }),
+  shouldShowClipboardItemMore({ scrollHeight: 60, clientHeight: 40, scrollWidth: 250, clientWidth: 250 }),
   true,
 );
 assert.equal(
-  shouldShowClipboardItemMore({
-    id: "long-file",
-    text: "very-long-copyshare-preview-file-name-that-will-be-clipped.png 25.2 KB",
-    contentType: "image",
-    syncStatus: "synced",
-  }),
+  shouldShowClipboardItemMore({ scrollHeight: 40, clientHeight: 40, scrollWidth: 251, clientWidth: 250 }),
   false,
 );
 assert.equal(
-  shouldShowClipboardItemMore({
-    id: "compact-long-text",
-    text: "定位20条上限应该落在哪个数据流，再写失败测试复现当前超过显示限制的文本",
-    contentType: "text",
-    syncStatus: "synced",
-  }, { textLimit: 18 }),
+  shouldShowClipboardItemMore({ scrollHeight: 20, clientHeight: 20, scrollWidth: 500, clientWidth: 250 }),
   true,
 );
 
@@ -174,6 +175,21 @@ assert.equal(
   100,
 );
 
+const fullHistoryWithGenericImageLabels = [
+  historyItem({ id: "image-a", summary: "图片", contentType: "image", contentHash: "image-hash-a" }),
+  historyItem({ id: "image-b", summary: "图片", contentType: "image", contentHash: "image-hash-b" }),
+  historyItem({ id: "image-c", summary: "图片", contentType: "image", contentHash: "image-hash-c" }),
+  ...Array.from({ length: 97 }, (_, index) => historyItem({
+    id: `history-${index}`,
+    summary: `History ${index}`,
+    contentHash: `text-hash-${index}`,
+  })),
+];
+assert.equal(
+  getFloatingClipboardItems([], fullHistoryWithGenericImageLabels, FLOATING_CLIPBOARD_HISTORY_LIMIT).length,
+  100,
+);
+
 assert.deepEqual(
   stripCreatedAt(getFloatingClipboardItems(
     [
@@ -258,7 +274,18 @@ assert.deepEqual(
   )),
   [
     { id: "system-1", text: "System one", contentType: "text", syncStatus: "unsynced" },
-    { id: "system-2", text: "System two", contentType: "text", syncStatus: "unsynced" },
+    { id: "app-2", text: "System two", contentType: "text", sourceDevice: "Office-PC", syncStatus: "synced" },
     { id: "app-1", text: "App one", contentType: "text", sourceDevice: "Office-PC", syncStatus: "synced" },
   ],
 );
+
+const pinnedCreatedAt = "2026-09-18T08:00:00Z";
+const mergedPinned = getFloatingClipboardItems(
+  [systemItem(1), { ...systemItem(2), text: "Pinned text" }],
+  [historyItem({ id: "pinned-app", content: "Pinned text", createdAt: pinnedCreatedAt, isPinned: true, pinnedAt: pinnedCreatedAt, contentHash: "pin-hash" })],
+  1,
+);
+assert.equal(mergedPinned[0].id, "pinned-app");
+assert.equal(mergedPinned[0].isPinned, true);
+assert.equal(mergedPinned[0].createdAt, pinnedCreatedAt);
+assert.equal(mergedPinned[0].syncStatus, "synced");

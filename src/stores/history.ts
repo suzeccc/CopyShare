@@ -3,7 +3,9 @@ import { defineStore } from "pinia";
 import { clearHistory, getHistory, onAppEvent, setHistoryItemPinned } from "@/lib/tauri";
 import {
   applyClipboardFileDownloadProgress,
+  clipboardFileDownloadActivityFromFile,
   clipboardFileDownloadActivityFromTask,
+  clipboardFileDownloadKey,
   limitClipboardFileDownloads,
   type ClipboardFileDownloadActivity,
 } from "@/lib/clipboardFileDownload";
@@ -66,21 +68,23 @@ export const useHistoryStore = defineStore("history", {
         this.pinningItemIds = next;
       }
     },
-    fileDownloadActivity(transferId?: string) {
-      return transferId ? this.fileDownloads[transferId] : undefined;
+    fileDownloadActivity(transferId?: string, fileId?: string) {
+      const key = clipboardFileDownloadKey(transferId, fileId);
+      return key ? this.fileDownloads[key] : undefined;
     },
-    isFileDownloadActive(transferId?: string) {
-      const status = this.fileDownloadActivity(transferId)?.status;
+    isFileDownloadActive(transferId?: string, fileId?: string) {
+      const status = this.fileDownloadActivity(transferId, fileId)?.status;
       return status === "accepted" || status === "transferring" || status === "retrying";
     },
-    beginFileDownload(transferId?: string) {
-      if (!transferId) {
+    beginFileDownload(transferId?: string, fileId?: string) {
+      const key = clipboardFileDownloadKey(transferId, fileId);
+      if (!key) {
         return;
       }
-      const current = this.fileDownloads[transferId];
+      const current = this.fileDownloads[key];
       this.fileDownloads = limitClipboardFileDownloads({
         ...this.fileDownloads,
-        [transferId]: {
+        [key]: {
           status: "accepted",
           transferredBytes: current?.transferredBytes ?? 0,
           totalSize: current?.totalSize ?? 0,
@@ -88,14 +92,15 @@ export const useHistoryStore = defineStore("history", {
         },
       });
     },
-    failFileDownload(transferId?: string, error = "文件下载失败") {
-      if (!transferId) {
+    failFileDownload(transferId?: string, fileId?: string, error = "文件下载失败") {
+      const key = clipboardFileDownloadKey(transferId, fileId);
+      if (!key) {
         return;
       }
-      const current = this.fileDownloads[transferId];
+      const current = this.fileDownloads[key];
       this.fileDownloads = limitClipboardFileDownloads({
         ...this.fileDownloads,
-        [transferId]: {
+        [key]: {
           status: "failed",
           transferredBytes: current?.transferredBytes ?? 0,
           totalSize: current?.totalSize ?? 0,
@@ -107,10 +112,17 @@ export const useHistoryStore = defineStore("history", {
       if (!task.clipboardSync) {
         return;
       }
-      this.fileDownloads = limitClipboardFileDownloads({
+      const next = {
         ...this.fileDownloads,
         [task.transferId]: clipboardFileDownloadActivityFromTask(task),
-      });
+      };
+      for (const file of task.files) {
+        const key = clipboardFileDownloadKey(task.transferId, file.id);
+        if (key) {
+          next[key] = clipboardFileDownloadActivityFromFile(task, file);
+        }
+      }
+      this.fileDownloads = limitClipboardFileDownloads(next);
     },
     updateFileDownloadProgress(progress: FileTransferProgressEvent) {
       const belongsToClipboard = Boolean(this.fileDownloads[progress.transferId])
@@ -124,6 +136,12 @@ export const useHistoryStore = defineStore("history", {
           this.fileDownloads[progress.transferId],
           progress,
         ),
+        [`${progress.transferId}:${progress.fileId}`]: {
+          status: progress.status ?? "transferring",
+          transferredBytes: Math.min(progress.fileTransferredBytes, progress.fileSize),
+          totalSize: progress.fileSize,
+          error: this.fileDownloads[`${progress.transferId}:${progress.fileId}`]?.error ?? null,
+        },
       });
     },
     async subscribe() {

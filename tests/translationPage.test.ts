@@ -28,6 +28,8 @@ const expectedSidebarOrder = [
   "总览",
   "剪切板",
   "设备连接",
+  "常用内容",
+  "图转文字",
   "翻译",
   "日志",
 ];
@@ -51,7 +53,7 @@ assert.match(configTypes, /translationApiKey: string/);
 assert.match(configTypes, /translationModel: string/);
 assert.match(configTypes, /translationProxy: string/);
 
-assert.match(configStore, /configVersion: 10/);
+assert.match(configStore, /configVersion: 12/);
 assert.match(configStore, /translationEngine: "google"/);
 assert.match(configStore, /translationModel: "gpt-4o-mini"/);
 

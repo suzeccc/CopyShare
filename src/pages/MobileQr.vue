@@ -1,8 +1,5 @@
 <script setup lang="ts">
-import ArrowLeftRight from "lucide-vue-next/dist/esm/icons/arrow-left-right.js";
-import Check from "lucide-vue-next/dist/esm/icons/check.js";
 import Copy from "lucide-vue-next/dist/esm/icons/copy.js";
-import Monitor from "lucide-vue-next/dist/esm/icons/monitor.js";
 import QrCode from "lucide-vue-next/dist/esm/icons/qr-code.js";
 import RefreshCw from "lucide-vue-next/dist/esm/icons/refresh-cw.js";
 import Smartphone from "lucide-vue-next/dist/esm/icons/smartphone.js";
@@ -22,7 +19,6 @@ const qr = ref("");
 let pollTimer: number | undefined;
 
 const phaseText = computed(() => getPhaseText(mobileStore.session?.phase));
-const contentItems = computed(() => mobileStore.session?.contentItems ?? []);
 const submittedItems = computed(() => mobileStore.session?.submittedItems ?? []);
 const canUseSession = computed(
   () =>
@@ -116,7 +112,7 @@ function getPhaseText(phase: MobileSessionPhase | undefined) {
     case "waiting":
       return "等待扫码";
     case "opened":
-      return "已扫码";
+      return "已连接";
     case "copied":
       return "已复制电脑内容";
     case "submitted":
@@ -160,7 +156,7 @@ function errorMessage(error: unknown, fallback: string) {
         <p class="text-xs font-semibold text-[color:var(--accent-text)]">局域网临时传输</p>
         <h2 class="mt-2 text-2xl font-semibold text-white">手机连接</h2>
         <p data-mobile-intro-copy class="mt-2 max-w-none whitespace-nowrap text-sm leading-6 text-[color:var(--muted-text)]">
-          扫码连接同一局域网页，在本次运行期内完成电脑到手机、手机到电脑的临时剪贴板传输。
+          用相机扫描二维码，临时传输电脑与手机剪贴板内容，无需安装 App
         </p>
       </div>
       <div class="flex flex-wrap justify-end gap-2">
@@ -222,12 +218,12 @@ function errorMessage(error: unknown, fallback: string) {
             <div class="flex flex-wrap items-start justify-between gap-3">
               <div class="flex min-w-0 flex-1 items-start gap-3">
                 <span class="grid h-11 w-11 shrink-0 place-items-center rounded-full border border-[color:var(--accent-line)] bg-[color:var(--accent-soft)] text-[color:var(--accent-text)]">
-                  <ArrowLeftRight class="h-5 w-5" />
+                  <Smartphone class="h-5 w-5" />
                 </span>
                 <div class="min-w-0">
                   <p class="text-base font-semibold text-white">本次临时传输</p>
                   <p class="mt-1 text-sm leading-6 text-[color:var(--muted-text)]">
-                    生成二维码后，用手机扫描二维码打开局域网页，无需安装 App。
+                    生成二维码后，用手机扫描二维码打开局域网页，无需安装 App
                   </p>
                 </div>
               </div>
@@ -243,39 +239,14 @@ function errorMessage(error: unknown, fallback: string) {
               <div class="flex min-w-0 items-center">
                 <span class="text-sm font-semibold text-slate-100">保持到手动结束</span>
                 <span class="hidden">
-                  关闭 CopyShare 或点击结束会话后，手机页面会停止同步。
+                  关闭 CopyShare 或点击结束会话后，手机页面会停止同步
                 </span>
               </div>
             </div>
           </section>
 
           <div data-mobile-summary-grid class="grid min-w-0 max-w-full gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-            <section data-mobile-clipboard-card class="min-w-0 overflow-hidden rounded-[22px] border border-[color:var(--main-line-soft)] bg-[color:var(--field-bg)] p-4">
-              <div class="flex items-center justify-between gap-3">
-                <p class="flex items-center gap-2 text-sm font-semibold text-white">
-                  <Monitor class="h-4 w-4 text-[color:var(--accent-text)]" />
-                  电脑剪贴板
-                </p>
-              </div>
-              <div v-if="contentItems.length" class="mt-3 grid max-h-[13rem] gap-2 overflow-auto pr-1">
-                <article
-                  v-for="(item, index) in contentItems"
-                  :key="item.id"
-                  class="rounded-2xl border border-[color:var(--main-line-soft)] bg-black/15 p-3"
-                >
-                  <p class="mb-2 text-[11px] font-medium text-[color:var(--subtle-text)]">电脑剪贴板 {{ index + 1 }}</p>
-          <p data-i18n-ignore class="line-clamp-4 select-text break-all text-sm leading-6 text-slate-100">{{ item.text }}</p>
-                </article>
-              </div>
-              <p v-else class="mt-3 min-h-[7.5rem] text-sm leading-6 text-[color:var(--muted-text)]">
-                待连接
-              </p>
-              <p class="hidden">
-                点击生成二维码后，会读取电脑当前文本剪贴板和最近剪贴板历史；手机连接后可逐条复制。
-              </p>
-            </section>
-
-            <section data-mobile-submit-card class="min-w-0 overflow-hidden rounded-[22px] border border-[color:var(--main-line-soft)] bg-[color:var(--field-bg)] p-4">
+            <section data-mobile-submit-card class="min-w-0 overflow-hidden rounded-[22px] border border-[color:var(--main-line-soft)] bg-[color:var(--field-bg)] p-4 lg:col-span-2">
               <div class="flex items-center justify-between gap-3">
                 <p class="flex items-center gap-2 text-sm font-semibold text-white">
                   <Smartphone class="h-4 w-4 text-[color:var(--accent-text)]" />
@@ -289,28 +260,18 @@ function errorMessage(error: unknown, fallback: string) {
                   class="rounded-2xl border border-emerald-300/15 bg-emerald-400/[0.06] p-3"
                 >
                   <p class="mb-2 text-[11px] font-medium text-emerald-200/80">手机提交 {{ index + 1 }}</p>
-          <p data-i18n-ignore class="line-clamp-4 select-text break-all text-sm leading-6 text-slate-100">{{ item.text }}</p>
+                  <p data-i18n-ignore class="line-clamp-4 select-text break-all text-sm leading-6 text-slate-100">{{ item.text }}</p>
                 </article>
               </div>
               <p v-else class="mt-3 min-h-[7.5rem] text-sm leading-6 text-[color:var(--muted-text)]">
                 待连接
               </p>
               <p class="hidden">
-                手机在同一个页面可连续粘贴并发送多条内容，这里会按顺序显示摘要。
+                手机在同一个页面可连续粘贴并发送多条内容，这里会按顺序显示摘要
               </p>
             </section>
           </div>
 
-          <section class="hidden">
-            <div>
-              <p class="text-sm font-semibold text-white">手机发送后自动写入电脑剪贴板</p>
-              <p class="mt-1 text-xs text-[color:var(--subtle-text)]">手机端每发送一条，都会直接覆盖电脑当前剪贴板，并保留在本次会话列表里。</p>
-            </div>
-            <span class="inline-flex h-10 items-center gap-2 rounded-full border border-emerald-300/30 bg-emerald-400/10 px-4 text-sm font-medium text-emerald-100">
-              <Check class="h-4 w-4" />
-              自动写入
-            </span>
-          </section>
         </div>
       </div>
     </Card>

@@ -11,4 +11,4 @@ assert.doesNotMatch(appShell, /devicesStore\.pendingTrust\[0\]/);
 assert.match(appShell, /data-trust-prompt/);
 assert.match(appShell, /devicesStore\.trust\(device\.id\)/);
 assert.match(appShell, /devicesStore\.reject\(device\.id\)/);
-assert.match(appShell, /v-if="!isFloating && trustPromptDevice"/);
+assert.match(appShell, /v-if="windowMode === 'main' && trustPromptDevice"/);

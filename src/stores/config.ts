@@ -4,12 +4,14 @@ import { getConfig, onAppEvent, updateConfig } from "@/lib/tauri";
 import type { AppConfig } from "@/types/config";
 
 const defaultConfig: AppConfig = {
-  configVersion: 10,
+  configVersion: 12,
+  onboardingCompleted: false,
   uiLanguage: "system",
   deviceName: "CopyShare",
   deviceId: "",
   theme: "win11Dark",
   closeAction: "ask",
+  startupWindowMode: "floating",
   port: 8765,
   autoStart: false,
   autoSync: true,
@@ -28,6 +30,7 @@ const defaultConfig: AppConfig = {
   syncText: true,
   syncImage: true,
   syncFiles: true,
+  syncDirection: "bidirectional",
   maxSendFileSizeMib: 3072,
   maxReceiveFileSizeMib: 3072,
   deduplicateSyncContent: true,

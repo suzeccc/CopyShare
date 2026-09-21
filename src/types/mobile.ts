@@ -27,3 +27,8 @@ export interface MobileSessionView {
   submittedItems: MobileClipboardTextItem[];
 }
 
+export interface MobileDeviceHistoryItem {
+  id: "mobile";
+  name: "移动端";
+  lastSeenAt: string;
+}

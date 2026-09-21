@@ -29,9 +29,9 @@ assert.match(button, /var\(--button-primary-bg\)/);
 assert.match(button, /var\(--button-primary-bg-hover\)/);
 assert.doesNotMatch(button, /border-blue-500|bg-blue-600|hover:bg-blue-500/);
 
-assert.match(switchControl, /peer-checked:border-\[#35d366\]/);
-assert.match(switchControl, /peer-checked:bg-\[#35d366\]/);
-assert.doesNotMatch(switchControl, /peer-checked:bg-\[color:var\(--accent-bg\)\]/);
+assert.match(switchControl, /background: var\(--switch-active\)/);
+assert.match(switchControl, /background: var\(--subtle-text\)/);
+assert.doesNotMatch(switchControl, /#35d366|bg-white|var\(--theme-accent\)|var\(--accent-line\)/);
 
 assert.match(floatingPanel, /var\(--floating-control-bg\)/);
 assert.match(floatingPanel, /var\(--floating-muted-text\)/);

@@ -219,35 +219,35 @@ html[data-app-theme="macosDark"] {
   --panel-bg-soft: rgba(58, 58, 60, 0.68);
   --field-bg: rgba(28, 28, 30, 0.88);
   --stat-bg: rgba(44, 44, 46, 0.76);
-  --theme-accent: #a78bfa;
+  --theme-accent: #75b8d4;
   --muted-text: #d1d1d6;
   --subtle-text: #a1a1a6;
-  --accent-bg: #6d5bd0;
-  --accent-bg-hover: #7c6af0;
-  --accent-line: rgba(167, 139, 250, 0.46);
-  --accent-soft: rgba(167, 139, 250, 0.14);
-  --accent-text: #c9bcff;
-  --accent-glow: rgba(167, 139, 250, 0.24);
-  --button-primary-bg: #6d5bd0;
-  --button-primary-bg-hover: #7c6af0;
-  --button-primary-line: rgba(167, 139, 250, 0.5);
+  --accent-bg: #2c6884;
+  --accent-bg-hover: #337794;
+  --accent-line: rgba(117, 184, 212, 0.46);
+  --accent-soft: rgba(117, 184, 212, 0.14);
+  --accent-text: #a9dbef;
+  --accent-glow: rgba(117, 184, 212, 0.24);
+  --button-primary-bg: #2c6884;
+  --button-primary-bg-hover: #337794;
+  --button-primary-line: rgba(117, 184, 212, 0.5);
   --button-primary-text: #ffffff;
   --dialog-bg: rgba(44, 44, 46, 0.94);
   --dialog-overlay-bg: rgba(0, 0, 0, 0.5);
   --disconnect-notice-bg: rgba(44, 44, 46, 0.96);
-  --disconnect-notice-line: rgba(167, 139, 250, 0.48);
-  --disconnect-notice-ring: rgba(167, 139, 250, 0.16);
+  --disconnect-notice-line: rgba(117, 184, 212, 0.48);
+  --disconnect-notice-ring: rgba(117, 184, 212, 0.16);
   --disconnect-notice-text: #f5f5f7;
   --disconnect-notice-muted-text: #d1d1d6;
-  --disconnect-notice-icon-bg: rgba(167, 139, 250, 0.12);
-  --disconnect-notice-icon-line: rgba(167, 139, 250, 0.4);
-  --disconnect-notice-icon-text: #c9bcff;
-  --disconnect-notice-close-hover: rgba(167, 139, 250, 0.12);
-  --disconnect-notice-shadow: 0 18px 52px rgba(0, 0, 0, 0.48), 0 0 28px rgba(167, 139, 250, 0.08);
+  --disconnect-notice-icon-bg: rgba(117, 184, 212, 0.12);
+  --disconnect-notice-icon-line: rgba(117, 184, 212, 0.4);
+  --disconnect-notice-icon-text: #a9dbef;
+  --disconnect-notice-close-hover: rgba(117, 184, 212, 0.12);
+  --disconnect-notice-shadow: 0 18px 52px rgba(0, 0, 0, 0.48), 0 0 28px rgba(117, 184, 212, 0.08);
   --floating-surface-line: rgba(255, 255, 255, 0.14);
-  --floating-surface-bg: linear-gradient(135deg, rgba(167, 139, 250, 0.08), transparent 48%),
+  --floating-surface-bg: linear-gradient(135deg, rgba(117, 184, 212, 0.08), transparent 48%),
     rgba(28, 28, 30, 0.74);
-  --floating-clipboard-history-bg: linear-gradient(135deg, rgba(167, 139, 250, 0.1), transparent 44%),
+  --floating-clipboard-history-bg: linear-gradient(135deg, rgba(117, 184, 212, 0.1), transparent 44%),
     rgba(28, 28, 30, 0.86);
   --floating-stat-bg: rgba(58, 58, 60, 0.62);
   --floating-stat-line: rgba(255, 255, 255, 0.1);
@@ -263,11 +263,11 @@ html[data-app-theme="macosDark"] {
   --clipboard-card-bg: rgba(44, 44, 46, 0.86);
   --clipboard-card-bg-hover: rgba(58, 58, 60, 0.94);
   --clipboard-card-line: rgba(255, 255, 255, 0.1);
-  --clipboard-card-line-hover: rgba(167, 139, 250, 0.3);
+  --clipboard-card-line-hover: rgba(117, 184, 212, 0.3);
   --clipboard-card-shadow: 0 10px 28px rgba(0, 0, 0, 0.24);
   --clipboard-card-shadow-hover: 0 16px 34px rgba(0, 0, 0, 0.34);
   --clipboard-card-text: #f5f5f7;
-  --clipboard-card-link-text: #c9bcff;
+  --clipboard-card-link-text: #a9dbef;
   --clipboard-card-meta-text: #a1a1a6;
   --clipboard-card-footer-text: #b7c6dc;
   --clipboard-card-soft-hover: rgba(255, 255, 255, 0.08);
@@ -329,17 +329,28 @@ body {
 
 html[data-window-mode="floating"],
 html[data-window-mode="floating"] body,
-html[data-window-mode="floating"] #app {
+html[data-window-mode="floating"] #app,
+html[data-window-mode="ball"],
+html[data-window-mode="ball"] body,
+html[data-window-mode="ball"] #app {
   background: transparent !important;
 }
 
-html[data-window-mode="floating"] {
+html[data-window-mode="floating"],
+html[data-window-mode="ball"] {
   background-color: transparent !important;
 }
 
 button,
 input {
   font: inherit;
+}
+
+/* Bound the retired Settings launcher when a cached renderer still displays it. */
+[data-network-diagnostics-entry] {
+  width: 100%;
+  max-width: 640px;
+  justify-self: start;
 }
 
 input,
@@ -399,42 +410,14 @@ button[data-window-control]:active {
 
 .app-window-shell {
   transform: translateZ(0);
-  will-change: background-color, border-color, padding;
 }
 
-.app-window-shell::before {
-  content: "";
-  position: absolute;
-  pointer-events: none;
-  z-index: 0;
-  opacity: 0;
-}
-
-.is-window-mode-transitioning.window-phase-main-exit.app-window-shell,
-.is-window-mode-transitioning.window-phase-main-enter.app-window-shell {
+.app-window-shell.is-mode-resizing {
   background-color: transparent !important;
   border-color: transparent !important;
   box-shadow: none;
-}
-
-.is-window-mode-transitioning.window-phase-floating-enter.app-window-shell::before {
-  inset: 8px;
-  border: 1px solid var(--floating-surface-line);
-  border-radius: 8px;
-  background: var(--floating-surface-bg);
-  box-shadow: 0 16px 42px rgba(0, 5, 15, 0.38);
-  transform-origin: top right;
-  animation: floating-shell-enter-bridge 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-
-.is-window-mode-transitioning.window-phase-main-enter.app-window-shell::before {
-  inset: 0;
-  border: 1px solid var(--main-line);
-  border-radius: 18px;
-  background: var(--main-bg);
-  box-shadow: 0 18px 50px rgba(3, 10, 22, 0.34);
-  transform-origin: top right;
-  animation: main-shell-enter-bridge 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  padding: 0 !important;
+  transition: none;
 }
 
 .startup-overlay {
@@ -445,10 +428,7 @@ button[data-window-control]:active {
   place-items: center;
   border-radius: 18px;
   overflow: hidden;
-  background:
-    radial-gradient(circle at 50% 38%, rgba(96, 205, 255, 0.12), transparent 30%),
-    rgba(17, 17, 17, 0.68);
-  backdrop-filter: blur(14px) saturate(135%);
+  background: transparent;
   user-select: none;
   -webkit-user-select: none;
 }
@@ -476,7 +456,7 @@ button[data-window-control]:active {
     0 28px 64px rgba(0, 0, 0, 0.42),
     0 0 42px rgba(96, 205, 255, 0.12),
     inset 0 1px 0 rgba(255, 255, 255, 0.08);
-  animation: startupOverlayEnter 900ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: startupOverlayEnter 450ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 
 .startup-logo {
@@ -501,12 +481,13 @@ button[data-window-control]:active {
 .startup-logo::before {
   left: 0;
   bottom: 0;
+  animation: startupLogoBase 900ms ease-in-out infinite;
 }
 
 .startup-logo::after {
   right: 0;
   top: 0;
-  animation: startupLogoNudge 1800ms ease-in-out infinite;
+  animation: startupLogoNudge 900ms ease-in-out infinite;
 }
 
 .startup-logo-link {
@@ -519,6 +500,7 @@ button[data-window-control]:active {
   border-radius: 999px;
   background: var(--theme-accent);
   box-shadow: 0 0 14px var(--accent-glow);
+  animation: startupLinkPulse 900ms ease-in-out infinite;
 }
 
 .startup-title {
@@ -550,175 +532,64 @@ button[data-window-control]:active {
   height: 100%;
   border-radius: inherit;
   background: linear-gradient(90deg, rgba(96, 205, 255, 0.24), var(--theme-accent));
-  animation: startupProgress 1800ms cubic-bezier(0.16, 1, 0.3, 1) infinite;
+  animation: startupProgress 900ms linear infinite;
 }
 
-.main-window-content,
-.floating-window-surface {
-  transform: translateZ(0);
-  transition:
-    opacity 220ms cubic-bezier(0.16, 1, 0.3, 1),
-    transform 220ms cubic-bezier(0.16, 1, 0.3, 1),
-    filter 220ms cubic-bezier(0.16, 1, 0.3, 1);
-  will-change: opacity, transform, filter;
-}
-
-.main-window-content {
-  transform-origin: var(--window-transition-origin, center);
-}
-
-.floating-window-surface {
-  transform-origin: top right;
-}
-
-.is-window-mode-transitioning.window-phase-main-enter .main-window-content,
-.is-window-mode-transitioning.window-phase-floating-enter .floating-window-surface {
-  position: relative;
-  z-index: 1;
-}
-
-.is-window-mode-transitioning.window-phase-main-exit .main-window-content,
-.is-window-mode-transitioning.window-phase-main-enter .main-window-content {
-  background: var(--main-bg);
-  border: 1px solid var(--main-line);
-  border-radius: 18px;
-  box-shadow: 0 18px 50px rgba(3, 10, 22, 0.34);
-}
-
-.window-panel-enter-active,
-.window-panel-leave-active {
-  transition:
-    opacity 220ms cubic-bezier(0.16, 1, 0.3, 1),
-    transform 220ms cubic-bezier(0.16, 1, 0.3, 1),
-    filter 220ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.window-panel-enter-from,
-.window-panel-leave-to {
+.is-collapsing-to-ball .main-window-content,
+.is-collapsing-to-ball .floating-window-surface {
   opacity: 0;
-  filter: blur(3px);
-  transform: scale(0.972) translateY(8px);
+  transform: scale(.96);
+  transition: opacity 100ms ease, transform 100ms ease;
 }
 
-.window-panel-enter-to,
-.window-panel-leave-from {
-  opacity: 1;
-  filter: blur(0);
-  transform: scale(1) translateY(0);
+html[data-window-mode="main"] .app-window-shell {
+  --panel-exit-scale: .82;
+  --panel-enter-scale: .84;
 }
 
-.is-window-mode-transitioning.window-phase-main-exit .main-window-content {
-  opacity: 0.22;
-  filter: blur(4px) saturate(0.82);
-  transform: translate(26px, -16px) scale(0.22) rotate(3deg);
+html[data-window-mode="floating"] .app-window-shell {
+  --panel-exit-scale: .92;
+  --panel-enter-scale: .88;
 }
 
-.is-window-mode-transitioning.window-phase-floating-exit .floating-window-surface {
-  opacity: 0.24;
-  filter: blur(4px) saturate(0.82);
-  transform: translate(18px, -14px) scale(0.36) rotate(-2deg);
-}
-
-.is-window-mode-transitioning.window-phase-main-enter .main-window-content {
+.app-window-shell[data-panel-transition] {
   transform-origin: top right;
-  animation: main-window-enter 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  transition: none;
+  will-change: transform, opacity;
 }
 
-.is-window-mode-transitioning.window-phase-floating-enter .floating-window-surface {
-  animation: floating-window-enter 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
+.app-window-shell[data-panel-transition="exit"] {
+  animation: panel-zoom-out 160ms cubic-bezier(0.4, 0, 0.6, 1) both;
 }
 
-@keyframes main-window-enter {
-  0% {
-    opacity: 0.2;
-    filter: blur(4px);
-    transform: scale(0.72) translate(34px, -22px);
-  }
-
-  68% {
-    opacity: 1;
-    filter: blur(0);
-    transform: scale(1.018) translate(0, 0);
-  }
-
-  100% {
-    opacity: 1;
-    filter: blur(0);
-    transform: scale(1) translateY(0);
-  }
+.app-window-shell[data-panel-transition="enter"] {
+  animation: panel-zoom-in 250ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
-@keyframes floating-window-enter {
-  0% {
-    opacity: 0.22;
-    filter: blur(4px);
-    transform: scale(0.72) translate(28px, -18px);
-  }
-
-  68% {
-    opacity: 1;
-    filter: blur(0);
-    transform: scale(1.045) translate(0, 0);
-  }
-
-  100% {
-    opacity: 1;
-    filter: blur(0);
-    transform: scale(1) translateY(0);
-  }
+@keyframes panel-zoom-out {
+  65% { opacity: .85; }
+  to { opacity: 0; transform: scale(var(--panel-exit-scale)); }
 }
 
-@keyframes main-shell-enter-bridge {
-  0% {
-    opacity: 0.2;
-    filter: blur(4px);
-    transform: scale(0.72) translate(34px, -22px);
-  }
-
-  58% {
-    opacity: 0.18;
-    filter: blur(2px);
-    transform: scale(1.012) translate(0, 0);
-  }
-
-  100% {
-    opacity: 0;
-    filter: blur(0);
-    transform: scale(1) translateY(0);
-  }
-}
-
-@keyframes floating-shell-enter-bridge {
-  0% {
-    opacity: 0.24;
-    filter: blur(4px);
-    transform: scale(0.72) translate(28px, -18px);
-  }
-
-  58% {
-    opacity: 0.18;
-    filter: blur(2px);
-    transform: scale(1.025) translate(0, 0);
-  }
-
-  100% {
-    opacity: 0;
-    filter: blur(0);
-    transform: scale(1) translateY(0);
-  }
+@keyframes panel-zoom-in {
+  from { opacity: 0; transform: scale(var(--panel-enter-scale)); }
+  35% { opacity: .88; }
+  to { opacity: 1; transform: scale(1); }
 }
 
 @keyframes startupOverlayEnter {
   0% {
     opacity: 0;
-    filter: blur(5px);
-    transform: translateY(14px) scale(0.94);
+    transform: translateY(18px) scale(0.9);
   }
 
-  34%,
+  60% {
+    opacity: 1;
+    transform: translateY(-3px) scale(1.035);
+  }
+
   100% {
     opacity: 1;
-    filter: blur(0);
     transform: translateY(0) scale(1);
   }
 }
@@ -730,8 +601,18 @@ button[data-window-control]:active {
   }
 
   50% {
-    transform: translate(-6px, 5px);
+    transform: translate(-8px, 8px) rotate(3deg);
   }
+}
+
+@keyframes startupLogoBase {
+  0%, 100% { transform: translate(0, 0); }
+  50% { transform: translate(3px, -3px) rotate(-3deg); }
+}
+
+@keyframes startupLinkPulse {
+  0%, 100% { opacity: 0.45; transform: scaleX(0.65); }
+  50% { opacity: 1; transform: scaleX(1); }
 }
 
 @keyframes startupProgress {
@@ -739,23 +620,15 @@ button[data-window-control]:active {
     transform: translateX(-105%);
   }
 
-  70%,
   100% {
-    transform: translateX(82%);
+    transform: translateX(175%);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .main-window-content,
-  .floating-window-surface,
-  .app-window-shell::before,
-  .window-panel-enter-active,
-  .window-panel-leave-active,
-  .startup-overlay-enter-active,
-  .startup-overlay-leave-active,
-  .startup-card,
-  .startup-logo::after,
-  .startup-progress::before,
+  .is-collapsing-to-ball .main-window-content,
+  .is-collapsing-to-ball .floating-window-surface,
+  /* Startup animation is explicitly enabled independently of desktop motion settings. */
   .trust-prompt-enter-active,
   .trust-prompt-leave-active,
   .floating-clipboard-row,
@@ -805,7 +678,28 @@ button[data-window-control]:active {
   border: 1px solid var(--floating-surface-line);
   background: var(--floating-surface-bg);
   box-shadow: 0 16px 42px rgba(0, 5, 15, 0.38);
-  backdrop-filter: blur(20px) saturate(150%);
+  isolation: isolate;
+  contain: paint;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+html[data-window-mode="floating"] .app-window-shell { filter: none; }
+
+html[data-window-mode="floating"] .floating-window-surface {
+  filter: none;
+  transform: none;
+  will-change: auto;
+}
+
+html[data-window-mode="floating"] .floating-clipboard-row {
+  transform: none;
+  transition-property: background-color, border-color, box-shadow;
+  will-change: auto;
+}
+
+html[data-window-mode="floating"] .floating-clipboard-row:hover {
+  transform: none;
 }
 
 .floating-clipboard-history-surface {
@@ -845,7 +739,8 @@ button[data-window-control]:active {
     transform 150ms ease;
 }
 
-.floating-clipboard-row:hover {
+.floating-clipboard-row:hover,
+.floating-clipboard-row[data-active="true"] {
   border-color: var(--floating-control-line);
   background: rgba(255, 255, 255, 0.055);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
@@ -936,7 +831,8 @@ button[data-window-control]:active {
 }
 
 [data-floating-clipboard-text],
-[data-floating-clipboard-history-text] {
+[data-floating-clipboard-history-text],
+[data-floating-clipboard-full-text] {
   user-select: text;
   -webkit-user-select: text;
   cursor: text;

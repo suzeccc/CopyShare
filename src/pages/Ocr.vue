@@ -75,7 +75,7 @@ function clearSession() {
         <div class="min-w-0">
           <p class="text-lg font-bold text-white">图片转文字</p>
           <p class="mt-1 text-[13px] leading-5 text-[color:var(--muted-text)]">
-            粘贴截图或图片即可在本机识别文字，图片不会上传云端。
+            粘贴截图或图片即可在本机识别文字，图片不会上传云端
           </p>
         </div>
         <div class="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-[color:var(--accent-line)] bg-[color:var(--accent-soft)] text-[color:var(--accent-text)]">

@@ -22,3 +22,7 @@ assert.match(clipboardPage, /await openHistoryFileLocation\(item\.id\)/);
 assert.match(floatingPanel, /openHistoryFileLocation/);
 assert.match(floatingPanel, /action === "openSourceLocation"/);
 assert.match(floatingPanel, /await openHistoryFileLocation\(item\.id\)/);
+for (const page of [clipboardPage, floatingPanel]) {
+  assert.doesNotMatch(page, /已打开文件(?:下载)?位置/);
+  assert.match(page, /打开文件位置失败/);
+}

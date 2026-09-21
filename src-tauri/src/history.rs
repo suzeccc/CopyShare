@@ -1,5 +1,6 @@
 use std::{
     fs,
+    io::Write,
     path::{Path, PathBuf},
     process::Command,
 };
@@ -14,6 +15,7 @@ use uuid::Uuid;
 use crate::{
     error::{AppError, AppResult},
     models::{ClipboardContentType, ClipboardMessage, HistoryDirection, HistoryItem, SyncStatus},
+    safe_json_store,
 };
 
 const HISTORY_FILE: &str = "history.json";
@@ -26,14 +28,30 @@ const HISTORY_LIMIT: usize = 100;
 const DEFAULT_THUMBNAIL_SIZE: u32 = 200;
 
 pub fn load_history(app: &AppHandle) -> AppResult<Vec<HistoryItem>> {
-    let path = history_path(app)?;
-    if !path.exists() {
-        return Ok(Vec::new());
-    }
+    load_history_from_dir(&app.path().app_data_dir()?)
+}
 
-    let text = fs::read_to_string(path)?;
-    let mut items = load_history_items_from_text(&text)?;
-    restore_history_images(&mut items, &history_images_dir(app)?);
+fn load_history_from_dir(root: &Path) -> AppResult<Vec<HistoryItem>> {
+    let mut items =
+        safe_json_store::load::<Vec<HistoryItem>>(&root.join(HISTORY_FILE))?.unwrap_or_default();
+    // Preserve inline images from older metadata before releasing their memory.
+    save_history_images(&root.join(HISTORY_IMAGE_DIR), &items)?;
+    let mut migrated = false;
+    for item in &mut items {
+        if item.content_type == ClipboardContentType::Image {
+            migrated |= !item.content.is_empty();
+            if item.content_hash.trim().is_empty() {
+                if let Ok(content) = image_content(root, item) {
+                    item.content_hash = crate::sync::content_hash(&item.content_type, &content);
+                    migrated = true;
+                }
+            }
+        }
+    }
+    release_image_content(&mut items);
+    if migrated {
+        safe_json_store::save(&root.join(HISTORY_FILE), &items)?;
+    }
     Ok(items)
 }
 
@@ -42,10 +60,14 @@ pub fn save_history(app: &AppHandle, items: &[HistoryItem]) -> AppResult<()> {
     let image_dir = history_images_dir(app)?;
     let thumbnail_dir = history_thumbnails_dir(app)?;
     save_history_images(&image_dir, items)?;
-    prune_history_images(&image_dir, items)?;
-    prune_history_thumbnails(&thumbnail_dir, items)?;
-    let text = serde_json::to_string_pretty(&history_items_for_disk(items))?;
-    fs::write(path, text)?;
+    safe_json_store::save(&path, &history_items_for_disk(items))?;
+    // Metadata is committed; cleanup failures must not roll back the in-memory snapshot.
+    if let Err(error) = prune_history_images(&image_dir, items) {
+        tracing::warn!("history image cleanup failed; will retry on the next save: {error}");
+    }
+    if let Err(error) = prune_history_thumbnails(&thumbnail_dir, items) {
+        tracing::warn!("history thumbnail cleanup failed; will retry on the next save: {error}");
+    }
     Ok(())
 }
 
@@ -85,6 +107,8 @@ pub fn make_history_item_with_status(
         content_type: message.content_type.clone(),
         sync_status,
         file_transfer_id: None,
+        file_transfer_file_id: None,
+        clipboard_batch_id: None,
         file_transfer_status: None,
         is_pinned: false,
         pinned_at: None,
@@ -149,6 +173,8 @@ pub fn upsert_history_by_content(items: &mut Vec<HistoryItem>, item: HistoryItem
         }
         existing.content_type = item.content_type;
         existing.file_transfer_id = item.file_transfer_id;
+        existing.file_transfer_file_id = item.file_transfer_file_id;
+        existing.clipboard_batch_id = item.clipboard_batch_id;
         existing.file_transfer_status = item.file_transfer_status;
         existing.success = item.success;
         existing.created_at = item.created_at;
@@ -179,7 +205,32 @@ pub fn summarize(content: &str) -> String {
 fn should_update_existing_history(existing: &HistoryItem, item: &HistoryItem) -> bool {
     existing.sync_status == SyncStatus::Unsynced
         && existing.content_type == item.content_type
-        && history_identity(existing) == history_identity(item)
+        && if item.content_type == ClipboardContentType::Image
+            && !existing.content_hash.trim().is_empty()
+            && !item.content_hash.trim().is_empty()
+        {
+            existing.content_hash == item.content_hash
+        } else {
+            history_identity(existing) == history_identity(item)
+        }
+}
+
+pub fn make_system_text_history_item(item: crate::models::ClipboardTextItem, source_device: String) -> HistoryItem {
+    let message = ClipboardMessage {
+        message_id: item.id.clone(),
+        source_device_id: String::new(),
+        source_device_name: source_device.clone(),
+        content_type: ClipboardContentType::Text,
+        content_hash: crate::sync_engine::content_hash(&ClipboardContentType::Text, &item.text),
+        content: item.text,
+        timestamp: 0,
+        origin_sequence: None,
+        event_version: None,
+    };
+    let mut history = make_history_item_with_status(HistoryDirection::Local, source_device, &message, SyncStatus::Unsynced);
+    history.id = item.id;
+    if let Some(created_at) = item.created_at { history.created_at = created_at; }
+    history
 }
 
 fn history_identity(item: &HistoryItem) -> &str {
@@ -217,6 +268,26 @@ pub fn update_file_transfer_history(
     Some(item.clone())
 }
 
+pub fn update_file_transfer_file_history(
+    items: &mut [HistoryItem],
+    transfer_id: &str,
+    file_id: &str,
+    status: crate::models::FileTransferStatus,
+    content: Option<String>,
+) -> Option<HistoryItem> {
+    let item = items.iter_mut().find(|item| {
+        item.file_transfer_id.as_deref() == Some(transfer_id)
+            && item.file_transfer_file_id.as_deref() == Some(file_id)
+    })?;
+    item.file_transfer_status = Some(status);
+    if let Some(content) = content {
+        if !content.trim().is_empty() {
+            item.content = content;
+        }
+    }
+    Some(item.clone())
+}
+
 fn history_content(message: &ClipboardMessage) -> String {
     match message.content_type {
         ClipboardContentType::Text | ClipboardContentType::Image | ClipboardContentType::FileList => {
@@ -241,30 +312,73 @@ pub fn history_item_for_frontend(item: &HistoryItem) -> HistoryItem {
 }
 
 fn strip_frontend_heavy_content(item: &HistoryItem) -> HistoryItem {
-    let mut item = item.clone();
-    if item.content_type == ClipboardContentType::Image {
-        item.content.clear();
+    HistoryItem {
+        id: item.id.clone(),
+        direction: item.direction.clone(),
+        source_device: item.source_device.clone(),
+        summary: item.summary.clone(),
+        content: if item.content_type == ClipboardContentType::Image {
+            String::new()
+        } else {
+            item.content.clone()
+        },
+        content_hash: item.content_hash.clone(),
+        content_type: item.content_type.clone(),
+        sync_status: item.sync_status.clone(),
+        file_transfer_id: item.file_transfer_id.clone(),
+        file_transfer_file_id: item.file_transfer_file_id.clone(),
+        clipboard_batch_id: item.clipboard_batch_id.clone(),
+        file_transfer_status: item.file_transfer_status.clone(),
+        is_pinned: item.is_pinned,
+        pinned_at: item.pinned_at,
+        success: item.success,
+        created_at: item.created_at,
     }
-    item
+}
+
+pub fn release_image_content(items: &mut [HistoryItem]) {
+    for item in items {
+        if item.content_type == ClipboardContentType::Image {
+            item.content = String::new();
+        }
+    }
 }
 
 fn save_history_images(image_dir: &PathBuf, items: &[HistoryItem]) -> AppResult<()> {
     fs::create_dir_all(image_dir)?;
     for item in items {
         if item.content_type == ClipboardContentType::Image && !item.content.trim().is_empty() {
-            fs::write(history_image_path(image_dir, &item.id), &item.content)?;
+            let path = history_image_path(image_dir, &item.id);
+            if fs::metadata(&path).is_ok_and(|metadata| metadata.len() == item.content.len() as u64)
+                && fs::read_to_string(&path).is_ok_and(|content| content == item.content)
+            {
+                continue;
+            }
+            let temp = image_dir.join(format!(".{}.tmp", Uuid::new_v4()));
+            let result = (|| -> AppResult<()> {
+                let mut file = fs::File::create(&temp)?;
+                file.write_all(item.content.as_bytes())?;
+                file.sync_all()?;
+                drop(file);
+                fs::rename(&temp, &path)?;
+                Ok(())
+            })();
+            let _ = fs::remove_file(&temp);
+            result?;
         }
     }
     Ok(())
 }
 
-fn restore_history_images(items: &mut [HistoryItem], image_dir: &PathBuf) {
-    for item in items {
-        if item.content_type == ClipboardContentType::Image && item.content.trim().is_empty() {
-            if let Ok(content) = fs::read_to_string(history_image_path(image_dir, &item.id)) {
-                item.content = content;
-            }
-        }
+pub fn image_content(root: &Path, item: &HistoryItem) -> AppResult<String> {
+    image_content_from_dir(&root.join(HISTORY_IMAGE_DIR), item)
+}
+
+fn image_content_from_dir(image_dir: &PathBuf, item: &HistoryItem) -> AppResult<String> {
+    if item.content.trim().is_empty() {
+        Ok(fs::read_to_string(history_image_path(image_dir, &item.id))?)
+    } else {
+        Ok(item.content.clone())
     }
 }
 
@@ -276,7 +390,11 @@ fn prune_history_images(image_dir: &PathBuf, items: &[HistoryItem]) -> AppResult
     let keep_files: std::collections::HashSet<String> = items
         .iter()
         .filter(|item| item.content_type == ClipboardContentType::Image)
-        .map(|item| history_image_file_name(&item.id))
+        .flat_map(|item| [
+            history_image_file_name(&item.id),
+            format!("{}.source", safe_history_id(&item.id)),
+            format!("{}.png", safe_history_id(&item.id)),
+        ])
         .collect();
 
     for entry in fs::read_dir(image_dir)? {
@@ -379,6 +497,33 @@ pub fn get_history_file_thumbnail(
     Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
 }
 
+pub fn save_image_source(root: &Path, id: &str, source: &Path) -> AppResult<()> {
+    let dir = root.join(HISTORY_IMAGE_DIR);
+    fs::create_dir_all(&dir)?;
+    fs::write(dir.join(format!("{}.source", safe_history_id(id))), source.to_string_lossy().as_bytes())?;
+    Ok(())
+}
+
+pub fn image_file_location(root: &Path, item: &HistoryItem) -> AppResult<PathBuf> {
+    if item.content_type != ClipboardContentType::Image {
+        return Err(AppError::InvalidInput("history item is not an image".into()));
+    }
+    let dir = root.join(HISTORY_IMAGE_DIR);
+    let id = safe_history_id(&item.id);
+    if item.direction == HistoryDirection::Local {
+        if let Ok(source) = fs::read_to_string(dir.join(format!("{id}.source"))) {
+            let source = PathBuf::from(source);
+            if source.is_absolute() && source.is_file() {
+                return Ok(source);
+            }
+        }
+    }
+    fs::create_dir_all(&dir)?;
+    let path = dir.join(format!("{id}.png"));
+    save_history_media(root, item, &path)?;
+    Ok(path)
+}
+
 pub fn get_history_file_preview_path(item: &HistoryItem) -> AppResult<String> {
     if item.content_type != ClipboardContentType::FileList {
         return Err(crate::error::AppError::InvalidInput(
@@ -388,7 +533,7 @@ pub fn get_history_file_preview_path(item: &HistoryItem) -> AppResult<String> {
 
     for entry in crate::clipboard::clipboard_content_to_file_entries(&item.content)? {
         let path = PathBuf::from(entry.path);
-        if (is_video_file_name(&entry.name) || is_video_file_path(&path)) && path.exists() {
+        if (is_video_file_name(&entry.name) || is_video_file_path(&path)) && path.is_file() {
             return Ok(path.to_string_lossy().to_string());
         }
     }
@@ -396,6 +541,42 @@ pub fn get_history_file_preview_path(item: &HistoryItem) -> AppResult<String> {
     Err(crate::error::AppError::InvalidInput(
         "视频文件不存在或尚未下载".to_string(),
     ))
+}
+
+pub fn save_history_media(root: &Path, item: &HistoryItem, destination: &Path) -> AppResult<()> {
+    // Stage beside the destination so failed reads/writes cannot truncate an existing file.
+    let temporary = destination.with_file_name(format!(".copyshare-{}.tmp", Uuid::new_v4()));
+    let result = (|| {
+        let mut output = fs::File::options().write(true).create_new(true).open(&temporary)?;
+        match item.content_type {
+            ClipboardContentType::Image => {
+                let bytes = base64::engine::general_purpose::STANDARD
+                    .decode(image_content(root, item)?.trim())
+                    .map_err(|error| AppError::Clipboard(error.to_string()))?;
+                if image::guess_format(&bytes).ok() == Some(image::ImageFormat::Png) {
+                    output.write_all(&bytes)?;
+                } else {
+                    image::load_from_memory(&bytes)
+                        .map_err(|error| AppError::Clipboard(error.to_string()))?
+                        .write_to(&mut output, image::ImageFormat::Png)
+                        .map_err(|error| AppError::Clipboard(error.to_string()))?;
+                }
+            }
+            ClipboardContentType::FileList => {
+                let mut source = fs::File::open(get_history_file_preview_path(item)?)?;
+                std::io::copy(&mut source, &mut output)?;
+            }
+            _ => return Err(AppError::InvalidInput("只能另存图片或视频".to_string())),
+        }
+        output.sync_all()?;
+        drop(output);
+        fs::rename(&temporary, destination)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
 }
 
 pub fn video_thumbnail_base64_for_path(path: &Path, max_size: u32) -> AppResult<String> {
@@ -426,7 +607,7 @@ fn is_video_file_path(path: &Path) -> bool {
         .is_some_and(is_video_file_name)
 }
 
-fn is_video_file_name(name: &str) -> bool {
+pub(crate) fn is_video_file_name(name: &str) -> bool {
     name.rsplit_once('.')
         .map(|(_, extension)| {
             matches!(
@@ -571,11 +752,7 @@ fn get_history_image_thumbnail_from_dirs(
         return Ok(base64::engine::general_purpose::STANDARD.encode(fs::read(thumbnail_path)?));
     }
 
-    let content = if item.content.trim().is_empty() {
-        fs::read_to_string(history_image_path(image_dir, &item.id))?
-    } else {
-        item.content.clone()
-    };
+    let content = image_content_from_dir(image_dir, item)?;
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(content.trim())
         .map_err(|error| crate::error::AppError::Clipboard(error.to_string()))?;
@@ -694,6 +871,7 @@ fn history_thumbnails_dir(app: &AppHandle) -> AppResult<PathBuf> {
     Ok(dir)
 }
 
+#[cfg(test)]
 fn load_history_items_from_text(text: &str) -> AppResult<Vec<HistoryItem>> {
     match serde_json::from_str(text) {
         Ok(items) => Ok(items),
@@ -853,10 +1031,8 @@ mod tests {
 
     #[test]
     fn image_history_content_round_trips_through_cache_files() -> AppResult<()> {
-        let image_dir = std::env::temp_dir().join(format!(
-            "copyshare-history-images-{}",
-            Uuid::new_v4()
-        ));
+        let image_dir =
+            std::env::temp_dir().join(format!("copyshare-history-images-{}", Uuid::new_v4()));
         let content = STANDARD.encode(vec![7; 2048]);
         let mut item = HistoryItem {
             id: "image:one".to_string(),
@@ -868,6 +1044,8 @@ mod tests {
             content_type: ClipboardContentType::Image,
             sync_status: SyncStatus::Synced,
             file_transfer_id: None,
+            file_transfer_file_id: None,
+            clipboard_batch_id: None,
             file_transfer_status: None,
             is_pinned: false,
             pinned_at: None,
@@ -876,11 +1054,151 @@ mod tests {
         };
 
         save_history_images(&image_dir, &[item.clone()])?;
+        let path = history_image_path(&image_dir, &item.id);
+        let old_time = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(946684800);
+        fs::File::options()
+            .write(true)
+            .open(&path)?
+            .set_times(fs::FileTimes::new().set_modified(old_time))?;
+        let before = fs::metadata(&path)?.modified()?;
+        save_history_images(&image_dir, &[item.clone()])?;
+        assert_eq!(
+            fs::metadata(&path)?.modified()?,
+            before,
+            "unchanged images must not be rewritten"
+        );
+        fs::write(&path, "!".repeat(content.len()))?;
+        save_history_images(&image_dir, &[item.clone()])?;
+        assert_eq!(
+            fs::read_to_string(&path)?,
+            content,
+            "damaged resources must be repaired"
+        );
         item.content.clear();
-        restore_history_images(std::slice::from_mut(&mut item), &image_dir);
+        item.content = image_content_from_dir(&image_dir, &item)?;
 
         assert_eq!(item.content, content);
         fs::remove_dir_all(image_dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn media_export_preserves_full_images_and_video_and_does_not_truncate_on_error() -> AppResult<()> {
+        let root = std::env::temp_dir().join(format!("copyshare-media-export-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root)?;
+        let image = image::RgbaImage::from_pixel(2048, 32, image::Rgba([30, 80, 120, 255]));
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(image.clone())
+            .write_to(&mut bytes, image::ImageFormat::Png).unwrap();
+        let message = ClipboardMessage {
+            message_id: "image".into(), source_device_id: "local".into(),
+            source_device_name: "Device".into(), content_type: ClipboardContentType::Image,
+            content: STANDARD.encode(bytes.get_ref()), content_hash: "hash".into(), timestamp: 1,
+            origin_sequence: None, event_version: None,
+        };
+        let mut items = vec![make_history_item(HistoryDirection::Local, "Device", &message)];
+        save_history_images(&root.join(HISTORY_IMAGE_DIR), &items)?;
+        release_image_content(&mut items);
+        let target = root.join("export.png");
+        fs::write(&target, b"existing")?;
+        save_history_media(&root, &items[0], &target)?;
+        assert_eq!(fs::read(&target)?, bytes.get_ref().clone());
+        assert_eq!(image::open(&target).unwrap().to_rgba8(), image);
+        let cached_location = image_file_location(&root, &items[0])?;
+        assert_eq!(fs::read(&cached_location)?, bytes.get_ref().clone());
+        save_image_source(&root, &items[0].id, &target)?;
+        assert_eq!(image_file_location(&root, &items[0])?, target);
+        prune_history_images(&root.join(HISTORY_IMAGE_DIR), &items)?;
+        assert!(cached_location.is_file());
+        assert_eq!(image_file_location(&root, &items[0])?, target);
+        let mut remote = items[0].clone();
+        remote.direction = HistoryDirection::Remote;
+        assert_eq!(image_file_location(&root, &remote)?, cached_location);
+        fs::remove_file(&target)?;
+        assert_eq!(image_file_location(&root, &items[0])?, cached_location);
+        fs::write(&target, bytes.get_ref())?;
+        let mut invalid = items[0].clone();
+        invalid.content = "not base64".into();
+        assert!(save_history_media(&root, &invalid, &target).is_err());
+        assert_eq!(fs::read(&target)?, bytes.get_ref().clone());
+
+        let source = root.join("original.mp4");
+        let video_bytes = vec![42; 200_000];
+        fs::write(&source, &video_bytes)?;
+        let mut video = items[0].clone();
+        video.content_type = ClipboardContentType::FileList;
+        video.content = serde_json::to_string(&vec![crate::clipboard::ClipboardFileEntry {
+            path: source.to_string_lossy().into(), name: "original.mp4".into(),
+            size: video_bytes.len() as u64, thumbnail: None,
+        }])?;
+        let saved_video = root.join("copy.mp4");
+        save_history_media(&root, &video, &saved_video)?;
+        assert_eq!(fs::read(&saved_video)?, video_bytes);
+        fs::remove_file(&source)?;
+        assert!(save_history_media(&root, &video, &saved_video).is_err());
+        assert_eq!(fs::read(&saved_video)?, video_bytes);
+        assert!(!fs::read_dir(&root)?.filter_map(Result::ok)
+            .any(|entry| entry.path().extension().is_some_and(|extension| extension == "tmp")));
+        prune_history_images(&root.join(HISTORY_IMAGE_DIR), &[])?;
+        assert_eq!(fs::read_dir(root.join(HISTORY_IMAGE_DIR))?.count(), 0);
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn history_loads_image_metadata_and_migrates_legacy_inline_content() -> AppResult<()> {
+        let root = std::env::temp_dir().join(format!("copyshare-lazy-history-{}", Uuid::new_v4()));
+        let content = STANDARD.encode(vec![7; 2048]);
+        let message = ClipboardMessage {
+            message_id: "image-1".into(),
+            source_device_id: "device-1".into(),
+            source_device_name: "Device".into(),
+            content_type: ClipboardContentType::Image,
+            content: content.clone(),
+            content_hash: crate::sync::content_hash(&ClipboardContentType::Image, &content),
+            timestamp: 1,
+            origin_sequence: None,
+            event_version: None,
+        };
+        let mut item = make_history_item_with_status(
+            HistoryDirection::Local,
+            "Device",
+            &message,
+            SyncStatus::Unsynced,
+        );
+        let id = item.id.clone();
+        item.content_hash.clear();
+        safe_json_store::save(&root.join(HISTORY_FILE), &[item])?;
+        let mut loaded = load_history_from_dir(&root)?;
+        assert!(loaded[0].content.is_empty());
+        assert_eq!(loaded[0].content.capacity(), 0);
+        assert_eq!(image_content(&root, &loaded[0])?, content);
+        assert_eq!(loaded[0].content_hash, message.content_hash);
+        let on_disk: Vec<HistoryItem> = safe_json_store::load(&root.join(HISTORY_FILE))?.unwrap();
+        assert!(on_disk[0].content.is_empty());
+        let new_item = make_history_item_with_status(
+            HistoryDirection::Local,
+            "Device",
+            &message,
+            SyncStatus::Synced,
+        );
+        let updated = upsert_history_by_content(&mut loaded, new_item);
+        assert_eq!(
+            updated.id, id,
+            "image deduplication must survive releasing its body"
+        );
+        assert_eq!(loaded.len(), 1);
+        release_image_content(&mut loaded);
+        fs::remove_file(
+            root.join(HISTORY_IMAGE_DIR)
+                .join(history_image_file_name(&id)),
+        )?;
+        assert!(
+            load_history_from_dir(&root)?[0].content.is_empty(),
+            "missing caches must not prevent startup"
+        );
+        assert!(image_content(&root, &loaded[0]).is_err());
+        fs::remove_dir_all(root)?;
         Ok(())
     }
 
@@ -902,6 +1220,8 @@ mod tests {
             content_type: ClipboardContentType::Image,
             sync_status: SyncStatus::Synced,
             file_transfer_id: None,
+            file_transfer_file_id: None,
+            clipboard_batch_id: None,
             file_transfer_status: None,
             is_pinned: false,
             pinned_at: None,
@@ -946,6 +1266,8 @@ mod tests {
             content_type: ClipboardContentType::Image,
             sync_status: SyncStatus::Synced,
             file_transfer_id: None,
+            file_transfer_file_id: None,
+            clipboard_batch_id: None,
             file_transfer_status: None,
             is_pinned: false,
             pinned_at: None,
@@ -987,6 +1309,8 @@ mod tests {
             content_type: ClipboardContentType::Image,
             sync_status: SyncStatus::Synced,
             file_transfer_id: None,
+            file_transfer_file_id: None,
+            clipboard_batch_id: None,
             file_transfer_status: None,
             is_pinned: false,
             pinned_at: None,
@@ -1149,6 +1473,48 @@ mod tests {
     }
 
     #[test]
+    fn file_transfer_file_history_updates_only_the_matching_file() {
+        let message = ClipboardMessage {
+            message_id: "transfer-1".to_string(),
+            source_device_id: "device-a".to_string(),
+            source_device_name: "Laptop A".to_string(),
+            content_type: ClipboardContentType::FileList,
+            content: r#"[{"path":"","name":"a.txt","size":3}]"#.to_string(),
+            content_hash: "hash".to_string(),
+            timestamp: 1,
+            origin_sequence: None,
+            event_version: None,
+        };
+        let mut first = make_history_item(HistoryDirection::Remote, "Laptop A", &message);
+        first.file_transfer_id = Some("transfer-1".to_string());
+        first.file_transfer_file_id = Some("file-1".to_string());
+        first.file_transfer_status = Some(crate::models::FileTransferStatus::Pending);
+        let mut second = first.clone();
+        second.id = "second".to_string();
+        second.file_transfer_file_id = Some("file-2".to_string());
+        let mut items = vec![first, second];
+
+        update_file_transfer_file_history(
+            &mut items,
+            "transfer-1",
+            "file-2",
+            crate::models::FileTransferStatus::Completed,
+            Some(r#"[{"path":"C:\\b.txt","name":"b.txt","size":4}]"#.to_string()),
+        )
+        .expect("matching file history should update");
+
+        assert_eq!(
+            items[0].file_transfer_status,
+            Some(crate::models::FileTransferStatus::Pending)
+        );
+        assert_eq!(
+            items[1].file_transfer_status,
+            Some(crate::models::FileTransferStatus::Completed)
+        );
+        assert!(items[1].content.contains(r#"C:\\b.txt"#));
+    }
+
+    #[test]
     fn unsynced_history_item_upgrades_to_synced_without_duplicate() {
         let message = ClipboardMessage {
             message_id: "m".to_string(),
@@ -1192,5 +1558,21 @@ mod tests {
             .expect("corrupted history should fall back to empty history");
 
         assert!(items.is_empty());
+    }
+
+    #[test]
+    fn system_text_can_be_pinned_with_original_time_and_unsynced_status() {
+        let created_at = chrono::DateTime::parse_from_rfc3339("2026-09-18T08:00:00Z").unwrap().with_timezone(&Utc);
+        let mut items = vec![make_system_text_history_item(crate::models::ClipboardTextItem {
+            id: "system-id".into(), text: "system text".into(), source_device: String::new(), created_at: Some(created_at),
+        }, "Local PC".into())];
+        set_history_item_pinned(&mut items, "system-id", true).unwrap();
+        assert!(items[0].is_pinned);
+        assert_eq!(items[0].created_at, created_at);
+        assert_eq!(items[0].content, "system text");
+        assert_eq!(items[0].sync_status, SyncStatus::Unsynced);
+        assert_eq!(items[0].content_hash, crate::sync_engine::content_hash(&ClipboardContentType::Text, "system text"));
+        set_history_item_pinned(&mut items, "system-id", false).unwrap();
+        assert!(!items[0].is_pinned);
     }
 }

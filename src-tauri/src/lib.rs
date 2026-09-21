@@ -7,6 +7,7 @@ mod discovery;
 mod error;
 mod file_transfer;
 mod file_transfer_http;
+mod file_transfer_paths;
 mod file_transfer_store;
 mod history;
 mod i18n;
@@ -17,9 +18,11 @@ mod network;
 mod network_diagnostics;
 mod notifications;
 mod ocr;
+mod safe_json_store;
 mod security;
 mod state;
 mod sync;
+mod sync_engine;
 mod tray;
 mod translator;
 mod window_position;
@@ -57,6 +60,8 @@ pub fn run() {
             #[cfg(desktop)]
             {
                 app.handle()
+                    .plugin(tauri_plugin_updater::Builder::new().build())?;
+                app.handle()
                     .plugin(tauri_plugin_global_shortcut::Builder::new().build())?;
                 app.handle().plugin(tauri_plugin_autostart::init(
                     MacosLauncher::LaunchAgent,
@@ -91,6 +96,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_status,
+            commands::set_floating_ball_shape,
             commands::start_sync,
             commands::stop_sync,
             commands::get_devices,
@@ -115,6 +121,7 @@ pub fn run() {
             commands::copy_library_item,
             commands::get_library_storage_size,
             commands::get_library_image_thumbnail,
+            commands::get_library_video_preview_path,
             commands::get_clipboard_history,
             commands::read_clipboard_text,
             commands::recognize_clipboard_image,
@@ -144,14 +151,18 @@ pub fn run() {
             commands::get_history_image_thumbnail,
             commands::get_history_file_thumbnail,
             commands::get_history_file_preview_path,
+            commands::save_history_media,
             commands::open_external_url,
             commands::open_windows_network_settings,
             commands::show_main_window,
             commands::hide_main_window,
             commands::exit_app,
+            commands::prepare_app_update,
+            commands::restart_app,
             commands::send_test_notification,
             commands::move_floating_window_to_cursor,
-            commands::move_main_window_to_center
+            commands::move_main_window_to_center,
+            commands::wait_for_primary_mouse_release
         ])
         .run(tauri::generate_context!())
         .expect("error while running CopyShare");

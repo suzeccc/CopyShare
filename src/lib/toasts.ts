@@ -8,7 +8,7 @@ export interface ToastMessage {
 }
 
 export const TOAST_TIMEOUT_MS = 1800;
-export const TOAST_LIMIT = 3;
+export const TOAST_LIMIT = 1;
 
 let toastSequence = 0;
 

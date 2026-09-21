@@ -1,4 +1,4 @@
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
 
 use crate::{
     error::{AppError, AppResult},
@@ -91,11 +91,34 @@ pub fn preferred_local_ip(trusted_devices: &[String], default_port: u16) -> Opti
 }
 
 pub fn preferred_local_ip_for_peer(peer_hint: Option<IpAddr>) -> Option<IpAddr> {
-    let selected = local_ip_address::list_afinet_netifas()
-        .ok()
-        .and_then(|candidates| select_preferred_local_ip(&candidates, peer_hint));
+    let selected = if_addrs::get_if_addrs().ok().and_then(|interfaces| {
+        let candidates = interfaces
+            .into_iter()
+            .map(|iface| {
+                let ip = iface.ip();
+                (iface.name, ip)
+            })
+            .collect::<Vec<_>>();
+        select_preferred_local_ip(&candidates, peer_hint)
+    });
 
-    selected.or_else(|| local_ip_address::local_ip().ok())
+    selected.or_else(|| {
+        routed_local_ipv4(
+            peer_hint
+                .filter(IpAddr::is_ipv4)
+                .unwrap_or(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))),
+        )
+    })
+}
+
+fn routed_local_ipv4(destination: IpAddr) -> Option<IpAddr> {
+    let IpAddr::V4(destination) = destination else {
+        return None;
+    };
+    let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).ok()?;
+    // UDP connect asks the OS for its route; no packet is sent.
+    socket.connect((destination, 80)).ok()?;
+    Some(socket.local_addr().ok()?.ip())
 }
 
 pub fn select_preferred_local_ip(
@@ -316,6 +339,25 @@ mod tests {
             select_preferred_local_ip(&candidates, Some("10.194.33.156".parse().unwrap())),
             Some("10.194.34.119".parse().unwrap())
         );
+    }
+
+    #[test]
+    fn local_ip_selection_preserves_vpn_only_lans_and_route_fallback() {
+        let candidates = vec![
+            ("Loopback".to_string(), IpAddr::V4(Ipv4Addr::LOCALHOST)),
+            ("Wi-Fi".to_string(), "169.254.1.2".parse().unwrap()),
+            ("WireGuard".to_string(), "10.8.0.2".parse().unwrap()),
+        ];
+        assert_eq!(
+            select_preferred_local_ip(&candidates, Some("10.8.0.1".parse().unwrap())),
+            Some("10.8.0.2".parse().unwrap())
+        );
+        assert_eq!(
+            routed_local_ipv4(IpAddr::V4(Ipv4Addr::LOCALHOST)),
+            Some(IpAddr::V4(Ipv4Addr::LOCALHOST))
+        );
+        assert!(routed_local_ipv4("::1".parse().unwrap()).is_none());
+        assert!(select_preferred_local_ip(&[], None).is_none());
     }
 
     #[test]

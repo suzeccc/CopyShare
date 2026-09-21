@@ -375,7 +375,7 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <p class="px-1 pt-3 text-[11px] leading-5 text-[color:var(--muted-text)]">
-            快速面板内的 ↑、↓、Enter 和 Esc 为固定操作键，不占用全局快捷键。
+            快速面板内的 ↑、↓、Enter 和 Esc 为固定操作键，不占用全局快捷键
           </p>
         </div>
 

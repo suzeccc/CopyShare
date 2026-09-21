@@ -8,23 +8,21 @@ use crate::{
     models::{
         new_device_id, AppConfig, MAX_FILE_SIZE_LIMIT_MIB, MIN_FILE_SIZE_LIMIT_MIB,
     },
+    safe_json_store,
     security,
 };
 
 const CONFIG_FILE: &str = "config.json";
-const CURRENT_CONFIG_VERSION: u16 = 10;
+const CURRENT_CONFIG_VERSION: u16 = 12;
 const LEGACY_DEFAULT_FILE_SIZE_LIMIT_MIB: u32 = 2048;
 
 pub fn load_config(app: &AppHandle) -> AppResult<AppConfig> {
     let path = config_path(app)?;
-    if !path.exists() {
+    let Some(mut config) = safe_json_store::load::<AppConfig>(&path)? else {
         let config = AppConfig::default();
         save_config(app, &config)?;
         return Ok(config);
-    }
-
-    let text = fs::read_to_string(path)?;
-    let mut config = parse_config_text(&text)?;
+    };
     let mut changed = ensure_config_device_id(&mut config);
     changed |= migrate_config(&mut config);
     changed |= normalize_config(&mut config);
@@ -38,9 +36,7 @@ pub fn save_config(app: &AppHandle, config: &AppConfig) -> AppResult<()> {
     let path = config_path(app)?;
     let mut normalized = config.clone();
     normalize_config(&mut normalized);
-    let text = serde_json::to_string_pretty(&normalized)?;
-    fs::write(path, text)?;
-    Ok(())
+    safe_json_store::save(&path, &normalized)
 }
 
 fn config_path(app: &AppHandle) -> AppResult<PathBuf> {
@@ -77,10 +73,14 @@ fn migrate_config(config: &mut AppConfig) -> bool {
             config.max_receive_file_size_mib = MAX_FILE_SIZE_LIMIT_MIB;
         }
     }
+    if config.config_version < 11 {
+        config.onboarding_completed = true;
+    }
     config.config_version = CURRENT_CONFIG_VERSION;
     true
 }
 
+#[cfg(test)]
 fn parse_config_text(text: &str) -> AppResult<AppConfig> {
     Ok(serde_json::from_str(text.trim_start_matches('\u{feff}'))?)
 }
@@ -108,6 +108,10 @@ pub(crate) fn normalize_config(config: &mut AppConfig) -> bool {
     }
     if config.notify_file_transfer {
         config.notify_file_transfer = false;
+        changed = true;
+    }
+    if config.startup_window_mode == crate::models::StartupWindowMode::Ball {
+        config.startup_window_mode = crate::models::StartupWindowMode::Floating;
         changed = true;
     }
     let normalized_file_save_dir = config
@@ -144,13 +148,47 @@ mod tests {
     use crate::models::AppConfig;
 
     #[test]
+    fn startup_window_mode_defaults_to_floating_and_preserves_explicit_main() {
+        use crate::models::StartupWindowMode;
+
+        assert_eq!(
+            AppConfig::default().startup_window_mode,
+            StartupWindowMode::Floating
+        );
+        let mut legacy = serde_json::to_value(AppConfig::default()).unwrap();
+        legacy["configVersion"] = serde_json::json!(11);
+        legacy.as_object_mut().unwrap().remove("startupWindowMode");
+        let mut config: AppConfig = serde_json::from_value(legacy.clone()).unwrap();
+        assert!(super::migrate_config(&mut config));
+        assert_eq!(config.startup_window_mode, StartupWindowMode::Floating);
+        assert!(!config.onboarding_completed);
+
+        legacy["startupWindowMode"] = serde_json::json!("main");
+        let mut config: AppConfig = serde_json::from_value(legacy).unwrap();
+        assert!(super::migrate_config(&mut config));
+        assert_eq!(config.startup_window_mode, StartupWindowMode::Main);
+        assert!(!super::migrate_config(&mut config));
+        let saved = serde_json::to_value(&config).unwrap();
+        assert_eq!(saved["startupWindowMode"], "main");
+        let reloaded: AppConfig = serde_json::from_value(saved).unwrap();
+        assert_eq!(reloaded.startup_window_mode, StartupWindowMode::Main);
+
+        let mut legacy_ball = AppConfig::default();
+        legacy_ball.startup_window_mode = StartupWindowMode::Ball;
+        assert!(super::normalize_config(&mut legacy_ball));
+        assert_eq!(legacy_ball.startup_window_mode, StartupWindowMode::Floating);
+    }
+
+    #[test]
     fn default_config_matches_mvp_scope() {
         let config = AppConfig::default();
 
-        assert_eq!(config.config_version, 10);
+        assert_eq!(config.config_version, 12);
+        assert!(!config.onboarding_completed);
         assert_eq!(config.ui_language, crate::models::UiLanguage::System);
         assert_eq!(config.port, 8765);
         assert_eq!(config.theme, crate::models::AppTheme::Win11Dark);
+        assert!(!config.onboarding_completed);
         assert_eq!(config.close_action, crate::models::CloseAction::Ask);
         assert!(config.auto_sync);
         assert!(config.quick_panel_shortcut_enabled);
@@ -167,6 +205,7 @@ mod tests {
         assert!(config.sync_text);
         assert!(config.sync_image);
         assert!(config.sync_files);
+        assert_eq!(config.sync_direction, crate::models::SyncDirection::Bidirectional);
         assert_eq!(config.max_send_file_size_mib, 3072);
         assert_eq!(config.max_receive_file_size_mib, 3072);
         assert!(config.quick_panel_shortcut_enabled);
@@ -262,7 +301,8 @@ mod tests {
         let mut config: AppConfig = serde_json::from_value(json).unwrap();
 
         assert!(super::migrate_config(&mut config));
-        assert_eq!(config.config_version, 10);
+        assert_eq!(config.config_version, 12);
+        assert!(config.onboarding_completed);
         assert!(config.sync_image);
         assert!(config.sync_files);
         assert!(config.notification_clipboard_preview);
@@ -273,7 +313,8 @@ mod tests {
         config.notification_clipboard_preview = false;
         config.notify_device_status = false;
         assert!(!super::migrate_config(&mut config));
-        assert_eq!(config.config_version, 10);
+        assert_eq!(config.config_version, 12);
+        assert!(config.onboarding_completed);
         assert!(!config.sync_image);
         assert!(!config.sync_files);
         assert!(!config.notification_clipboard_preview);
@@ -284,6 +325,7 @@ mod tests {
     fn version_six_migration_preserves_existing_sync_choices() {
         let mut config = AppConfig {
             config_version: 6,
+            sync_text: false,
             sync_image: false,
             sync_files: false,
             notification_clipboard_preview: false,
@@ -292,7 +334,9 @@ mod tests {
         };
 
         assert!(super::migrate_config(&mut config));
-        assert_eq!(config.config_version, 10);
+        assert_eq!(config.config_version, 12);
+        assert!(config.onboarding_completed);
+        assert!(!config.sync_text);
         assert!(!config.sync_image);
         assert!(!config.sync_files);
         assert!(!config.notification_clipboard_preview);
@@ -309,7 +353,8 @@ mod tests {
         };
 
         assert!(super::migrate_config(&mut config));
-        assert_eq!(config.config_version, 10);
+        assert_eq!(config.config_version, 12);
+        assert!(config.onboarding_completed);
         assert!(!config.quick_panel_shortcut_enabled);
         assert_eq!(config.quick_panel_shortcut, "Alt+Shift+Q");
         assert!(!config.ocr_shortcut_enabled);
@@ -328,7 +373,8 @@ mod tests {
         };
 
         assert!(super::migrate_config(&mut config));
-        assert_eq!(config.config_version, 10);
+        assert_eq!(config.config_version, 12);
+        assert!(config.onboarding_completed);
         assert_eq!(config.max_send_file_size_mib, 3072);
         assert_eq!(config.max_receive_file_size_mib, 1024);
     }

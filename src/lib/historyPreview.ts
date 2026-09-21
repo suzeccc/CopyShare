@@ -16,6 +16,8 @@ export type ClipboardPreviewItem = {
   sourceDevice?: string;
   createdAt?: string;
   fileTransferId?: string;
+  fileTransferFileId?: string;
+  clipboardBatchId?: string;
   fileTransferStatus?: FileTransferStatus;
   isPinned?: boolean;
   pinnedAt?: string;
@@ -24,12 +26,11 @@ export type ClipboardPreviewItem = {
 export const CLIPBOARD_PREVIEW_LIMIT = 20;
 export const FLOATING_CLIPBOARD_PREVIEW_LIMIT = 20;
 export const FLOATING_CLIPBOARD_HISTORY_LIMIT = 100;
-export const CLIPBOARD_MORE_TEXT_LIMIT = 80;
-export const CLIPBOARD_MORE_FILE_NAME_LIMIT = 32;
 export const CLIPBOARD_CATEGORIES = ["全部", "文本", "图片", "视频", "链接", "文件"] as const;
 
 const FILE_SIZE_SUFFIX_PATTERN = /\s+\d+(?:\.\d+)?\s*(?:B|KB|MB|GB|TB)$/i;
 const FILE_SUMMARY_PATTERN = /^(.*?)\s+(\d+(?:\.\d+)?\s*(?:B|KB|MB|GB|TB))$/i;
+const LEGACY_CORRUPTED_MULTI_FILE_LABEL = "\u6d93\ue045\u6783\u6d60?";
 const HTTP_URL_PATTERN = /https?:\/\/[^\s]+/i;
 const VIDEO_FILE_PATTERN = /\.(mp4|mov|mkv|avi|webm|m4v|wmv)$/i;
 
@@ -46,29 +47,45 @@ export type ClipboardFileSummary = {
   size: string | null;
 };
 
-export type ClipboardMoreVisibilityOptions = {
-  textLimit?: number;
-};
 
 function previewText(item: HistoryItem): string {
   if (item.contentType === "text") {
     return item.content || item.summary;
   }
-  return item.summary;
+  return item.contentType === "fileList"
+    ? normalizeClipboardFileSummaryText(item.summary)
+    : item.summary;
+}
+
+function normalizeClipboardFileSummaryText(text: string): string {
+  return text.replace(LEGACY_CORRUPTED_MULTI_FILE_LABEL, "个文件 · ");
+}
+
+function floatingClipboardDedupKey(item: ClipboardPreviewItem): string {
+  if (item.contentType === "text") {
+    return `text:${item.text}`;
+  }
+
+  const contentHash = (item.contentHash ?? "").trim();
+  return contentHash
+    ? `${item.contentType}:hash:${contentHash}`
+    : `${item.contentType}:id:${item.id}`;
 }
 
 export function stripSizeSuffix(text: string): string {
-  return text.replace(FILE_SIZE_SUFFIX_PATTERN, "");
+  return normalizeClipboardFileSummaryText(text)
+    .replace(FILE_SIZE_SUFFIX_PATTERN, "")
+    .replace(/\s*·\s*$/, "");
 }
 
 export function splitClipboardFileSummary(text: string): ClipboardFileSummary {
-  const normalized = text.trim();
+  const normalized = normalizeClipboardFileSummaryText(text).trim();
   const match = normalized.match(FILE_SUMMARY_PATTERN);
   if (!match) {
     return { name: normalized, size: null };
   }
   return {
-    name: match[1].trim(),
+    name: match[1].trim().replace(/\s*·\s*$/, ""),
     size: match[2].replace(/\s+/g, " ").trim(),
   };
 }
@@ -78,20 +95,10 @@ export function getClipboardLinkUrl(text: string): string | null {
 }
 
 export function shouldShowClipboardItemMore(
-  item: Pick<ClipboardPreviewItem, "text" | "contentType">,
-  options: ClipboardMoreVisibilityOptions = {},
+  element: Pick<HTMLElement, "scrollHeight" | "clientHeight" | "scrollWidth" | "clientWidth">,
 ): boolean {
-  const text = item.text.trim();
-  if (!text) {
-    return false;
-  }
-  if (item.contentType !== "text") {
-    return false;
-  }
-  if (text.includes("\n")) {
-    return true;
-  }
-  return text.length > (options.textLimit ?? CLIPBOARD_MORE_TEXT_LIMIT);
+  return element.scrollHeight > element.clientHeight + 1
+    || element.scrollWidth > element.clientWidth + 1;
 }
 
 export function isClipboardVideoFile(item: Pick<ClipboardPreviewItem, "text" | "contentType">): boolean {
@@ -120,6 +127,8 @@ export function getRecentClipboardItems(
       syncStatus: syncStatus(item),
       createdAt: item.createdAt,
       fileTransferId: item.fileTransferId,
+      fileTransferFileId: item.fileTransferFileId,
+      clipboardBatchId: item.clipboardBatchId,
       fileTransferStatus: item.fileTransferStatus,
       isPinned: item.isPinned,
       pinnedAt: item.pinnedAt,
@@ -175,8 +184,14 @@ export function getFloatingClipboardItems(
   limit = FLOATING_CLIPBOARD_PREVIEW_LIMIT,
 ): ClipboardPreviewItem[] {
   const seen = new Set<string>();
+  const appPreviewItems = getRecentClipboardItems(appItems, FLOATING_CLIPBOARD_HISTORY_LIMIT);
+  const appTextItems = new Map<string, ClipboardPreviewItem>();
+  for (const item of appPreviewItems) {
+    if (item.contentType === "text" && !appTextItems.has(item.text)) appTextItems.set(item.text, item);
+  }
   const recentSystemItems = systemItems
     .map((item) => ({
+      ...item,
       id: item.id,
       text: item.text.trim(),
       contentHash: item.contentHash,
@@ -185,28 +200,33 @@ export function getFloatingClipboardItems(
       syncStatus: item.syncStatus ?? "unsynced",
       createdAt: item.createdAt,
       fileTransferId: item.fileTransferId,
+      fileTransferFileId: item.fileTransferFileId,
+      clipboardBatchId: item.clipboardBatchId,
       fileTransferStatus: item.fileTransferStatus,
     }))
     .filter((item) => item.text.length > 0)
+    .map((item) => appTextItems.get(item.text) ?? item)
     .slice(0, limit);
   const mergedItems: ClipboardPreviewItem[] = [...recentSystemItems];
 
   for (const item of recentSystemItems) {
-    seen.add(item.text);
+    seen.add(floatingClipboardDedupKey(item));
   }
 
-  for (const item of getRecentClipboardItems(appItems, limit)) {
-    if (mergedItems.length >= limit) {
-      break;
-    }
-
-    if (seen.has(item.text)) {
+  for (const item of appPreviewItems) {
+    const dedupKey = floatingClipboardDedupKey(item);
+    if (seen.has(dedupKey)) {
       continue;
     }
 
     mergedItems.push(item);
-    seen.add(item.text);
+    seen.add(dedupKey);
   }
 
-  return mergedItems;
+  return mergedItems.sort((left, right) => {
+    if (Boolean(left.isPinned) !== Boolean(right.isPinned)) return left.isPinned ? -1 : 1;
+    return left.isPinned && right.isPinned
+      ? (Date.parse(right.pinnedAt ?? "") || 0) - (Date.parse(left.pinnedAt ?? "") || 0)
+      : 0;
+  }).slice(0, limit);
 }

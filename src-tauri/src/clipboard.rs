@@ -73,10 +73,10 @@ pub fn read_clipboard_files() -> AppResult<Vec<PathBuf>> {
 pub fn clipboard_has_image_data() -> bool {
     #[cfg(target_os = "windows")]
     {
+        use windows::core::PCWSTR;
         use windows::Win32::System::DataExchange::{
             IsClipboardFormatAvailable, RegisterClipboardFormatW,
         };
-        use windows::core::PCWSTR;
 
         const CF_DIB: u32 = 8;
         const CF_DIBV5: u32 = 17;
@@ -92,21 +92,78 @@ pub fn clipboard_has_image_data() -> bool {
         cf_png != 0 && unsafe { IsClipboardFormatAvailable(cf_png) }.is_ok()
     }
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
+    {
+        macos_clipboard_has_type("public.tiff")
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
         false
     }
 }
 
-pub fn clipboard_sequence_number() -> Option<u32> {
+pub fn clipboard_has_text_data() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        unsafe { windows::Win32::System::DataExchange::IsClipboardFormatAvailable(13) }.is_ok()
+    }
+    #[cfg(target_os = "macos")]
+    {
+        macos_clipboard_has_type("public.utf8-plain-text")
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        false
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_general_pasteboard() -> Option<objc2::rc::Retained<objc2::runtime::AnyObject>> {
+    let class = objc2::runtime::AnyClass::get(c"NSPasteboard")?;
+    // SAFETY: AppKit supplies this selector. msg_send retains the shared object.
+    unsafe { objc2::msg_send![class, generalPasteboard] }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_clipboard_has_type(content_type: &str) -> bool {
+    use objc2::{
+        msg_send,
+        rc::{autoreleasepool, Retained},
+    };
+    use objc2_foundation::{NSArray, NSString};
+
+    autoreleasepool(|_| {
+        let Some(pasteboard) = macos_general_pasteboard() else {
+            return false;
+        };
+        // SAFETY: NSPasteboard.types returns a nullable array of NSString objects.
+        let types: Option<Retained<NSArray<NSString>>> = unsafe { msg_send![&*pasteboard, types] };
+        types.is_some_and(|types| types.containsObject(&NSString::from_str(content_type)))
+    })
+}
+
+pub fn clipboard_sequence_number() -> Option<u64> {
     #[cfg(target_os = "windows")]
     {
         let sequence =
             unsafe { windows::Win32::System::DataExchange::GetClipboardSequenceNumber() };
-        return (sequence != 0).then_some(sequence);
+        return (sequence != 0).then_some(u64::from(sequence));
     }
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
+    {
+        use objc2::{msg_send, rc::autoreleasepool};
+
+        return autoreleasepool(|_| {
+            let pasteboard = macos_general_pasteboard()?;
+            // SAFETY: NSPasteboard.changeCount returns NSInteger, matching isize.
+            let count: isize = unsafe { msg_send![&*pasteboard, changeCount] };
+            u64::try_from(count).ok()
+        });
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
         None
     }
@@ -114,11 +171,11 @@ pub fn clipboard_sequence_number() -> Option<u32> {
 
 pub fn write_clipboard_files(app: &AppHandle, paths: &[PathBuf]) -> AppResult<()> {
     if paths.is_empty() {
-        return Err(AppError::InvalidInput("鏂囦欢鍒楄〃涓虹┖".to_string()));
+        return Err(AppError::InvalidInput("文件列表为空".to_string()));
     }
     if let Some(missing) = paths.iter().find(|path| std::fs::metadata(path).is_err()) {
         return Err(AppError::InvalidInput(format!(
-            "鏂囦欢涓嶅瓨鍦細{}",
+            "文件不存在：{}",
             missing.to_string_lossy()
         )));
     }
@@ -190,10 +247,10 @@ pub fn clipboard_content_to_file_paths(content: &str) -> AppResult<Vec<PathBuf>>
 
 pub fn summarize_file_entries(entries: &[ClipboardFileEntry]) -> String {
     match entries {
-        [] => "鏂囦欢鍒楄〃".to_string(),
+        [] => "文件列表".to_string(),
         [entry] => format!("{} {}", entry.name, format_file_size(entry.size)),
         entries => format!(
-            "{} 涓枃浠?{}",
+            "{} 个文件 · {}",
             entries.len(),
             format_file_size(entries.iter().map(|entry| entry.size).sum())
         ),
@@ -222,12 +279,35 @@ fn format_file_size(size: u64) -> String {
 pub fn summarize_file_content(content: &str) -> String {
     clipboard_content_to_file_entries(content)
         .map(|entries| summarize_file_entries(&entries))
-        .unwrap_or_else(|_| "鏂囦欢鍒楄〃".to_string())
+        .unwrap_or_else(|_| "文件列表".to_string())
 }
 
 pub fn read_clipboard_image_base64(app: &AppHandle) -> AppResult<Option<String>> {
-    if let Ok(image) = app.clipboard().read_image() {
-        return image_to_png_base64(&image).map(Some);
+    read_clipboard_image_base64_inner(app, None)
+}
+
+pub fn read_clipboard_image_base64_if_changed(
+    app: &AppHandle,
+    last_image: &mut Option<[u8; 32]>,
+) -> AppResult<Option<String>> {
+    read_clipboard_image_base64_inner(app, Some(last_image))
+}
+
+fn read_clipboard_image_base64_inner(
+    app: &AppHandle,
+    last_image: Option<&mut Option<[u8; 32]>>,
+) -> AppResult<Option<String>> {
+    let image_error = match app.clipboard().read_image() {
+        Ok(image) => {
+            if let Some(last_image) = last_image {
+                return image_to_png_base64_if_changed(&image, last_image);
+            }
+            return image_to_png_base64(&image).map(Some);
+        }
+        Err(error) => error,
+    };
+    if let Some(last_image) = last_image {
+        *last_image = None;
     }
 
     if let Ok(Some(image)) = read_clipboard_dib_base64() {
@@ -235,20 +315,43 @@ pub fn read_clipboard_image_base64(app: &AppHandle) -> AppResult<Option<String>>
     }
 
     match read_clipboard_image_file_base64() {
-        Ok(image) => Ok(image),
-        Err(_) => Ok(None),
+        Ok(Some(image)) => Ok(Some(image)),
+        _ if clipboard_has_image_data() => Err(AppError::Clipboard(image_error.to_string())),
+        _ => Ok(None),
     }
 }
 
-pub fn write_clipboard_image_base64(app: &AppHandle, content: &str) -> AppResult<()> {
+fn image_to_png_base64_if_changed(
+    image: &Image<'_>,
+    last_image: &mut Option<[u8; 32]>,
+) -> AppResult<Option<String>> {
+    use sha2::{Digest, Sha256};
+
+    // ponytail: platforms without a change counter still read/hash RGBA;
+    // use native clipboard events if this remains a measured CPU bottleneck.
+    let mut hasher = Sha256::new();
+    hasher.update(image.width().to_le_bytes());
+    hasher.update(image.height().to_le_bytes());
+    hasher.update(image.rgba());
+    let fingerprint: [u8; 32] = hasher.finalize().into();
+    if *last_image == Some(fingerprint) {
+        return Ok(None);
+    }
+    let encoded = image_to_png_base64(image)?;
+    *last_image = Some(fingerprint);
+    Ok(Some(encoded))
+}
+
+pub fn write_clipboard_image_base64(app: &AppHandle, content: &str, summary: Option<&str>) -> AppResult<()> {
     #[cfg(target_os = "windows")]
     {
         let _ = app;
-        return write_clipboard_image_base64_windows(content);
+        return write_clipboard_image_base64_windows(content, summary);
     }
 
     #[cfg(not(target_os = "windows"))]
     {
+    let _ = summary;
     let image = png_base64_to_image(content)?;
     app.clipboard()
         .write_image(&image)
@@ -282,12 +385,12 @@ pub fn png_base64_to_image(content: &str) -> AppResult<Image<'static>> {
 }
 
 #[cfg(target_os = "windows")]
-fn write_clipboard_image_base64_windows(content: &str) -> AppResult<()> {
+fn write_clipboard_image_base64_windows(content: &str, summary: Option<&str>) -> AppResult<()> {
     let bytes = STANDARD
         .decode(content)
         .map_err(|error| AppError::Clipboard(error.to_string()))?;
     let image = png_base64_to_image(content)?;
-    write_windows_image_to_clipboard(image.rgba(), image.width(), image.height(), &bytes)
+    write_windows_image_to_clipboard(image.rgba(), image.width(), image.height(), &bytes, summary)
 }
 
 #[cfg(target_os = "windows")]
@@ -311,6 +414,7 @@ fn write_windows_image_to_clipboard(
     width: u32,
     height: u32,
     png_bytes: &[u8],
+    summary: Option<&str>,
 ) -> AppResult<()> {
     use windows::Win32::System::DataExchange::{
         EmptyClipboard, RegisterClipboardFormatW,
@@ -322,7 +426,7 @@ fn write_windows_image_to_clipboard(
 
     let dib = build_windows_dib_bytes(rgba, width, height)?;
     let html = build_windows_image_html(png_bytes);
-    let temp_png_path = write_temp_clipboard_png(png_bytes)?;
+    let temp_png_path = write_temp_clipboard_png(png_bytes, summary)?;
     let hdrop = build_windows_hdrop_bytes(&temp_png_path);
 
     unsafe {
@@ -438,13 +542,39 @@ fn build_windows_image_html(png_bytes: &[u8]) -> Vec<u8> {
 }
 
 #[cfg(target_os = "windows")]
-fn write_temp_clipboard_png(png_bytes: &[u8]) -> AppResult<PathBuf> {
+fn write_temp_clipboard_png(png_bytes: &[u8], summary: Option<&str>) -> AppResult<PathBuf> {
     let mut dir = std::env::temp_dir();
     dir.push("copyshare_paste");
+    dir.push(uuid::Uuid::new_v4().to_string());
     std::fs::create_dir_all(&dir)?;
-    dir.push(format!("paste_{}.png", uuid::Uuid::new_v4()));
+    dir.push(clipboard_image_file_name(summary));
     std::fs::write(&dir, png_bytes)?;
     Ok(dir)
+}
+
+#[cfg(target_os = "windows")]
+fn clipboard_image_file_name(summary: Option<&str>) -> String {
+    let summary = summary.unwrap_or("CopyShare.png").trim();
+    let name = match summary.rsplit_once(' ') {
+        Some((before, unit)) if ["B", "KB", "MB", "GB", "TB"].contains(&unit) => {
+            before.rsplit_once(' ').map(|(name, _)| name).unwrap_or(summary)
+        }
+        _ => summary,
+    };
+    if !is_supported_image_file(Path::new(name)) {
+        return "CopyShare.png".into();
+    }
+    let stem = Path::new(name).file_stem().and_then(|stem| stem.to_str()).unwrap_or("CopyShare");
+    let stem: String = stem.chars().map(|ch| {
+        if ch.is_control() || "<>:\"/\\|?*".contains(ch) { '_' } else { ch }
+    }).take(120).collect();
+    let stem = stem.trim_end_matches([' ', '.']);
+    let reserved = stem.split('.').next().unwrap_or("").to_ascii_uppercase();
+    if stem.is_empty() || ["CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"].contains(&reserved.as_str()) {
+        "CopyShare.png".into()
+    } else {
+        format!("{stem}.png")
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -574,7 +704,7 @@ fn image_file_path_to_png_base64(path: &Path) -> AppResult<Option<String>> {
     image_file_to_png_base64(path).map(Some)
 }
 
-fn is_supported_image_file(path: &Path) -> bool {
+pub(crate) fn is_supported_image_file(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
         .map(|extension| {
@@ -772,6 +902,9 @@ pub async fn read_clipboard_history_text(limit: usize) -> AppResult<Vec<Clipboar
                 .to_string(),
             text,
             source_device: String::new(),
+            created_at: item.Timestamp().ok().and_then(|timestamp| {
+                chrono::DateTime::from_timestamp_micros(timestamp.UniversalTime / 10 - 11_644_473_600_000_000)
+            }),
         });
     }
 
@@ -822,7 +955,37 @@ mod tests {
             "a.txt 1.00 KB",
             "single file history should append bytes"
         );
-        assert!(summarize_file_entries(&files).ends_with("3.00 KB"));
+        assert_eq!(summarize_file_entries(&files), "2 个文件 · 3.00 KB");
+        assert_eq!(summarize_file_entries(&[]), "文件列表");
+    }
+
+    #[test]
+    fn image_polling_skips_encoding_unchanged_pixels_and_tracks_dimensions() {
+        let pixels = vec![255, 0, 0, 255, 0, 255, 0, 255];
+        let image = Image::new_owned(pixels.clone(), 2, 1);
+        let mut last_image = None;
+        let encoded = image_to_png_base64_if_changed(&image, &mut last_image)
+            .unwrap()
+            .expect("first image must be encoded");
+        assert_eq!(encoded, image_to_png_base64(&image).unwrap());
+        assert!(image_to_png_base64_if_changed(&image, &mut last_image)
+            .unwrap()
+            .is_none());
+        let reshaped = Image::new_owned(pixels, 1, 2);
+        assert!(image_to_png_base64_if_changed(&reshaped, &mut last_image)
+            .unwrap()
+            .is_some());
+        let changed = Image::new_owned(vec![0; 8], 1, 2);
+        assert!(image_to_png_base64_if_changed(&changed, &mut last_image)
+            .unwrap()
+            .is_some());
+        assert!(image_to_png_base64_if_changed(&changed, &mut last_image)
+            .unwrap()
+            .is_none());
+        last_image = None;
+        assert!(image_to_png_base64_if_changed(&changed, &mut last_image)
+            .unwrap()
+            .is_some());
     }
 
     #[test]
@@ -999,5 +1162,25 @@ mod tests {
         assert_eq!(&hdrop[0..4], &20u32.to_le_bytes());
         assert_eq!(&hdrop[16..20], &1u32.to_le_bytes());
         assert!(hdrop.ends_with(&[0, 0, 0, 0]));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn copied_image_preserves_name_without_overwriting_previous_copy() {
+        let summary = "PixPin_2026-09-18_16-46-43.png 4.28 KB";
+        let first = write_temp_clipboard_png(b"first", Some(summary)).unwrap();
+        let second = write_temp_clipboard_png(b"second", Some(summary)).unwrap();
+        assert_eq!(first.file_name().unwrap(), "PixPin_2026-09-18_16-46-43.png");
+        assert_ne!(first, second);
+        assert_eq!(std::fs::read(&first).unwrap(), b"first");
+        assert_eq!(std::fs::read(&second).unwrap(), b"second");
+        assert_eq!(clipboard_image_file_name(Some("photo with spaces.jpg 2.94 MB")), "photo with spaces.png");
+        assert_eq!(clipboard_image_file_name(Some("CON.png")), "CopyShare.png");
+        assert_eq!(clipboard_image_file_name(None), "CopyShare.png");
+        assert!(!clipboard_image_file_name(Some("../unsafe?.png 1 B")).contains('/'));
+        std::fs::remove_file(&first).unwrap();
+        std::fs::remove_dir(first.parent().unwrap()).unwrap();
+        std::fs::remove_file(&second).unwrap();
+        std::fs::remove_dir(second.parent().unwrap()).unwrap();
     }
 }

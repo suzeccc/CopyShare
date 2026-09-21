@@ -13,7 +13,7 @@ const primaryItems = [
   { label: "总览", path: "/", icon: Home },
   { label: "剪切板", path: "/clipboard", icon: Clipboard },
   { label: "设备连接", path: "/devices", icon: MonitorSmartphone },
-  { label: "常用片段", path: "/library", icon: MessageSquareText },
+  { label: "常用内容", path: "/library", icon: MessageSquareText },
   { label: "图转文字", path: "/ocr", icon: ScanText },
   { label: "翻译", path: "/translate", icon: Languages },
   { label: "日志", path: "/logs", icon: History },
@@ -26,7 +26,7 @@ const footerItems = [
 </script>
 
 <template>
-  <aside class="flex h-full w-48 shrink-0 flex-col border-r border-[color:var(--main-line)] bg-[color:var(--main-bg)] px-2 py-5">
+  <aside class="flex h-full w-40 shrink-0 flex-col border-r border-[color:var(--main-line)] bg-[color:var(--main-bg)] px-2 py-5">
     <div class="mb-6">
       <p class="text-xs font-medium uppercase text-slate-500">CopyShare</p>
       <h1 class="mt-2 text-xl font-semibold text-white">剪贴板共享</h1>

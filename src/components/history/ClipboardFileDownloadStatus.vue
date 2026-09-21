@@ -27,7 +27,10 @@ const historyStore = useHistoryStore();
 const feedback = computed(() =>
   getClipboardFileDownloadFeedback(
     props.item,
-    historyStore.fileDownloadActivity(props.item.fileTransferId),
+    historyStore.fileDownloadActivity(
+      props.item.fileTransferId,
+      props.item.fileTransferFileId,
+    ),
   ),
 );
 const feedbackClass = computed(() => {

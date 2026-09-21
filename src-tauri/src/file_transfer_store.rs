@@ -34,6 +34,8 @@ pub struct TransferSnapshot {
     pub version: u32,
     pub task: FileTransferTask,
     pub files: Vec<PersistedTransferFile>,
+    #[serde(default)]
+    pub requested_file_ids: Vec<String>,
     pub download_host: Option<String>,
     pub download_port: Option<u16>,
     pub retry_count: u8,
@@ -296,6 +298,7 @@ mod tests {
                 temp_path: Some(temp_path),
                 final_path: Some(final_path),
             }],
+            requested_file_ids: vec!["file-1".to_string()],
             download_host: None,
             download_port: None,
             retry_count: 0,
@@ -315,6 +318,20 @@ mod tests {
 
         assert_eq!(loaded, vec![first]);
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn legacy_snapshot_without_requested_files_still_deserializes() {
+        let root = test_root("legacy-requested-files");
+        let mut value = serde_json::to_value(snapshot(&root)).unwrap();
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("requestedFileIds");
+
+        let restored: TransferSnapshot = serde_json::from_value(value).unwrap();
+
+        assert!(restored.requested_file_ids.is_empty());
     }
 
     #[test]

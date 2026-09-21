@@ -5,6 +5,7 @@ use tauri::{AppHandle, Manager};
 use crate::{
     error::AppResult,
     models::{DeviceInfo, DeviceStatus},
+    safe_json_store,
 };
 
 const DEVICES_FILE: &str = "devices.json";
@@ -12,19 +13,13 @@ const DEVICES_LIMIT: usize = 100;
 
 pub fn load_devices(app: &AppHandle) -> AppResult<Vec<DeviceInfo>> {
     let path = devices_path(app)?;
-    if !path.exists() {
-        return Ok(Vec::new());
-    }
-
-    let text = fs::read_to_string(path)?;
-    load_device_items_from_text(&text)
+    let values = safe_json_store::load::<Vec<serde_json::Value>>(&path)?.unwrap_or_default();
+    load_device_items(values)
 }
 
 pub fn save_devices(app: &AppHandle, devices: &[DeviceInfo]) -> AppResult<()> {
     let path = devices_path(app)?;
-    let text = serde_json::to_string_pretty(&device_history_snapshot(devices))?;
-    fs::write(path, text)?;
-    Ok(())
+    safe_json_store::save(&path, &device_history_snapshot(devices))
 }
 
 fn devices_path(app: &AppHandle) -> AppResult<PathBuf> {
@@ -33,11 +28,16 @@ fn devices_path(app: &AppHandle) -> AppResult<PathBuf> {
     Ok(dir.join(DEVICES_FILE))
 }
 
+#[cfg(test)]
 fn load_device_items_from_text(text: &str) -> AppResult<Vec<DeviceInfo>> {
     let values = match serde_json::from_str::<Vec<serde_json::Value>>(text) {
         Ok(values) => values,
         Err(_) => return Ok(Vec::new()),
     };
+    load_device_items(values)
+}
+
+fn load_device_items(values: Vec<serde_json::Value>) -> AppResult<Vec<DeviceInfo>> {
     let mut items = Vec::with_capacity(values.len());
 
     for value in values {

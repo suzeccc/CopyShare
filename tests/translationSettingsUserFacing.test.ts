@@ -36,19 +36,20 @@ test("translation settings stack controls in narrow windows", () => {
   assert.doesNotMatch(translationSection, /sm:flex-row/);
 });
 
-test("translation engine picker uses a polished segmented control style", () => {
+test("translation engine picker gives each service a clear responsive choice", () => {
   const pickerStart = settings.indexOf("data-translation-engine-picker");
   const pickerEnd = settings.indexOf("</div>", pickerStart);
   const picker = settings.slice(pickerStart, pickerEnd);
 
-  assert.match(picker, /p-1\.5/);
-  assert.match(picker, /gap-1\.5/);
-  assert.match(picker, /rounded-\[14px\]/);
-  assert.match(picker, /shadow-\[inset_0_1px_0_rgba\(255,255,255,0\.04\)\]/);
-  assert.match(settings, /bg-\[linear-gradient\(135deg,rgba\(79,167,203,0\.24\),rgba\(79,167,203,0\.10\)\)\]/);
-  assert.match(settings, /shadow-\[0_10px_26px_rgba\(0,0,0,0\.24\),inset_0_1px_0_rgba\(255,255,255,0\.08\)\]/);
-  assert.match(settings, /hover:bg-\[rgba\(255,255,255,0\.035\)\]/);
-  assert.doesNotMatch(picker, /divide-x/);
+  assert.match(picker, /role="group"/);
+  assert.match(picker, /class="translation-engine-picker"/);
+  assert.match(picker, /class="translation-engine-option"/);
+  assert.match(picker, /:aria-pressed="draft\.translationEngine === option\.value"/);
+  assert.match(settings, /\.translation-engine-picker \{[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/);
+  assert.match(settings, /@media \(max-width: 560px\) \{\s*\.translation-engine-picker \{ grid-template-columns: 1fr; \}/);
+  assert.doesNotMatch(settings, /\.translation-engine-option\.is-selected::before/);
+  assert.match(settings, /\.translation-engine-option:focus-visible/);
+  assert.match(settings, /background: linear-gradient\(105deg, var\(--accent-soft\), var\(--field-bg\) 70%\)/);
 });
 
 test("translation setting interactions do not show success toasts for unchanged values", () => {
@@ -62,16 +63,19 @@ test("translation setting interactions do not show success toasts for unchanged 
   assert.match(settings, /if \(translationModel === configStore\.config\.translationModel\) return;/);
 });
 
-test("translation settings are placed below clear history settings copy", () => {
-  assert.match(settings, />保存同步历史</);
-  assert.match(settings, /保存剪贴板同步记录，关闭后不再记录新的同步历史/);
-  assert.match(settings, /label="保存同步历史"/);
+test("sync direction is grouped with sync content and shortcuts follow translation", () => {
+  assert.doesNotMatch(settings, /data-history-settings|保存同步记录/);
   assert.doesNotMatch(settings, /保存同步摘要/);
   assert.doesNotMatch(settings, /只保存摘要，不保存完整敏感剪贴板内容/);
 
-  const historyStart = settings.indexOf(">历史记录<");
+  const syncStart = settings.indexOf(">同步内容<");
   const translationStart = settings.indexOf("<section data-translation-settings");
-  assert.equal(historyStart >= 0, true);
+  const shortcutStart = settings.indexOf("<section data-global-shortcut-settings");
+  const syncSection = settings.slice(syncStart, translationStart);
+  assert.equal(syncStart >= 0, true);
   assert.equal(translationStart >= 0, true);
-  assert.equal(historyStart < translationStart, true);
+  assert.equal(shortcutStart >= 0, true);
+  assert.match(syncSection, /data-sync-direction-setting/);
+  assert.doesNotMatch(settings, /<p class="text-\[13px\] font-bold text-\[color:var\(--subtle-text\)\]">历史记录<\/p>/);
+  assert.equal(translationStart < shortcutStart, true);
 });

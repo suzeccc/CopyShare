@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import Copy from "lucide-vue-next/dist/esm/icons/copy.js";
-import Monitor from "lucide-vue-next/dist/esm/icons/monitor.js";
 import QrCode from "lucide-vue-next/dist/esm/icons/qr-code.js";
 import RefreshCw from "lucide-vue-next/dist/esm/icons/refresh-cw.js";
 import Smartphone from "lucide-vue-next/dist/esm/icons/smartphone.js";
@@ -20,7 +19,6 @@ const qr = ref("");
 let pollTimer: number | undefined;
 
 const phaseText = computed(() => getPhaseText(mobileStore.session?.phase));
-const contentItems = computed(() => mobileStore.session?.contentItems ?? []);
 const submittedItems = computed(() => mobileStore.session?.submittedItems ?? []);
 const canUseSession = computed(
   () =>
@@ -125,7 +123,7 @@ function getPhaseText(phase: MobileSessionPhase | undefined) {
     case "waiting":
       return "等待扫码";
     case "opened":
-      return "已扫码";
+      return "已连接";
     case "copied":
       return "已复制电脑内容";
     case "submitted":
@@ -181,7 +179,7 @@ function errorMessage(error: unknown, fallback: string) {
             <p class="text-xs font-semibold text-[color:var(--accent-text)]">局域网临时传输</p>
             <h2 class="mt-1 text-xl font-semibold text-white">手机连接</h2>
             <p class="mt-1 text-sm leading-6 text-[color:var(--muted-text)]">
-              用手机扫描二维码，临时传输电脑与手机剪贴板内容，无需安装 App。
+              用相机扫描二维码，临时传输电脑与手机剪贴板内容，无需安装 App
             </p>
           </div>
           <button
@@ -243,27 +241,10 @@ function errorMessage(error: unknown, fallback: string) {
                 <div>
                   <p class="text-sm font-semibold text-white">保持到手动结束</p>
                   <p class="mt-1 text-sm leading-6 text-[color:var(--muted-text)]">
-                    关闭 CopyShare 或点击结束会话后，手机页面会停止同步。
+                    关闭 CopyShare 或点击结束会话后，手机页面会停止同步
                   </p>
                 </div>
               </div>
-            </section>
-
-            <section class="rounded-[20px] border border-[color:var(--main-line-soft)] bg-[color:var(--field-bg)] p-4">
-              <p class="flex items-center gap-2 text-sm font-semibold text-white">
-                <Monitor class="h-4 w-4 text-[color:var(--accent-text)]" />
-                电脑剪贴板
-              </p>
-              <div v-if="contentItems.length" class="mt-3 grid max-h-32 gap-2 overflow-auto pr-1">
-                <article
-                  v-for="item in contentItems"
-                  :key="item.id"
-                  class="rounded-2xl border border-[color:var(--main-line-soft)] bg-black/15 p-3"
-                >
-                <p data-i18n-ignore class="line-clamp-3 break-all text-sm leading-6 text-slate-100">{{ item.text }}</p>
-                </article>
-              </div>
-              <p v-else class="mt-3 text-sm leading-6 text-[color:var(--muted-text)]">等待手机扫码后读取。</p>
             </section>
 
             <section class="rounded-[20px] border border-[color:var(--main-line-soft)] bg-[color:var(--field-bg)] p-4">
@@ -277,10 +258,10 @@ function errorMessage(error: unknown, fallback: string) {
                   :key="item.id"
                   class="rounded-2xl border border-emerald-300/15 bg-emerald-400/[0.06] p-3"
                 >
-                <p data-i18n-ignore class="line-clamp-3 break-all text-sm leading-6 text-slate-100">{{ item.text }}</p>
+                  <p data-i18n-ignore class="line-clamp-3 break-all text-sm leading-6 text-slate-100">{{ item.text }}</p>
                 </article>
               </div>
-              <p v-else class="mt-3 text-sm leading-6 text-[color:var(--muted-text)]">手机发送后会显示在这里。</p>
+              <p v-else class="mt-3 text-sm leading-6 text-[color:var(--muted-text)]">手机发送后会显示在这里</p>
             </section>
           </div>
         </div>

@@ -13,6 +13,7 @@
     "windows": [
       {
         "label": "main",
+        "visible": false,
         "title": "CopyShare",
         "width": 1120,
         "height": 720,
@@ -37,6 +38,8 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
+    "publisher": "suzeccc",
     "targets": "all",
     "icon": [
       "icons/32x32.png",
@@ -46,5 +49,16 @@
       "icons/icon.ico",
       "icons/icon.png"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IENFMEMyMjVGQ0E4OEE2OTQKUldTVXBvaktYeUlNemxNcDVsSCtrN1JBREF2MkZvOG1lQTlCTUpTMHJtaG9iby9WUkhndkpMUGQK",
+      "endpoints": [
+        "https://github.com/suzeccc/CopyShare/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

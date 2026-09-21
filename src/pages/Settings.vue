@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import CheckCircle2 from "lucide-vue-next/dist/esm/icons/circle-check.js";
+import ChevronDown from "lucide-vue-next/dist/esm/icons/chevron-down.js";
 import ChevronRight from "lucide-vue-next/dist/esm/icons/chevron-right.js";
 import Globe2 from "lucide-vue-next/dist/esm/icons/earth.js";
 import Keyboard from "lucide-vue-next/dist/esm/icons/keyboard.js";
@@ -12,9 +13,11 @@ import Button from "@/components/ui/Button.vue";
 import Switch from "@/components/ui/Switch.vue";
 import { setUiLanguage } from "@/i18n";
 import { clampPort } from "@/lib/format";
+import type { AppWindowMode } from "@/lib/windowMode";
 import {
   clearCache,
   getCacheSize,
+  getTransferSaveDir,
   openTransferFolder,
   resetTransferSaveDir,
   selectTransferSaveDir,
@@ -26,6 +29,7 @@ import type {
   AppConfig,
   AppTheme,
   CloseAction,
+  SyncDirection,
   TranslationEngine,
   UiLanguage,
 } from "@/types/config";
@@ -55,10 +59,21 @@ const translationEngineOptions: Array<{
   { value: "google", label: "Google 翻译", hint: "免费 · 无需配置", icon: Globe2 },
   { value: "ai", label: "AI 翻译", hint: "使用自有 API", icon: Sparkles },
 ];
-const languageOptions: Array<{ value: UiLanguage; label: string; hint: string }> = [
-  { value: "system", label: "跟随系统", hint: "根据操作系统语言自动选择" },
-  { value: "zh-CN", label: "简体中文", hint: "使用简体中文界面" },
-  { value: "en-US", label: "English", hint: "Use the English interface" },
+const startupWindowOptions: Array<{ value: Exclude<AppWindowMode, "ball">; label: string }> = [
+  { value: "floating", label: "浮窗界面" },
+  { value: "main", label: "主界面" },
+];
+const syncDirectionOptions: Array<{ value: SyncDirection; label: string }> = [
+  { value: "bidirectional", label: "发送和接收" },
+  { value: "sendOnly", label: "只发送" },
+  { value: "receiveOnly", label: "只接收" },
+];
+const languageOptions: Array<{ value: UiLanguage; label: string }> = [
+  { value: "system", label: "跟随系统" },
+  { value: "zh-CN", label: "简体中文" },
+  { value: "zh-TW", label: "繁體中文" },
+  { value: "en-US", label: "English" },
+  { value: "ja-JP", label: "日本語" },
 ];
 const basicSettingsSaving = ref(false);
 const syncContentSaving = ref(false);
@@ -68,6 +83,10 @@ const cacheSizeBytes = ref<number | null>(null);
 const cacheSizeLoading = ref(false);
 const cacheClearing = ref(false);
 const shortcutDialogOpen = ref(false);
+const defaultTransferSaveDir = ref("");
+const displayedTransferSaveDir = computed(() =>
+  draft.fileSaveDir || defaultTransferSaveDir.value || "默认下载目录",
+);
 const configMutationSaving = computed(() =>
   configStore.saving
   || basicSettingsSaving.value
@@ -82,9 +101,9 @@ type BasicSettingKey =
   | "port"
   | "theme"
   | "closeAction"
+  | "startupWindowMode"
   | "autoStart"
   | "autoSync"
-  | "saveHistory"
   | "autoOpenFolderAfterSave"
   | "translationEngine"
   | "translationApiUrl"
@@ -146,6 +165,7 @@ watch(
       draft.syncText = next.syncText;
       draft.syncImage = next.syncImage;
       draft.syncFiles = next.syncFiles;
+      draft.syncDirection = next.syncDirection;
       draft.maxSendFileSizeMib = next.maxSendFileSizeMib;
       draft.maxReceiveFileSizeMib = next.maxReceiveFileSizeMib;
       draft.deduplicateSyncContent = next.deduplicateSyncContent;
@@ -182,7 +202,16 @@ onBeforeUnmount(() => {
 
 onMounted(() => {
   void loadCacheSize();
+  void loadDefaultTransferSaveDir();
 });
+
+async function loadDefaultTransferSaveDir() {
+  try {
+    defaultTransferSaveDir.value = await getTransferSaveDir();
+  } catch {
+    // Keep the localized fallback when the native path cannot be resolved.
+  }
+}
 
 async function saveBasicSettings(
   patch: Partial<Pick<AppConfig, BasicSettingKey>>,
@@ -206,7 +235,6 @@ async function saveBasicSettings(
       ...patch,
       deviceName: (patch.deviceName ?? configStore.config.deviceName).trim(),
       port: clampPort(patch.port ?? configStore.config.port),
-      syncText: true,
     });
 
     if (configStore.error) {
@@ -360,11 +388,6 @@ async function saveAutoSync(autoSync: boolean) {
   await saveBasicSettings({ autoSync }, { silent: true });
 }
 
-async function saveHistorySetting(saveHistory: boolean) {
-  draft.saveHistory = saveHistory;
-  await saveBasicSettings({ saveHistory }, { silent: true });
-}
-
 async function saveAutoOpenFolderAfterSave(autoOpenFolderAfterSave: boolean) {
   draft.autoOpenFolderAfterSave = autoOpenFolderAfterSave;
   await saveBasicSettings({ autoOpenFolderAfterSave }, { silent: true });
@@ -374,8 +397,10 @@ async function saveSyncSetting(
   patch: Partial<
     Pick<
       AppConfig,
+      | "syncText"
       | "syncImage"
       | "syncFiles"
+      | "syncDirection"
       | "deduplicateSyncContent"
     >
   >,
@@ -393,7 +418,6 @@ async function saveSyncSetting(
     await configStore.save({
       ...configStore.config,
       ...patch,
-      syncText: true,
     });
 
     if (configStore.error) {
@@ -413,8 +437,16 @@ async function saveSyncImage(syncImage: boolean) {
   await saveSyncSetting({ syncImage });
 }
 
+async function saveSyncText(syncText: boolean) {
+  await saveSyncSetting({ syncText });
+}
+
 async function saveSyncFiles(syncFiles: boolean) {
   await saveSyncSetting({ syncFiles });
+}
+
+async function saveSyncDirection(syncDirection: SyncDirection) {
+  await saveSyncSetting({ syncDirection });
 }
 
 async function saveDeduplicateSyncContent(deduplicateSyncContent: boolean) {
@@ -449,6 +481,7 @@ async function resetDownloadLocation() {
   try {
     const config = await resetTransferSaveDir();
     applySavedConfig(config);
+    await loadDefaultTransferSaveDir();
     toastStore.success("已恢复默认下载位置");
   } catch (error) {
     toastStore.error(`恢复默认下载位置失败：${String(error)}`);
@@ -481,7 +514,6 @@ async function saveNotificationSetting(
     await configStore.save({
       ...configStore.config,
       ...patch,
-      syncText: true,
     });
 
     if (configStore.error) {
@@ -551,13 +583,13 @@ async function clearLocalCache() {
 
 <template>
   <div data-settings-image2-page class="grid w-full gap-4 pb-4 text-[13px]">
-    <section data-startup-settings class="grid gap-2">
-      <p class="text-[13px] font-bold text-[color:var(--subtle-text)]">开机启动</p>
+    <section data-settings-image2-section="basic" class="grid gap-2">
+      <p class="text-[13px] font-bold text-[color:var(--subtle-text)]">基础设置</p>
       <div
         data-settings-image2-card
         class="overflow-hidden rounded-[10px] border border-[color:var(--main-line)] bg-[color:var(--panel-bg)]"
       >
-        <div data-settings-image2-row class="flex min-h-[50px] items-center justify-between gap-4 px-3 py-3">
+        <div data-startup-settings data-settings-image2-row class="flex min-h-[50px] items-center justify-between gap-4 px-3 py-3">
           <span class="text-[15px] font-bold text-white">开机启动</span>
           <Switch
             control-only
@@ -580,55 +612,72 @@ async function clearLocalCache() {
             @update:model-value="saveAutoSync"
           />
         </div>
-      </div>
-    </section>
-
-    <section data-settings-image2-section="basic" class="grid gap-2">
-      <p class="text-[13px] font-bold text-[color:var(--subtle-text)]">基础设置</p>
-      <div
-        data-settings-image2-card
-        class="overflow-hidden rounded-[10px] border border-[color:var(--main-line)] bg-[color:var(--panel-bg)]"
-      >
-        <div
-          data-ui-language-setting
-          data-settings-image2-row
-          class="flex min-h-[58px] items-start justify-between gap-4 px-3 py-3"
-        >
-          <span class="pt-1 text-[15px] font-bold text-white">界面语言</span>
-          <div data-settings-image2-select class="flex max-w-[620px] flex-wrap justify-end gap-2">
+        <div data-startup-window-setting data-settings-image2-row class="flex min-h-[58px] flex-col items-stretch justify-between gap-3 border-t border-[color:var(--main-line-soft)] px-3 py-3 sm:flex-row sm:items-center sm:gap-4">
+          <span class="grid min-w-0 gap-1">
+            <span class="text-[15px] font-bold text-white">启动界面</span>
+            <span class="text-[13px] text-[color:var(--muted-text)]">下次启动时生效</span>
+          </span>
+          <div class="flex flex-wrap justify-end gap-2" role="group" aria-label="启动界面">
             <button
-              v-for="option in languageOptions"
+              v-for="option in startupWindowOptions"
               :key="option.value"
               type="button"
               class="h-8 rounded-md border px-3 text-[13px] font-bold transition"
-              :class="draft.uiLanguage === option.value
+              :class="draft.startupWindowMode === option.value
                 ? 'border-[color:var(--accent-line)] bg-[color:var(--accent-soft)] text-[color:var(--accent-text)]'
                 : 'border-[color:var(--main-line-soft)] bg-[color:var(--main-bg-muted)] text-slate-300 hover:border-[color:var(--main-line)] hover:text-white'"
-              :title="option.hint"
+              :aria-pressed="draft.startupWindowMode === option.value"
               :disabled="configMutationSaving"
-              @click="saveUiLanguage(option.value)"
+              @click="saveBasicSettings({ startupWindowMode: option.value })"
             >
               {{ option.label }}
             </button>
           </div>
         </div>
+        <div
+          data-ui-language-setting
+          data-settings-image2-row
+          class="flex min-h-[58px] items-start justify-between gap-4 border-t border-[color:var(--main-line-soft)] px-3 py-3"
+        >
+          <span class="pt-1 text-[15px] font-bold text-white">界面语言</span>
+          <div data-settings-image2-select class="relative w-full shrink-0 sm:w-[220px]">
+            <select
+              aria-label="界面语言"
+              class="h-9 w-full appearance-none rounded-md border border-[color:var(--main-line-soft)] bg-[color:var(--field-bg)] pl-3 pr-9 text-[13px] font-semibold text-[color:var(--clipboard-card-text)] outline-none transition hover:border-[color:var(--main-line)] focus-visible:border-[color:var(--accent-line)] focus-visible:ring-2 focus-visible:ring-[color:var(--accent-soft)]"
+              :value="draft.uiLanguage"
+              :disabled="configMutationSaving"
+              @change="saveUiLanguage(($event.target as HTMLSelectElement).value as UiLanguage)"
+            >
+              <option
+                v-for="option in languageOptions"
+                :key="option.value"
+                :value="option.value"
+                :data-i18n-ignore="option.value !== 'system' || undefined"
+              >
+                {{ option.label }}
+              </option>
+            </select>
+            <ChevronDown class="pointer-events-none absolute right-3 top-2.5 h-4 w-4 text-[color:var(--muted-text)]" aria-hidden="true" />
+          </div>
+        </div>
 
         <label
           data-settings-image2-row
-          class="flex min-h-[58px] items-center justify-between gap-4 border-t border-[color:var(--main-line-soft)] px-3 py-3"
+          class="flex min-h-[58px] flex-col items-stretch justify-between gap-3 border-t border-[color:var(--main-line-soft)] px-3 py-3 sm:flex-row sm:items-center sm:gap-4"
         >
-          <span class="grid min-w-0 flex-1 gap-2">
+          <span data-device-name-copy class="grid min-w-0 flex-1 gap-1">
             <span class="text-[15px] font-bold text-white">设备名称</span>
-            <input
-              v-model="draft.deviceName"
-              data-settings-image2-field
-              class="h-8 w-full max-w-[320px] min-w-0 rounded-md border-0 bg-[color:var(--field-bg)] px-3 text-[13px] text-white"
-              :disabled="configMutationSaving"
-              @blur="saveDeviceName"
-              @keydown.enter="saveDeviceName"
-            >
             <span class="text-[13px] text-[color:var(--muted-text)]">用于局域网内识别这台设备</span>
           </span>
+          <input
+            v-model="draft.deviceName"
+            data-device-name-field
+            data-settings-image2-field
+            class="h-8 w-full min-w-0 shrink-0 rounded-md border-0 bg-[color:var(--field-bg)] px-3 text-[13px] text-white sm:w-[180px]"
+            :disabled="configMutationSaving"
+            @blur="saveDeviceName"
+            @keydown.enter="saveDeviceName"
+          >
         </label>
 
         <label
@@ -655,21 +704,23 @@ async function clearLocalCache() {
           class="flex min-h-[58px] items-start justify-between gap-4 border-t border-[color:var(--main-line-soft)] px-3 py-3"
         >
           <span class="pt-1 text-[15px] font-bold text-white">主题外观</span>
-          <div data-settings-image2-select class="flex max-w-[620px] flex-wrap justify-end gap-2">
-            <button
-              v-for="option in themeOptions"
-              :key="option.value"
-              type="button"
-              class="h-8 rounded-md border px-3 text-[13px] font-bold transition"
-              :class="draft.theme === option.value
-                ? 'border-[color:var(--accent-line)] bg-[color:var(--accent-soft)] text-[color:var(--accent-text)]'
-                : 'border-[color:var(--main-line-soft)] bg-[color:var(--main-bg-muted)] text-slate-300 hover:border-[color:var(--main-line)] hover:text-white'"
-              :title="option.hint"
+          <div data-settings-image2-select class="relative w-full shrink-0 sm:w-[220px]">
+            <select
+              aria-label="主题外观"
+              class="h-9 w-full appearance-none rounded-md border border-[color:var(--main-line-soft)] bg-[color:var(--field-bg)] pl-3 pr-9 text-[13px] font-semibold text-[color:var(--clipboard-card-text)] outline-none transition hover:border-[color:var(--main-line)] focus-visible:border-[color:var(--accent-line)] focus-visible:ring-2 focus-visible:ring-[color:var(--accent-soft)]"
+              :value="draft.theme"
               :disabled="configMutationSaving"
-              @click="saveTheme(option.value)"
+              @change="saveTheme(($event.target as HTMLSelectElement).value as AppTheme)"
             >
-              {{ option.label }}
-            </button>
+              <option
+                v-for="option in themeOptions"
+                :key="option.value"
+                :value="option.value"
+              >
+                {{ option.label }}
+              </option>
+            </select>
+            <ChevronDown class="pointer-events-none absolute right-3 top-2.5 h-4 w-4 text-[color:var(--muted-text)]" aria-hidden="true" />
           </div>
         </div>
 
@@ -679,48 +730,26 @@ async function clearLocalCache() {
           class="flex min-h-[58px] items-start justify-between gap-4 border-t border-[color:var(--main-line-soft)] px-3 py-3"
         >
           <span class="pt-1 text-[15px] font-bold text-white">关闭按钮行为</span>
-          <div data-settings-image2-select class="flex max-w-[620px] flex-wrap justify-end gap-2">
-            <button
-              v-for="option in closeActionOptions"
-              :key="option.value"
-              type="button"
-              class="h-8 rounded-md border px-3 text-[13px] font-bold transition"
-              :class="draft.closeAction === option.value
-                ? 'border-[color:var(--accent-line)] bg-[color:var(--accent-soft)] text-[color:var(--accent-text)]'
-                : 'border-[color:var(--main-line-soft)] bg-[color:var(--main-bg-muted)] text-slate-300 hover:border-[color:var(--main-line)] hover:text-white'"
-              :title="option.hint"
+          <div data-settings-image2-select class="relative w-full shrink-0 sm:w-[220px]">
+            <select
+              aria-label="关闭按钮行为"
+              class="h-9 w-full appearance-none rounded-md border border-[color:var(--main-line-soft)] bg-[color:var(--field-bg)] pl-3 pr-9 text-[13px] font-semibold text-[color:var(--clipboard-card-text)] outline-none transition hover:border-[color:var(--main-line)] focus-visible:border-[color:var(--accent-line)] focus-visible:ring-2 focus-visible:ring-[color:var(--accent-soft)]"
+              :value="draft.closeAction"
               :disabled="configMutationSaving"
-              @click="saveCloseAction(option.value)"
+              @change="saveCloseAction(($event.target as HTMLSelectElement).value as CloseAction)"
             >
-              {{ option.label }}
-            </button>
+              <option
+                v-for="option in closeActionOptions"
+                :key="option.value"
+                :value="option.value"
+              >
+                {{ option.label }}
+              </option>
+            </select>
+            <ChevronDown class="pointer-events-none absolute right-3 top-2.5 h-4 w-4 text-[color:var(--muted-text)]" aria-hidden="true" />
           </div>
         </div>
       </div>
-    </section>
-
-    <section data-global-shortcut-settings class="grid gap-2">
-      <p class="text-[13px] font-bold text-[color:var(--subtle-text)]">快捷键</p>
-      <button
-        data-shortcut-settings-entry
-        data-settings-image2-card
-        type="button"
-        class="group flex min-h-[64px] w-full items-center justify-between gap-4 rounded-[10px] border border-[color:var(--main-line)] bg-[color:var(--panel-bg)] px-3 py-3 text-left transition hover:border-[color:var(--accent-line)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color:var(--accent-line)]"
-        @click="shortcutDialogOpen = true"
-      >
-        <span class="flex min-w-0 items-center gap-3">
-          <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-[color:var(--main-line-soft)] bg-[color:var(--main-bg-muted)] text-[color:var(--accent-text)]">
-            <Keyboard class="h-4 w-4" />
-          </span>
-          <span class="grid min-w-0 gap-1">
-            <span class="text-[15px] font-bold text-white">快捷键设置</span>
-            <span class="text-[13px] text-[color:var(--muted-text)]">
-              已启用 {{ shortcutEnabledCount }} 个，点击统一管理
-            </span>
-          </span>
-        </span>
-        <ChevronRight class="h-4 w-4 shrink-0 text-slate-500 transition group-hover:translate-x-0.5 group-hover:text-[color:var(--accent-text)]" />
-      </button>
     </section>
 
     <section data-storage-settings class="grid gap-2">
@@ -735,11 +764,11 @@ async function clearLocalCache() {
             <span class="text-[15px] font-bold text-white">下载位置</span>
             <span
               data-settings-image2-field
-              :data-i18n-ignore="draft.fileSaveDir ? '' : undefined"
+              data-i18n-ignore
               class="h-8 min-w-0 truncate rounded-md bg-[color:var(--field-bg)] px-3 font-mono text-[13px] leading-8 text-slate-300"
-              :title="draft.fileSaveDir || '默认下载目录'"
+              :title="displayedTransferSaveDir"
             >
-              {{ draft.fileSaveDir || "默认下载目录" }}
+              {{ displayedTransferSaveDir }}
             </span>
             <span class="text-[13px] text-[color:var(--muted-text)]">接收文件或复制远端文件时保存到这里</span>
           </div>
@@ -830,12 +859,36 @@ async function clearLocalCache() {
         data-settings-image2-card
         class="overflow-hidden rounded-[10px] border border-[color:var(--main-line)] bg-[color:var(--panel-bg)]"
       >
+        <div
+          data-sync-direction-setting
+          data-settings-image2-row
+          class="flex min-h-[58px] flex-col items-stretch justify-between gap-3 px-3 py-3 sm:flex-row sm:items-center sm:gap-4"
+        >
+          <span class="grid min-w-0 gap-1">
+            <span class="text-[15px] font-bold text-white">同步方向</span>
+            <span class="text-[13px] text-[color:var(--muted-text)]">选择本机剪贴板内容的发送和接收方式</span>
+          </span>
+          <div data-settings-image2-select class="relative w-full shrink-0 sm:w-[220px]">
+            <select
+              aria-label="同步方向"
+              class="h-9 w-full appearance-none rounded-md border border-[color:var(--main-line-soft)] bg-[color:var(--field-bg)] pl-3 pr-9 text-[13px] font-semibold text-[color:var(--clipboard-card-text)] outline-none transition hover:border-[color:var(--main-line)] focus-visible:border-[color:var(--accent-line)] focus-visible:ring-2 focus-visible:ring-[color:var(--accent-soft)]"
+              :value="draft.syncDirection"
+              :disabled="configMutationSaving"
+              @change="saveSyncDirection(($event.target as HTMLSelectElement).value as SyncDirection)"
+            >
+              <option v-for="option in syncDirectionOptions" :key="option.value" :value="option.value">
+                {{ option.label }}
+              </option>
+            </select>
+            <ChevronDown class="pointer-events-none absolute right-3 top-2.5 h-4 w-4 text-[color:var(--muted-text)]" aria-hidden="true" />
+          </div>
+        </div>
         <div data-settings-image2-row class="flex min-h-[54px] items-center justify-between gap-4 px-3 py-3">
           <span class="grid min-w-0 gap-1">
             <span class="text-[15px] font-bold text-white">同步文本</span>
-            <span class="text-[13px] text-[color:var(--muted-text)]">文本剪贴板始终同步</span>
+            <span class="text-[13px] text-[color:var(--muted-text)]">复制文本后同步到其他设备；关闭不影响本机复制</span>
           </span>
-          <Switch control-only v-model="draft.syncText" label="同步文本" disabled />
+          <Switch control-only :model-value="draft.syncText" label="同步文本" :disabled="configMutationSaving" @update:model-value="saveSyncText" />
         </div>
         <div
           data-settings-image2-row
@@ -843,7 +896,7 @@ async function clearLocalCache() {
         >
           <span class="grid min-w-0 gap-1">
             <span class="text-[15px] font-bold text-white">同步图片</span>
-            <span class="text-[13px] text-[color:var(--muted-text)]">支持截图和图片复制</span>
+            <span class="text-[13px] text-[color:var(--muted-text)]">复制截图或图片后同步到其他设备；关闭不影响本机复制</span>
           </span>
           <Switch
             control-only
@@ -859,7 +912,7 @@ async function clearLocalCache() {
         >
           <span class="grid min-w-0 gap-1">
             <span class="text-[15px] font-bold text-white">同步文件</span>
-            <span class="text-[13px] text-[color:var(--muted-text)]">复制文件后同步到对方历史</span>
+            <span class="text-[13px] text-[color:var(--muted-text)]">复制文件后同步到其他设备；关闭不影响本机复制</span>
           </span>
           <Switch
             control-only
@@ -902,28 +955,6 @@ async function clearLocalCache() {
       </div>
     </section>
 
-    <section class="grid gap-2">
-      <p class="text-[13px] font-bold text-[color:var(--subtle-text)]">历史记录</p>
-      <div
-        data-settings-image2-card
-        class="overflow-hidden rounded-[10px] border border-[color:var(--main-line)] bg-[color:var(--panel-bg)]"
-      >
-        <div data-settings-image2-row class="flex min-h-[54px] items-center justify-between gap-4 px-3 py-3">
-          <span class="grid min-w-0 gap-1">
-            <span class="text-[15px] font-bold text-white">保存同步历史</span>
-            <span class="text-[13px] text-[color:var(--muted-text)]">保存剪贴板同步记录，关闭后不再记录新的同步历史</span>
-          </span>
-          <Switch
-            control-only
-            :model-value="draft.saveHistory"
-            label="保存同步历史"
-            :disabled="configMutationSaving"
-            @update:model-value="saveHistorySetting"
-          />
-        </div>
-      </div>
-    </section>
-
     <section data-translation-settings class="grid gap-2">
       <p class="text-[13px] font-bold text-[color:var(--subtle-text)]">翻译</p>
       <div
@@ -932,36 +963,35 @@ async function clearLocalCache() {
       >
         <div
           data-settings-image2-row
-          class="flex min-h-[76px] flex-col gap-3 px-3 py-3 lg:flex-row lg:items-center lg:justify-between"
+          class="translation-engine-section"
         >
-          <span class="grid min-w-0 gap-1">
+          <span class="translation-engine-heading">
             <span class="text-[15px] font-bold text-white">翻译方式</span>
             <span class="text-[13px] text-[color:var(--muted-text)]">选择默认使用的翻译服务</span>
           </span>
           <div
             data-translation-engine-picker
-            role="radiogroup"
+            role="group"
             aria-label="翻译方式"
-            class="grid w-full shrink-0 grid-cols-2 gap-1.5 rounded-[14px] border border-[color:var(--main-line-soft)] bg-[color:var(--field-bg)] p-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] lg:w-[500px]"
+            class="translation-engine-picker"
           >
             <button
               v-for="option in translationEngineOptions"
               :key="option.value"
               type="button"
-              class="flex min-h-[52px] min-w-0 items-center gap-2.5 rounded-[10px] px-3 text-left transition duration-200"
-              :class="draft.translationEngine === option.value
-                ? 'bg-[linear-gradient(135deg,rgba(79,167,203,0.24),rgba(79,167,203,0.10))] text-[color:var(--accent-text)] shadow-[0_10px_26px_rgba(0,0,0,0.24),inset_0_1px_0_rgba(255,255,255,0.08)] ring-1 ring-inset ring-[color:var(--accent-line)]'
-                : 'text-slate-300 hover:bg-[rgba(255,255,255,0.035)] hover:text-white'"
+              class="translation-engine-option"
+              :class="{ 'is-selected': draft.translationEngine === option.value }"
               :title="option.hint"
               :aria-pressed="draft.translationEngine === option.value"
               :disabled="configMutationSaving"
               @click="saveTranslationEngine(option.value)"
             >
-              <component :is="option.icon" class="h-4 w-4 shrink-0" />
-              <span class="min-w-0">
-                <span class="block truncate text-[13px] font-bold">{{ option.label }}</span>
-                <span class="block truncate text-[12px] opacity-75">{{ option.hint }}</span>
+              <span class="translation-engine-icon"><component :is="option.icon" class="h-4 w-4" /></span>
+              <span class="translation-engine-copy">
+                <strong>{{ option.label }}</strong>
+                <small>{{ option.hint }}</small>
               </span>
+              <CheckCircle2 v-if="draft.translationEngine === option.value" class="translation-engine-check" aria-hidden="true" />
             </button>
           </div>
         </div>
@@ -969,16 +999,12 @@ async function clearLocalCache() {
         <div
           v-if="draft.translationEngine === 'google'"
           data-translation-google-ready
-          class="flex min-h-[62px] items-center gap-3 border-t border-[color:var(--main-line-soft)] bg-[color:var(--main-bg-muted)] px-3 py-3"
+          class="translation-ready-row"
         >
-          <span
-            class="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-[color:var(--accent-line)] bg-[color:var(--accent-soft)] text-[color:var(--accent-text)]"
-          >
-            <CheckCircle2 class="h-4 w-4" />
-          </span>
-          <span class="grid min-w-0 gap-0.5">
-            <span class="text-[14px] font-bold text-white">Google 翻译已启用</span>
-            <span class="text-[13px] text-[color:var(--muted-text)]">无需 API Key 或额外设置</span>
+          <CheckCircle2 class="h-4 w-4 shrink-0 text-[color:var(--accent-text)]" aria-hidden="true" />
+          <span class="translation-ready-copy">
+            <strong>Google 翻译已启用</strong>
+            <span>无需 API Key 或额外设置</span>
           </span>
         </div>
 
@@ -1064,6 +1090,30 @@ async function clearLocalCache() {
       </div>
     </section>
 
+    <section data-global-shortcut-settings class="grid gap-2">
+      <p class="text-[13px] font-bold text-[color:var(--subtle-text)]">快捷键</p>
+      <button
+        data-shortcut-settings-entry
+        data-settings-image2-card
+        type="button"
+        class="group flex min-h-[64px] w-full items-center justify-between gap-4 rounded-[10px] border border-[color:var(--main-line)] bg-[color:var(--panel-bg)] px-3 py-3 text-left transition hover:border-[color:var(--accent-line)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color:var(--accent-line)]"
+        @click="shortcutDialogOpen = true"
+      >
+        <span class="flex min-w-0 items-center gap-3">
+          <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-[color:var(--main-line-soft)] bg-[color:var(--main-bg-muted)] text-[color:var(--accent-text)]">
+            <Keyboard class="h-4 w-4" />
+          </span>
+          <span class="grid min-w-0 gap-1">
+            <span class="text-[15px] font-bold text-white">快捷键设置</span>
+            <span class="text-[13px] text-[color:var(--muted-text)]">
+              已启用 {{ shortcutEnabledCount }} 个，点击统一管理
+            </span>
+          </span>
+        </span>
+        <ChevronRight class="h-4 w-4 shrink-0 text-slate-500 transition group-hover:translate-x-0.5 group-hover:text-[color:var(--accent-text)]" />
+      </button>
+    </section>
+
     <section data-desktop-notification-settings class="grid gap-2">
       <p class="text-[13px] font-bold text-[color:var(--subtle-text)]">桌面通知</p>
       <div
@@ -1083,6 +1133,13 @@ async function clearLocalCache() {
             @update:model-value="saveDesktopNotifications"
           />
         </div>
+        <Transition name="notification-options">
+          <div
+            v-if="draft.desktopNotifications"
+            data-notification-options
+            class="notification-options-grid"
+          >
+            <div data-notification-options-content class="min-h-0 overflow-hidden">
         <div
           data-settings-image2-row
           class="flex min-h-[50px] items-center justify-between gap-4 border-t border-[color:var(--main-line-soft)] px-3 py-3"
@@ -1151,6 +1208,9 @@ async function clearLocalCache() {
             @update:model-value="saveNotificationClipboardPreview"
           />
         </div>
+            </div>
+          </div>
+        </Transition>
       </div>
     </section>
 
@@ -1164,3 +1224,132 @@ async function clearLocalCache() {
     />
   </div>
 </template>
+
+<style scoped>
+.translation-engine-section {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+}
+
+.translation-engine-heading,
+.translation-engine-copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.translation-engine-picker {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.translation-engine-option {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 68px;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--main-line-soft);
+  border-radius: 10px;
+  background: var(--field-bg);
+  color: var(--clipboard-card-text);
+  text-align: left;
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.translation-engine-option:hover:not(:disabled) {
+  border-color: var(--main-line);
+  background: var(--main-bg-muted);
+}
+
+.translation-engine-option:focus-visible {
+  outline: 2px solid var(--accent-text);
+  outline-offset: 2px;
+}
+
+.translation-engine-option:disabled { cursor: not-allowed; opacity: 0.6; }
+
+.translation-engine-option.is-selected {
+  border-color: var(--accent-line);
+  background: linear-gradient(105deg, var(--accent-soft), var(--field-bg) 70%);
+}
+
+.translation-engine-icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--main-line-soft);
+  border-radius: 9px;
+  background: var(--main-bg-soft);
+  color: var(--muted-text);
+}
+
+.is-selected .translation-engine-icon {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.translation-engine-copy strong { font-size: 13px; line-height: 1.3; }
+.translation-engine-copy small { color: var(--muted-text); font-size: 12px; line-height: 1.35; }
+.translation-engine-check { width: 17px; height: 17px; flex: 0 0 auto; margin-left: auto; color: var(--accent-text); }
+
+.translation-ready-row {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--main-line-soft);
+}
+
+.translation-ready-copy { display: flex; min-width: 0; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; }
+.translation-ready-copy strong { color: var(--clipboard-card-text); font-size: 13px; }
+.translation-ready-copy span { color: var(--muted-text); font-size: 12px; }
+
+@media (max-width: 560px) {
+  .translation-engine-picker { grid-template-columns: 1fr; }
+  .translation-engine-option { min-height: 60px; }
+}
+
+.notification-options-grid {
+  display: grid;
+  grid-template-rows: 1fr;
+}
+
+.notification-options-enter-active,
+.notification-options-leave-active {
+  overflow: hidden;
+  transition:
+    grid-template-rows 340ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 220ms ease,
+    transform 340ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.notification-options-enter-from,
+.notification-options-leave-to {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transform: translateY(-6px);
+}
+
+.notification-options-enter-to,
+.notification-options-leave-from {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transform: translateY(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .notification-options-enter-active,
+  .notification-options-leave-active {
+    transition: none;
+  }
+}
+</style>

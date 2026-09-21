@@ -201,8 +201,8 @@ fn local_address_check(
             "local-address",
             DiagnosticStatus::Error,
             "局域网地址",
-            "没有检测到可用的 IPv4 网络地址。",
-            Some("请确认网卡已连接，并暂时停用冲突的 VPN 或虚拟网卡后重试。"),
+            "没有检测到可用的 IPv4 网络地址",
+            Some("请确认网卡已连接，并暂时停用冲突的 VPN 或虚拟网卡后重试"),
             None,
             None,
         );
@@ -225,8 +225,8 @@ fn local_address_check(
             "local-address",
             DiagnosticStatus::Warning,
             "局域网地址",
-            format!("{preferred}检测到 {displayed}，但没有私有 IPv4 地址。"),
-            Some("请确认当前设备连接到家庭或办公局域网。"),
+            format!("{preferred}检测到 {displayed}，但没有私有 IPv4 地址"),
+            Some("请确认当前设备连接到家庭或办公局域网"),
             None,
             None,
         );
@@ -249,7 +249,7 @@ fn sync_listener_check(port: u16, running: bool) -> NetworkDiagnosticCheck {
             "sync-listener",
             DiagnosticStatus::Pass,
             "同步与文件传输监听",
-            format!("正在监听所有网卡的 TCP {port} 端口。"),
+            format!("正在监听所有网卡的 TCP {port} 端口"),
             None,
             Some("TCP"),
             Some(port),
@@ -263,8 +263,8 @@ fn sync_listener_check(port: u16, running: bool) -> NetworkDiagnosticCheck {
                 "sync-listener",
                 DiagnosticStatus::Warning,
                 "同步与文件传输监听",
-                format!("同步尚未启动；TCP {port} 端口当前可用。"),
-                Some("启动同步后，其他设备才能连接并传输内容。"),
+                format!("同步尚未启动；TCP {port} 端口当前可用"),
+                Some("启动同步后，其他设备才能连接并传输内容"),
                 Some("TCP"),
                 Some(port),
             )
@@ -274,7 +274,7 @@ fn sync_listener_check(port: u16, running: bool) -> NetworkDiagnosticCheck {
             DiagnosticStatus::Error,
             "同步与文件传输监听",
             format!("同步尚未启动，且 TCP {port} 端口不可用：{error}"),
-            Some("关闭占用该端口的程序，或在基础设置中更换监听端口。"),
+            Some("关闭占用该端口的程序，或在基础设置中更换监听端口"),
             Some("TCP"),
             Some(port),
         ),
@@ -287,7 +287,7 @@ fn discovery_listener_check(running: bool) -> NetworkDiagnosticCheck {
             "discovery-listener",
             DiagnosticStatus::Pass,
             "局域网自动发现",
-            format!("自动发现服务正在使用 UDP {DISCOVERY_PORT}。"),
+            format!("自动发现服务正在使用 UDP {DISCOVERY_PORT}"),
             None,
             Some("UDP"),
             Some(DISCOVERY_PORT),
@@ -297,8 +297,8 @@ fn discovery_listener_check(running: bool) -> NetworkDiagnosticCheck {
             "discovery-listener",
             DiagnosticStatus::Error,
             "局域网自动发现",
-            format!("自动发现服务未能监听 UDP {DISCOVERY_PORT}。"),
-            Some("检查端口占用和防火墙；仍可在设备页手动输入对方 IP。"),
+            format!("自动发现服务未能监听 UDP {DISCOVERY_PORT}"),
+            Some("检查端口占用和防火墙；仍可在设备页手动输入对方 IP"),
             Some("UDP"),
             Some(DISCOVERY_PORT),
         )
@@ -311,7 +311,7 @@ fn mobile_listener_check(running: bool) -> NetworkDiagnosticCheck {
             "mobile-listener",
             DiagnosticStatus::Pass,
             "手机临时连接",
-            format!("手机连接服务正在使用 TCP {MOBILE_HTTP_PORT}。"),
+            format!("手机连接服务正在使用 TCP {MOBILE_HTTP_PORT}"),
             None,
             Some("TCP"),
             Some(MOBILE_HTTP_PORT),
@@ -325,7 +325,7 @@ fn mobile_listener_check(running: bool) -> NetworkDiagnosticCheck {
                 "mobile-listener",
                 DiagnosticStatus::Pass,
                 "手机临时连接",
-                format!("TCP {MOBILE_HTTP_PORT} 端口可用，将在创建二维码会话时启用。"),
+                format!("TCP {MOBILE_HTTP_PORT} 端口可用，将在创建二维码会话时启用"),
                 None,
                 Some("TCP"),
                 Some(MOBILE_HTTP_PORT),
@@ -336,7 +336,7 @@ fn mobile_listener_check(running: bool) -> NetworkDiagnosticCheck {
             DiagnosticStatus::Error,
             "手机临时连接",
             format!("TCP {MOBILE_HTTP_PORT} 端口不可用：{error}"),
-            Some("关闭占用该端口的程序后重新检测。"),
+            Some("关闭占用该端口的程序后重新检测"),
             Some("TCP"),
             Some(MOBILE_HTTP_PORT),
         ),
@@ -350,9 +350,9 @@ fn append_firewall_checks(checks: &mut Vec<NetworkDiagnosticCheck>, sync_port: u
             "firewall",
             DiagnosticStatus::Unknown,
             "系统防火墙",
-            "当前平台暂不支持自动读取防火墙规则。",
+            "当前平台暂不支持自动读取防火墙规则",
             Some(&format!(
-                "请手动允许 TCP {sync_port}、UDP {DISCOVERY_PORT} 和 TCP {MOBILE_HTTP_PORT} 的入站访问。"
+                "请手动允许 TCP {sync_port}、UDP {DISCOVERY_PORT} 和 TCP {MOBILE_HTTP_PORT} 的入站访问"
             )),
             None,
             None,
@@ -368,7 +368,7 @@ fn append_firewall_checks(checks: &mut Vec<NetworkDiagnosticCheck>, sync_port: u
                 DiagnosticStatus::Unknown,
                 "Windows 网络类型",
                 format!("无法读取活动网络类型：{error}"),
-                Some("可以重新检测，或在 Windows 设置中确认当前网络为“专用网络”。"),
+                Some("可以重新检测，或在 Windows 设置中确认当前网络为“专用网络”"),
                 None,
                 None,
             ));
@@ -377,8 +377,8 @@ fn append_firewall_checks(checks: &mut Vec<NetworkDiagnosticCheck>, sync_port: u
                     id,
                     DiagnosticStatus::Unknown,
                     title,
-                    format!("无法确认 {protocol} {port} 的 Windows 防火墙状态。"),
-                    Some("点击“修复防火墙”可重新创建 CopyShare 专用网络入站规则。"),
+                    format!("无法确认 {protocol} {port} 的 Windows 防火墙状态"),
+                    Some("点击“修复防火墙”可重新创建 CopyShare 专用网络入站规则"),
                     Some(protocol),
                     Some(port),
                 ));
@@ -405,10 +405,10 @@ fn append_windows_firewall_checks(
     checks.push(if public_active {
         check(
             "windows-network-profile",
-            DiagnosticStatus::Warning,
+            DiagnosticStatus::Pass,
             "Windows 网络类型",
-            format!("活动网络类型为 {profiles}；公共网络会限制局域网入站连接。"),
-            Some("确认当前网络可信后，在 Windows 网络设置中将它改为“专用网络”。"),
+            format!("活动网络类型为 {profiles}，此项仅供参考"),
+            None,
             None,
             None,
         )
@@ -417,7 +417,7 @@ fn append_windows_firewall_checks(
             "windows-network-profile",
             DiagnosticStatus::Pass,
             "Windows 网络类型",
-            format!("活动网络类型：{profiles}。"),
+            format!("活动网络类型：{profiles}"),
             None,
             None,
             None,
@@ -429,7 +429,7 @@ fn append_windows_firewall_checks(
             "windows-firewall-profile",
             DiagnosticStatus::Pass,
             "Windows 专用网络防火墙",
-            "专用网络防火墙已启用，将检查 CopyShare 入站规则。",
+            "专用网络防火墙已启用，将检查 CopyShare 入站规则",
             None,
             None,
             None,
@@ -437,10 +437,10 @@ fn append_windows_firewall_checks(
     } else {
         check(
             "windows-firewall-profile",
-            DiagnosticStatus::Warning,
+            DiagnosticStatus::Pass,
             "Windows 专用网络防火墙",
-            "专用网络防火墙当前未启用，端口不会被它阻止。",
-            Some("建议启用 Windows 防火墙，并使用下方修复按钮创建最小范围规则。"),
+            "专用网络防火墙当前未启用，端口不会被它阻止",
+            None,
             None,
             None,
         )
@@ -460,9 +460,9 @@ fn append_windows_firewall_checks(
                 DiagnosticStatus::Pass,
                 title,
                 if snapshot.private_firewall_enabled {
-                    format!("专用网络已允许 {protocol} {port} 入站访问。")
+                    format!("专用网络已允许 {protocol} {port} 入站访问")
                 } else {
-                    format!("防火墙未启用，{protocol} {port} 当前不会被阻止。")
+                    format!("防火墙未启用，{protocol} {port} 当前不会被阻止")
                 },
                 None,
                 Some(protocol),
@@ -473,8 +473,8 @@ fn append_windows_firewall_checks(
                 id,
                 DiagnosticStatus::Error,
                 title,
-                format!("没有找到覆盖 {protocol} {port} 的专用网络入站允许规则。"),
-                Some("点击“修复防火墙”，通过管理员授权创建 CopyShare 规则。"),
+                format!("没有找到覆盖 {protocol} {port} 的专用网络入站允许规则"),
+                Some("点击“修复防火墙”，通过管理员授权创建 CopyShare 规则"),
                 Some(protocol),
                 Some(port),
             )
@@ -645,6 +645,29 @@ mod tests {
                 ("firewall-mobile", "手机连接防火墙", "TCP", 8766),
             ]
         );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn public_profile_and_disabled_firewall_are_informational() {
+        let mut checks = Vec::new();
+        append_windows_firewall_checks(
+            &mut checks,
+            8765,
+            WindowsFirewallSnapshot {
+                private_firewall_enabled: false,
+                active_profiles: vec!["Public".to_string()],
+                sync_allowed: false,
+                discovery_allowed: false,
+                mobile_allowed: false,
+            },
+        );
+
+        for id in ["windows-network-profile", "windows-firewall-profile"] {
+            let item = checks.iter().find(|item| item.id == id).unwrap();
+            assert_eq!(item.status, DiagnosticStatus::Pass);
+            assert!(item.recommendation.is_none());
+        }
     }
 
     #[cfg(target_os = "windows")]

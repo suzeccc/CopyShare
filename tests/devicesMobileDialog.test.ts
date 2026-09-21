@@ -34,14 +34,10 @@ assert.match(dialog, /defineModel<boolean>/);
 assert.match(dialog, /useMobileStore/);
 assert.match(dialog, /createMobileQrCodeDataUrl/);
 assert.match(dialog, /@click\.self="closeDialog"/);
-assert.match(dialog, /Monitor/);
 assert.match(dialog, /Smartphone/);
-assert.match(dialog, /电脑剪贴板/);
 assert.match(dialog, /手机提交/);
-assert.match(dialog, /<Monitor class="h-4 w-4 text-\[color:var\(--accent-text\)\]" \/>\s*电脑剪贴板/);
-assert.match(dialog, /<Smartphone class="h-4 w-4 text-\[color:var\(--accent-text\)\]" \/>\s*手机提交/);
-assert.doesNotMatch(dialog, /<Smartphone class="h-4 w-4 text-\[color:var\(--accent-text\)\]" \/>\s*电脑剪贴板/);
-assert.doesNotMatch(dialog, /<ShieldCheck class="h-4 w-4 text-emerald-300" \/>\s*手机提交/);
+assert.doesNotMatch(dialog, /Monitor|电脑剪贴板/);
+assert.match(dialog, /case "opened":\s*return "已连接"/);
 
 assert.doesNotMatch(sidebar, /label: "手机连接"/);
 assert.doesNotMatch(sidebar, /path: "\/mobile"/);

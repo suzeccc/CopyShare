@@ -34,13 +34,14 @@ CopyShare is designed for trusted LANs in offices, dorms, and homes. It does not
 
 ## Quick start
 
-1. Install and open CopyShare on two or more computers that can reach each other on the same LAN.
-2. Open **Devices** and wait for automatic discovery. If discovery fails, enter the other device's IPv4 address and listening port manually.
-3. Approve the trust request on both sides. Previously trusted devices reconnect automatically and join the sync mesh when they return.
-4. Copy text, a screenshot, an image, or files. Text and images sync according to your settings; files appear in the receiving application and are saved only after download.
+1. Install and open CopyShare from [GitHub Releases](https://github.com/suzeccc/CopyShare/releases/latest). The first-run wizard guides you through device name, download folder, automatic sync, and autostart.
+2. Make sure two or more computers can reach each other on the same LAN.
+3. Open **Devices** and wait for automatic discovery. If discovery fails, enter the other device's IPv4 address and listening port (default `8765`).
+4. Approve the trust request on both sides. Previously trusted devices reconnect automatically and join the sync mesh when they return.
+5. Copy text, a screenshot, an image, or files. Text and images sync according to your settings; files appear in the receiving application and are saved only after download.
 
 > [!TIP]
-> If a device cannot be found, open **Settings → Network diagnostics** first. It checks sync, discovery and mobile ports, the Windows network profile, and firewall rules, then provides specific guidance.
+> If a device cannot be found, open **Settings → Network diagnostics** first. It checks sync, discovery and mobile ports, the Windows network profile, and firewall rules, then provides specific guidance. For the full walkthrough, see the [user guide](docs/用户指南.md).
 
 ## Downloads and platforms
 
@@ -82,36 +83,37 @@ Open [GitHub Releases](https://github.com/suzeccc/CopyShare/releases/latest) and
 - Sync text, screenshots, images, and file clipboard content; videos are handled as files.
 - Enable or disable text, image, and file sync independently, and choose whether to filter duplicate content.
 - Trusted devices reconnect automatically and form a multi-device sync mesh without manual pair-by-pair maintenance.
-- Concurrent updates converge through a stable version order, and already applied messages are not forwarded again in a loop.
-- Each peer uses a bounded control queue and coalesces pending clipboard updates to the latest value, preventing unbounded buildup behind a slow device.
-- History records time, source device, and sync status. New history can be disabled, and existing history can be cleared.
+- Concurrent updates converge through a stable version order, and already applied messages are not forwarded again into loops.
+- Each peer uses a bounded control queue and latest-clipboard coalescing, so a slow device cannot grow the send queue without bound.
+- History entries show time, source device, and sync status; history saving can be disabled and existing history can be cleared.
 
-### File transfer and resumable downloads
+### File transfer and resume
 
-- After one or more files are copied, the receiver gets metadata and a download entry first. CopyShare does not automatically load an entire large file into memory or write it directly to the receiver's clipboard.
-- Downloads stream over HTTP Range. Interrupted tasks preserve completed bytes and can retry automatically, pause, or continue manually.
-- A valid transfer can resume after either the sender or receiver restarts. If the source changes, verification fails, or authorization expires, the task stops instead of combining incompatible data.
-- Download tokens are bound to the receiving device, byte offset, and expiration, and are consumed once for their intended operation.
-- Individual files have no separate cap; sending and receiving share the task-level limit.
-- The hard limit is **10 GiB total per task**, so a single-file task can contain a file up to 10 GiB.
-- Change, open, or reset the download directory, and choose whether to open the folder after a transfer completes.
+- After one or more files are copied, the receiver first gets file metadata and a download entry. Large files are not fully loaded into memory or written into the receiver clipboard automatically.
+- Downloads are per file: choosing one item downloads only that file, not the rest of the batch.
+- Transfers use streaming I/O and HTTP Range. Interrupted downloads keep completed bytes and can auto-retry, pause, or continue.
+- Both sender and receiver can resume from a valid checkpoint after restart. If the source file changes, checksum validation fails, or authorization expires, the task stops instead of appending bad data.
+- Download tokens are bound to the receiving device, offset, and expiry, and are consumed once for their intended use.
+- A batch can contain at most **100** files. There is no separate per-file ceiling; send and receive share the total task size limit.
+- The hard application limit is **10 GiB total size per task**, so a single-file transfer is also capped at 10 GiB.
+- You can change the download folder, open it, restore the default location, and choose whether to open the folder when a download completes.
 
 > [!NOTE]
-> A file transfer consumes upload traffic on the sender and download traffic on the receiver. Actual speed depends on both network adapters, Wi-Fi or Ethernet, storage performance, and LAN congestion.
+> File transfer uses sender uplink and receiver downlink at the same time. Actual speed depends on NICs, Wi-Fi or Ethernet, disks, and LAN congestion on both sides.
 
 ### Clipboard history, library, and media previews
 
-- Filter by all content, text, images, videos, links, or files, and search by keyword.
-- Expand long text, open links with the system browser, and zoom image previews.
-- Local videos have thumbnails and a separate preview window. If the operating system cannot decode a format, open the file location instead.
-- Favorite or pin history items. Library items are not removed when ordinary history is cleared.
-- Add titles, tags, and notes to saved items, search them, or convert text items into reusable snippets.
-- Create, edit, copy, pin, and drag-sort snippets.
-- Switch the library between grid and list layouts and inspect its local storage usage.
+- Filter by all, text, image, video, link, or file, and search by keyword.
+- Expand long text, open links in the system browser, and zoom images on a fixed preview canvas.
+- Local videos support thumbnails and a dedicated preview window; if the system cannot decode a codec, open the file location instead.
+- History items can be favorited or pinned; favorites are not deleted when ordinary history is cleared.
+- Favorites support titles, tags, notes, and search, and can be converted into reusable text snippets.
+- Snippets support create, edit, copy, pin, and drag-and-drop ordering.
+- The library can switch between grid and list layouts and reports local storage use.
 
 ### Global shortcuts and desktop integration
 
-Shortcuts can be enabled, changed, or reset independently. If a shortcut conflicts or registration fails, CopyShare preserves the previous working configuration.
+Shortcuts can be enabled, remapped, and restored individually. If a binding conflicts or fails to register, the previous working configuration is kept.
 
 | Action | Default shortcut | Default state |
 | --- | --- | --- |
@@ -122,76 +124,79 @@ Shortcuts can be enabled, changed, or reset independently. If a shortcut conflic
 | Pause/resume sync | `Alt+Shift+S` | Disabled |
 
 - The quick panel supports arrow-key selection, `Enter` to copy, and `Esc` to close.
-- Tray actions open the main window, start or stop synchronization, or exit the application.
-- Closing the main window can ask every time, minimize to the tray, or exit directly. The native close button and `Alt+F4` use the same policy.
-- Desktop notifications, single-instance behavior, system autostart, and automatic sync on launch are available.
+- The tray can open the main window, start or stop sync, or quit the app.
+- Closing the main window can ask every time, minimize to the tray, or quit immediately. The native close button and `Alt+F4` use the same policy.
+- Desktop notifications, single-instance launch, autostart, and automatic sync after launch are supported.
 
-### Network diagnostics and Windows Firewall
+### Network diagnostics and Windows firewall
 
-- Check the sync TCP port, UDP discovery port, and temporary mobile-connection port.
-- See listener state, the LAN address, Windows network profile, and private-network firewall state.
-- Inspect firewall coverage for synchronization, discovery, and mobile access, with actionable recommendations for each result.
-- On Windows, **Repair firewall** creates private-network inbound rules only for the current CopyShare executable. It never changes a public network to private automatically.
-- VPNs, virtual adapters, guest Wi-Fi, and router client isolation can still prevent discovery or connectivity.
+- Checks the sync TCP port, UDP discovery port, and temporary mobile access port.
+- Shows listener state, LAN addresses, Windows network profile, and private-network firewall status.
+- Inspects firewall rules needed for sync, discovery, and mobile access, then provides actionable guidance.
+- On Windows, **Repair firewall** only creates private-network inbound rules for the current CopyShare executable. It does not automatically change a public network profile to private.
+- VPNs, virtual adapters, guest Wi-Fi, and router client isolation can still block discovery and connections.
 
 ### OCR, translation, and temporary mobile access
 
-- Paste a screenshot, bitmap, or image file into **Image to text**. Preprocessing and OCR run locally; the result can be edited, copied, or cleared.
-- Google translation does not require an API key. AI translation accepts your own endpoint, API key, model, and proxy.
-- A computer can generate a temporary QR code. A phone browser can scan it to view offered text or submit text back to the computer.
-- Mobile sessions can be closed manually; their QR code and session become invalid immediately.
-- The interface supports Simplified Chinese and English, and saves the selected language locally.
+- In **Image to text**, paste a screenshot, bitmap, or image file. Preprocessing and OCR run locally; results can be edited, copied, or cleared.
+- Google Translate needs no API key. AI translation accepts your own API endpoint, API key, model, and optional proxy.
+- The computer can generate a temporary QR code. A phone browser can scan it to view text from the computer or submit text back.
+- Mobile sessions can be closed manually; the QR code and session become invalid immediately.
+- The UI supports Simplified Chinese and English, and the choice is saved in local configuration.
 
-### Settings, notifications, and cache
+### Settings, notifications, sync log, and cache
 
-- Configure device name, listener port, theme, synchronized content, file-size limits, download directory, and close behavior.
-- Choose from Win11 Dark, Midnight Glass, Graphite Mist, and Tea Green themes.
-- Control notifications for clipboard updates, trust requests, file transfers, device status, and sync failures, and send a real test notification.
-- Configuration writes are serialized. If a save is blocked or fails, the interface rolls back to the last successfully stored configuration instead of showing an unsaved value.
-- Cache management reports local storage used by image history, thumbnails, video thumbnails, and related assets, and can clear that cache.
-- Check for updates at startup or manually from the **About** page, then open the release page.
+- Configure device name, listening port, theme, sync content types, file size limits, download folder, and close behavior.
+- Themes include Win11 Dark, Midnight Glass, Graphite Mist, and Tea Green.
+- Desktop notifications can be controlled separately for clipboard, trust confirmation, file transfer, device state, and sync errors, with a real test notification.
+- **Sync log** records transfer direction, content type, device, size, status, and errors without showing clipboard body text. Filter by all, issues, devices, or files, and resume recoverable file tasks from the log.
+- Configuration writes are serialized. If a save is blocked or fails, the UI reverts to the last successful configuration so the interface does not drift from disk.
+- Cache management reports local use for image history, thumbnails, and video thumbnails, and can clear cache.
+- Startup checks for updates silently. **About** downloads and verifies signed updates, then installs and restarts after confirmation. Manually install an updater-enabled package once; future updates need no GitHub download page.
 
 ## Privacy and security boundaries
 
-- Clipboard content is not uploaded to a CopyShare-operated cloud service. Synchronization, library data, and OCR data are processed only on the local computer and connected LAN devices.
-- Device trust controls who may participate in synchronization, but it is not an end-to-end encrypted transport intended for the public internet or an untrusted shared network. Use CopyShare only on trusted LANs and trust only explicitly authorized devices.
-- A temporary mobile session becomes invalid after it is closed. Do not share its QR code with untrusted people.
-- When Google or custom AI translation is used, the text being translated is sent to the selected translation service. Do not send sensitive content to an external translation provider.
-- Your AI API key is stored in your own local configuration. Use a dedicated key and manage it carefully.
-- Update checks access the GitHub Releases API. Other LAN synchronization features do not depend on a CopyShare cloud service.
-- A clipboard may contain passwords, verification codes, or private files. Pause synchronization or disable the relevant content type before handling sensitive data.
+- Clipboard content is not uploaded to a CopyShare-owned cloud. Sync, library, and OCR data stay on the local machine and connected LAN devices.
+- Device trust limits who can participate in sync, but it is not an end-to-end encrypted channel suitable for the public internet or untrusted shared networks. Use it only on trusted LANs and only trust devices you intentionally authorize.
+- Temporary mobile sessions become invalid after they are closed. Do not share the QR code with untrusted people.
+- When using Google Translate or custom AI translation, the text is sent to the selected translation service. Do not submit sensitive content to external translation services.
+- AI API keys are stored in your own local configuration. Use a dedicated key and manage it carefully.
+- Update checks and downloads use GitHub Releases. Other LAN sync features do not depend on a CopyShare cloud.
+- Clipboards may contain passwords, verification codes, and private files. Pause sync or disable the relevant content types before handling sensitive material.
 
 ## FAQ
 
-### Why can't CopyShare find another device?
+### What if a device cannot be discovered?
 
-1. Confirm that CopyShare is running on both computers and that they can reach each other on the same LAN.
-2. Open **Settings → Network diagnostics** and follow the listener, network-profile, and firewall results.
-3. Temporarily rule out VPNs, virtual adapters, guest Wi-Fi, and client isolation.
-4. Enter the other device's IPv4 address and listening port manually in **Devices**.
+1. Confirm both sides have CopyShare running and are on a mutually reachable LAN.
+2. Open **Settings → Network diagnostics** and follow the port, network profile, and firewall results.
+3. Temporarily rule out VPN, virtual adapters, guest Wi-Fi, and client isolation.
+4. In **Devices**, enter the other device's IPv4 address and listening port manually (default `8765`).
 
-### Why is a file not placed directly on the receiving clipboard?
+For the full troubleshooting order, see [Troubleshooting](docs/故障排查.md).
 
-This is intentional. The receiving application shows a file entry first and saves the file only after the user downloads it. This prevents an unconfirmed large file from automatically consuming disk, network, and memory resources. An incomplete task can continue when transfer conditions recover.
+### Why do files not appear directly in the receiver clipboard?
 
-### What are the large-file limits?
+This is expected. The receiving application shows a file entry first and saves the file only after the user downloads it. That design prevents unconfirmed large files from automatically consuming disk, network, and memory. Incomplete tasks can resume when conditions recover.
 
-Individual files have no separate cap. A task cannot exceed **10 GiB** in total, so a one-file task can contain a file up to 10 GiB while multi-file tasks are limited by their combined size.
+### How many files can one transfer include?
 
-### Why is content not updating after the devices connect?
+A batch can contain at most **100** files, and the total task size cannot exceed **10 GiB**. With a single file, that file is effectively capped at 10 GiB; with multiple files, the combined size is counted.
 
-- Confirm that both sides completed the trust flow instead of remaining in a pending state.
-- Check that synchronization is running and that the relevant text, image, or file switch is enabled.
-- If the same content was copied recently, check whether duplicate-content filtering is enabled.
-- Read the specific error in logs or desktop notifications, then run network diagnostics.
+### What if devices are connected but content does not update?
 
-### Why can't a video be previewed?
+- Confirm both sides finished trust, rather than still waiting for approval.
+- Check that sync is running and that the text, image, or file switches are enabled.
+- If the same content was just copied, check whether duplicate-content filtering is enabled.
+- Inspect the sync log and desktop notifications for the specific error, then run network diagnostics.
 
-Desktop media support does not cover every video codec. CopyShare keeps the file entry and reports a preview error; open the file location and use another player when necessary.
+### What if a video cannot be previewed?
+
+Desktop media capabilities do not support every codec. CopyShare keeps the file entry and surfaces the preview error so you can open the file location and use another player.
 
 ### Where are received files saved?
 
-The default location is a `CopyShare` folder inside the system Downloads directory. Use **Settings → Download location** to change, open, or reset it.
+By default they are saved under the system Downloads folder in a `CopyShare` directory. You can change, open, or restore that location in **Settings → Download location**; the first-run wizard can also choose the save folder.
 
 ## Development and builds
 
@@ -216,21 +221,34 @@ cargo test
 
 | Command | Purpose |
 | --- | --- |
-| `npm run tauri:dev` | Start the desktop application in development mode |
-| `npm run build` | Type-check and build the frontend |
-| `npm run build:exe` | Build the current platform executable without an installer |
-| `npm run tauri:build` | Build the current platform installer packages |
+| `npm run tauri:dev` | Start desktop development mode |
+| `npm run build` | Run TypeScript checks and build the frontend |
+| `npm run build:exe` | Build the current-platform main executable without installers |
+| `npm run tauri:build` | Build current-platform installers |
 | `node --test tests/*.test.ts` | Run Node behavior and structure tests |
 | `cargo test` | Run Rust backend tests |
 
-## Technology and releases
+For the full quality gates, package verification, and release checklist, see [Testing and builds](docs/测试与构建.md).
+
+## Stack and release
 
 - [Tauri 2](https://tauri.app/) + Rust: desktop runtime, LAN communication, file transfer, and system integration
-- [Vue 3](https://vuejs.org/) + TypeScript + Pinia: interface, routing, and frontend state
+- [Vue 3](https://vuejs.org/) + TypeScript + Pinia: UI, routing, and frontend state
 - [Tailwind CSS](https://tailwindcss.com/): interface styling
 
 A `v*` tag or manual run of the [Release workflow](.github/workflows/release.yml) builds Windows x64/ARM64 NSIS, macOS Apple Silicon/Intel, and Linux packages, then creates a draft GitHub Release. Use [GitHub Releases](https://github.com/suzeccc/CopyShare/releases/latest) as the source of truth for published versions.
 
+## Project documentation
+
+| Document | Audience | Contents |
+| --- | --- | --- |
+| [User guide](docs/用户指南.md) | Users | First run, device connections, synchronization, file transfers, and settings |
+| [Troubleshooting](docs/故障排查.md) | Users and support | Network, trust, synchronization, file, OCR, and desktop integration issues |
+| [Development guide](docs/开发指南.md) | Developers | Environment, repository layout, call paths, migrations, and conventions |
+| [Testing and builds](docs/测试与构建.md) | Developers and releasers | Quality gates, local builds, bundles, and release checks |
+| [Architecture and extension points](docs/架构与扩展点.md) | Developers | Module boundaries, data flow, persistence recovery, and security invariants |
+| [LAN protocol](docs/局域网协议.md) | Developers | Discovery, trust, clipboard, file transfer, and resume protocol |
+
 ## License
 
-CopyShare is available under the [MIT License](LICENSE).
+CopyShare is released under the [MIT License](LICENSE).

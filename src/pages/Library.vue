@@ -20,7 +20,7 @@ import {
   writeLibraryLayout,
   type LibraryLayout,
 } from "@/lib/libraryLayout";
-import { getLibraryStorageSize } from "@/lib/tauri";
+import { convertLocalFileSrc, getLibraryStorageSize, getLibraryVideoPreviewPath, openMediaPreviewWindow } from "@/lib/tauri";
 import { useLibraryStore } from "@/stores/library";
 import { useToastStore } from "@/stores/toasts";
 import type {
@@ -52,12 +52,12 @@ const views: Array<{ value: LibraryView; label: string }> = [
 const activeHeader = computed(() => ({
   snippets: {
     title: "常用片段",
-    description: "快速保存和复用高频文本内容。",
+    description: "快速保存和复用高频文本内容",
     icon: MessageSquareText,
   },
   all: {
     title: "收藏夹",
-    description: "长期保存常用内容，不受剪贴板历史清理影响。",
+    description: "长期保存常用内容，不受剪贴板历史清理影响",
     icon: Bookmarks,
   },
 })[activeView.value]);
@@ -161,6 +161,20 @@ async function copyItem(item: LibraryItem) {
     toastStore.success("已复制");
   } catch (error) {
     toastStore.error(`复制失败：${String(error)}`);
+  }
+}
+
+async function previewVideo(item: LibraryItem, assetIndex: number) {
+  try {
+    const path = await getLibraryVideoPreviewPath(item.id, assetIndex);
+    await openMediaPreviewWindow({
+      kind: "video",
+      historyId: "",
+      title: item.assets[assetIndex].fileName,
+      src: convertLocalFileSrc(path),
+    });
+  } catch (error) {
+    toastStore.error(`无法预览视频：${String(error)}`);
   }
 }
 
@@ -363,7 +377,7 @@ onUnmounted(() => libraryStore.disposeSubscription());
       data-library-list
       :data-library-layout="libraryLayout"
       :class="libraryLayout === 'grid'
-        ? 'grid gap-3 md:grid-cols-2 2xl:grid-cols-3'
+        ? 'grid items-stretch grid-cols-[repeat(auto-fill,minmax(min(100%,280px),1fr))] gap-2'
         : 'grid gap-2'"
     >
       <LibraryCard
@@ -378,6 +392,7 @@ onUnmounted(() => libraryStore.disposeSubscription());
         @dragover.prevent
         @drop.prevent="dropPinnedItem(item.id)"
         @copy="copyItem"
+        @preview-video="previewVideo"
         @pin="togglePin"
         @edit="openMetadataEditor"
         @convert-snippet="convertSnippet"
@@ -398,7 +413,7 @@ onUnmounted(() => libraryStore.disposeSubscription());
         <div>
           <p class="font-bold text-white">{{ loading ? "正在加载收藏夹" : "这里还没有匹配的内容" }}</p>
           <p class="mt-1 text-[12px] text-[color:var(--muted-text)]">
-            {{ items.length ? "调整搜索或筛选条件。" : "从剪贴板历史收藏内容，或新建一个文本片段。" }}
+        {{ items.length ? "调整搜索或筛选条件" : "从剪贴板历史收藏内容，或新建一个文本片段" }}
           </p>
         </div>
       </div>

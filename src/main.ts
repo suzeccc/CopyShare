@@ -5,6 +5,8 @@ import App from "./App.vue";
 import { initializeI18n, setUiLanguage } from "./i18n";
 import { getConfig, onAppEvent } from "./lib/tauri";
 import router from "./router";
+import { useConfigStore } from "./stores/config";
+import type { UiLanguage } from "./types/config";
 import "./style.css";
 
 async function bootstrap() {
@@ -15,12 +17,18 @@ async function bootstrap() {
   initializeI18n(initialConfig?.uiLanguage ?? "system");
   if (isTauriRuntime) {
     await onAppEvent("config-updated", (config) => {
-      const nextConfig = config as { uiLanguage?: "system" | "zh-CN" | "en-US" };
+      const nextConfig = config as { uiLanguage?: UiLanguage };
       setUiLanguage(nextConfig.uiLanguage ?? "system");
     }).catch(() => undefined);
   }
 
-  createApp(App).use(createPinia()).use(router).mount("#app");
+  const pinia = createPinia();
+  if (initialConfig) {
+    useConfigStore(pinia).config = initialConfig;
+  }
+  const app = createApp(App).use(pinia).use(router);
+  await router.isReady();
+  app.mount("#app");
 }
 
 void bootstrap();

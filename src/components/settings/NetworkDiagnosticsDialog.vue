@@ -14,6 +14,10 @@ import type {
   DiagnosticStatus,
   NetworkDiagnosticReport,
 } from "@/types/networkDiagnostics";
+import {
+  isNetworkDiagnosticInformational,
+  isOperationalNetworkDiagnostic,
+} from "@/types/networkDiagnostics";
 
 const props = defineProps<{
   open: boolean;
@@ -46,10 +50,20 @@ const summaryGroups = computed(() => {
   if (!props.report) return [];
 
   const definitions = [
-    { label: "文件传输", ids: ["sync-listener", "firewall-sync"] },
-    { label: "自动发现设备", ids: ["discovery-listener", "firewall-discovery"] },
-    { label: "手机连接", ids: ["mobile-listener", "firewall-mobile"] },
-    { label: "Windows 网络", ids: ["windows-network-profile", "windows-firewall-profile"] },
+    { label: "文件传输", ids: ["sync-listener"], informational: false },
+    { label: "自动发现设备", ids: ["discovery-listener"], informational: false },
+    { label: "手机连接", ids: ["mobile-listener"], informational: false },
+    {
+      label: "Windows 网络与防火墙",
+      ids: [
+        "windows-network-profile",
+        "windows-firewall-profile",
+        "firewall-sync",
+        "firewall-discovery",
+        "firewall-mobile",
+      ],
+      informational: true,
+    },
   ];
 
   return definitions
@@ -65,7 +79,9 @@ const summaryGroups = computed(() => {
 });
 
 const actionableChecks = computed(() =>
-  props.report?.checks.filter((item) => item.status !== "pass") ?? [],
+  props.report?.checks.filter(
+    (item) => isOperationalNetworkDiagnostic(item.id) && item.status !== "pass",
+  ) ?? [],
 );
 
 const beginnerGuidance = computed(() => {
@@ -79,11 +95,15 @@ const beginnerGuidance = computed(() => {
 });
 
 const publicNetworkNeedsAction = computed(() =>
-  actionableChecks.value.some((item) => item.id === "windows-network-profile"),
+  actionableChecks.value.length > 0
+  && props.report?.checks.some(
+    (item) => item.id === "windows-network-profile" && item.status !== "pass",
+  ),
 );
 
 const firewallNeedsRepair = computed(() => {
   if (!props.report?.repairSupported) return false;
+  if (!actionableChecks.value.some((item) => item.status === "error")) return false;
   const firewallRuleIds = new Set(["firewall-sync", "firewall-discovery", "firewall-mobile"]);
   return props.report.checks.some(
     (item) => firewallRuleIds.has(item.id) && (item.status === "error" || item.status === "unknown"),
@@ -94,36 +114,31 @@ const overallState = computed(() => {
   if (actionableChecks.value.some((item) => item.status === "error")) {
     return {
       title: "部分连接功能可能无法使用",
-      detail: "按下面的提示处理后，再重新检测一次。",
+      detail: "按下面的提示处理后，再重新检测一次",
       classes: "border-red-400/25 bg-red-400/8 text-red-100",
     };
   }
   if (actionableChecks.value.length > 0) {
     return {
       title: "网络可以使用，但有设置需要确认",
-      detail: "当前同步服务正常，完成下面的设置可以提高连接成功率。",
+      detail: "当前同步服务正常，完成下面的设置可以提高连接成功率",
       classes: "border-amber-400/25 bg-amber-400/8 text-amber-100",
     };
   }
   return {
     title: "网络连接正常",
-    detail: "其他设备可以发现并连接这台电脑。",
+    detail: "其他设备可以发现并连接这台电脑",
     classes: "border-emerald-400/25 bg-emerald-400/8 text-emerald-100",
   };
 });
 
 function beginnerRecommendation(id: string, fallback: string | null) {
   return {
-    "local-address": "确认电脑已连接家庭或办公 Wi-Fi/网线，并暂时关闭冲突的 VPN。",
-    "sync-listener": "启动同步；如果仍然失败，请在基础设置中更换监听端口。",
-    "discovery-listener": "重新启动同步；仍无法发现时，可在设备页输入对方地址连接。",
-    "mobile-listener": "关闭占用手机连接服务的程序，然后重新检测。",
-    "windows-network-profile": "确认当前网络可信后，在 Windows 中把网络类型改为“专用”。",
-    "windows-firewall-profile": "建议开启 Windows 防火墙，再让 CopyShare 添加所需规则。",
-    "firewall-sync": "点击“修复防火墙”，并允许管理员授权。",
-    "firewall-discovery": "点击“修复防火墙”，并允许管理员授权。",
-    "firewall-mobile": "点击“修复防火墙”，并允许管理员授权。",
-  }[id] ?? fallback ?? "完成设置后重新检测。";
+    "local-address": "确认电脑已连接家庭或办公 Wi-Fi/网线，并暂时关闭冲突的 VPN",
+    "sync-listener": "启动同步；如果仍然失败，请在基础设置中更换监听端口",
+    "discovery-listener": "重新启动同步；仍无法发现时，可在设备页输入对方地址连接",
+    "mobile-listener": "关闭占用手机连接服务的程序，然后重新检测",
+  }[id] ?? fallback ?? "完成设置后重新检测";
 }
 
 function diagnosticStatusLabel(status: DiagnosticStatus) {
@@ -247,9 +262,12 @@ watch(
                 :class="index > 0 ? 'border-t border-[color:var(--main-line-soft)]' : ''"
               >
                 <span class="text-[13px] font-medium text-slate-100">{{ group.label }}</span>
-                <span class="flex items-center gap-1.5 text-[12px] font-bold" :class="diagnosticStatusTextClasses(group.status)">
+                <span
+                  class="flex items-center gap-1.5 text-[12px] font-bold"
+                  :class="group.informational ? 'text-slate-400' : diagnosticStatusTextClasses(group.status)"
+                >
                   <span class="h-1.5 w-1.5 rounded-full bg-current" />
-                  {{ group.status === "pass" ? "正常" : group.status === "error" ? "需要处理" : "需要设置" }}
+                  {{ group.informational ? "仅供参考" : group.status === "pass" ? "正常" : group.status === "error" ? "需要处理" : "需要确认" }}
                 </span>
               </div>
             </section>
@@ -302,14 +320,16 @@ watch(
                     <span class="text-[14px] font-bold text-white">{{ item.title }}</span>
                     <span
                       class="rounded-full border px-2 py-0.5 text-[11px] font-bold"
-                      :class="diagnosticStatusClasses(item.status)"
+                      :class="isNetworkDiagnosticInformational(item.id)
+                        ? 'border-slate-500/40 bg-slate-500/10 text-slate-300'
+                        : diagnosticStatusClasses(item.status)"
                     >
-                      {{ diagnosticStatusLabel(item.status) }}
+                      {{ isNetworkDiagnosticInformational(item.id) ? "参考" : diagnosticStatusLabel(item.status) }}
                     </span>
                   </div>
                   <span class="text-[12px] leading-5 text-[color:var(--muted-text)]">{{ item.detail }}</span>
                   <span
-                    v-if="item.recommendation"
+                    v-if="item.recommendation && !isNetworkDiagnosticInformational(item.id)"
                     class="text-[12px] leading-5"
                     :class="item.status === 'error' ? 'text-red-200' : 'text-amber-100/90'"
                   >

@@ -148,14 +148,27 @@ impl Default for CloseAction {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum StartupWindowMode {
+    #[default]
+    Floating,
+    Main,
+    Ball,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum UiLanguage {
     #[serde(rename = "system")]
     System,
     #[serde(rename = "zh-CN")]
     ZhCn,
+    #[serde(rename = "zh-TW")]
+    ZhTw,
     #[serde(rename = "en-US")]
     EnUs,
+    #[serde(rename = "ja-JP")]
+    JaJp,
 }
 
 impl Default for UiLanguage {
@@ -174,6 +187,25 @@ pub enum TranslationEngine {
 impl Default for TranslationEngine {
     fn default() -> Self {
         Self::Google
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum SyncDirection {
+    #[default]
+    Bidirectional,
+    SendOnly,
+    ReceiveOnly,
+}
+
+impl SyncDirection {
+    pub fn allows_send(self) -> bool {
+        matches!(self, Self::Bidirectional | Self::SendOnly)
+    }
+
+    pub fn allows_receive(self) -> bool {
+        matches!(self, Self::Bidirectional | Self::ReceiveOnly)
     }
 }
 
@@ -232,6 +264,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub config_version: u16,
     #[serde(default)]
+    pub onboarding_completed: bool,
+    #[serde(default)]
     pub ui_language: UiLanguage,
     pub device_name: String,
     #[serde(default)]
@@ -240,6 +274,8 @@ pub struct AppConfig {
     pub theme: AppTheme,
     #[serde(default)]
     pub close_action: CloseAction,
+    #[serde(default)]
+    pub startup_window_mode: StartupWindowMode,
     pub port: u16,
     pub auto_start: bool,
     pub auto_sync: bool,
@@ -268,6 +304,8 @@ pub struct AppConfig {
     pub sync_text: bool,
     pub sync_image: bool,
     pub sync_files: bool,
+    #[serde(default)]
+    pub sync_direction: SyncDirection,
     #[serde(default = "default_file_size_limit_mib")]
     pub max_send_file_size_mib: u32,
     #[serde(default = "default_file_size_limit_mib")]
@@ -313,12 +351,14 @@ fn default_true() -> bool {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            config_version: 10,
+            config_version: 12,
+            onboarding_completed: false,
             ui_language: UiLanguage::System,
             device_name: "CopyShare".to_string(),
             device_id: new_device_id(),
             theme: AppTheme::Win11Dark,
             close_action: CloseAction::Ask,
+            startup_window_mode: StartupWindowMode::Floating,
             port: 8765,
             auto_start: false,
             auto_sync: true,
@@ -337,6 +377,7 @@ impl Default for AppConfig {
             sync_text: true,
             sync_image: true,
             sync_files: true,
+            sync_direction: SyncDirection::Bidirectional,
             max_send_file_size_mib: default_file_size_limit_mib(),
             max_receive_file_size_mib: default_file_size_limit_mib(),
             deduplicate_sync_content: true,
@@ -422,6 +463,10 @@ pub struct HistoryItem {
     pub sync_status: SyncStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file_transfer_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_transfer_file_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clipboard_batch_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file_transfer_status: Option<FileTransferStatus>,
     #[serde(default)]
@@ -512,6 +557,8 @@ pub struct ClipboardTextItem {
     pub text: String,
     #[serde(default)]
     pub source_device: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -1,0 +1,86 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { waitForWindowSize } from "../src/lib/windowMode.ts";
+import { WINDOW_MODE_ENTER_MS, WINDOW_MODE_EXIT_MS } from "../src/lib/windowTransition.ts";
+
+const shell = readFileSync("src/components/layout/AppShell.vue", "utf8").replace(/\r\n/g, "\n");
+const main = readFileSync("src/main.ts", "utf8");
+const app = readFileSync("src/App.vue", "utf8").replace(/\r\n/g, "\n");
+const bridge = readFileSync("src/lib/tauri.ts", "utf8");
+assert.ok(main.indexOf("await router.isReady()") < main.indexOf('app.mount("#app")'));
+assert.match(shell, /onMounted\(async \(\) => \{\s*windowModeChange = initializeStartupWindow\(\);/);
+assert.match(bridge, /const bounds = saved\?\.size \?\? FLOATING_WINDOW_BOUNDS/);
+assert.match(bridge, /const bounds = saved\?\.size \?\? MAIN_WINDOW_BOUNDS/);
+assert.match(bridge, /await waitForWindowSize\(bounds\)/);
+assert.match(shell, /v-show="!isResizingWindow && !windowModeFailed"/);
+
+// Execute the real coordinator: route/shortcut requests must wait for startup and each other.
+const body = shell.match(/function switchWindowMode\([\s\S]*?\) \{([\s\S]*?)\n\}\n\nasync function toggleQuickPanelFromShortcut/);
+assert.ok(body);
+const factory = new Function("windowMode", "isSwitchingWindowMode", "isResizingWindow", "panelTransitionPhase", "nextTick", "enterFloatingWindow", "restoreMainWindow", "toastStore", "console", "startup", "windowModeFailed", "window", "WINDOW_MODE_EXIT_MS", "WINDOW_MODE_ENTER_MS", `
+  let windowModeChange = startup;
+  return function(nextMode, resizeWindow, pointer) { ${body[1]} };
+`);
+let finishStartup!: () => void;
+const startup = new Promise<void>((resolve) => { finishStartup = resolve; });
+const mode = { value: "floating" };
+const switching = { value: false };
+const resizing = { value: false };
+const phase = { value: null };
+const calls: string[] = [];
+const toasts: string[] = [];
+const failed = { value: false };
+let failRollback = false;
+const rollback = async (mode: string) => { calls.push(`rollback-${mode}`); if (failRollback) throw new Error("rollback failed"); };
+const switchMode = factory(mode, switching, resizing, phase, async () => {}, () => rollback("floating"), () => rollback("main"), { error(message: string) { toasts.push(message); } }, { error() {} }, startup, failed, { setTimeout: (callback: () => void) => queueMicrotask(callback) }, WINDOW_MODE_EXIT_MS, WINDOW_MODE_ENTER_MS);
+let finishMain!: () => void;
+const mainPending = new Promise<void>((resolve) => { finishMain = resolve; });
+const first = switchMode("main", async () => { calls.push("main"); await mainPending; });
+const second = switchMode("floating", async () => { calls.push("floating"); });
+await new Promise((resolve) => setImmediate(resolve));
+assert.deepEqual(calls, [], "navigation must not overtake startup resize");
+finishStartup();
+await new Promise((resolve) => setImmediate(resolve));
+assert.deepEqual(calls, ["main"]);
+assert.equal(switching.value, true);
+assert.equal(resizing.value, true);
+assert.equal(mode.value, "floating", "UI must wait for confirmed viewport");
+finishMain();
+await Promise.all([first, second]);
+assert.deepEqual(calls, ["main", "floating"], "queued request must not be discarded");
+assert.equal(mode.value, "floating");
+assert.equal(switching.value, false);
+assert.equal(resizing.value, false);
+await switchMode("main", async () => { throw new Error("partial native resize failure"); });
+assert.equal(mode.value, "floating");
+assert.equal(calls.at(-1), "rollback-floating");
+assert.equal(toasts.length, 1);
+await switchMode("main", async () => { calls.push("retry-main"); });
+assert.equal(mode.value, "main", "failed request must not poison the queue");
+failRollback = true;
+await switchMode("floating", async () => { throw new Error("resize failed"); });
+assert.equal(failed.value, true, "failed rollback must hide incompatible UI and offer retry");
+await switchMode("main", async () => {});
+assert.equal(failed.value, false, "retry must resize even when requested mode equals previous mode");
+
+const viewport = { innerWidth: 340, innerHeight: 360 };
+let ready = false;
+const resized = waitForWindowSize({ width: 1120, height: 720 }, viewport).then(() => { ready = true; });
+await new Promise((resolve) => setTimeout(resolve, 20));
+assert.equal(ready, false, "queued native command is not a viewport acknowledgement");
+viewport.innerWidth = 1120;
+viewport.innerHeight = 720;
+await resized;
+await assert.rejects(waitForWindowSize({ width: 340, height: 360 }, viewport, 0), /requested size/);
+
+// The real startup flow must release its overlay even if scanning/shortcuts/listeners stall.
+const startupBody = app.match(/onMounted\(async \(\) => \{([\s\S]*?)\n\}\);/);
+assert.ok(startupBody);
+const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+const runStartup = new AsyncFunction("isMediaPreviewRoute", "startupVisible", "statusStore", "devicesStore", "configStore", "historyStore", "activityLogStore", "shortcutStore", "toastStore", "onAppEvent", "handlePageNavigation", "updater", "startupUpdate", "finishStartupOverlay", "console", "window", "restoreMainWindow", "showMainWindow", "startupAnimationVisible", "nextTick", `let navigateUnlisten; ${startupBody[1].replace("onAppEvent<string>", "onAppEvent")}`);
+const never = () => new Promise(() => {});
+const store = { refresh: async () => {}, subscribe: never };
+let dismissed = false;
+const animationVisible = { value: false };
+await runStartup({ value: false }, { value: true }, { ...store, status: {} }, { ...store, refresh: never }, { ...store, config: {} }, { ...store, items: [] }, { ...store, initialize() {} }, { apply: never }, { error() {} }, never, () => {}, { checkForUpdate: async () => {}, phase: "idle" }, {}, async () => { dismissed = true; }, { error() {} }, { __TAURI_INTERNALS__: {} }, async () => {}, async () => { assert.equal(animationVisible.value, false, "animation must not play before the native window is shown"); }, animationVisible, async () => { assert.equal(animationVisible.value, true); });
+assert.equal(dismissed, true);

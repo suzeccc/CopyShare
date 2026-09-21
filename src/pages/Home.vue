@@ -11,12 +11,21 @@ import { RouterLink } from "vue-router";
 import SyncSwitch from "@/components/status/SyncSwitch.vue";
 import Button from "@/components/ui/Button.vue";
 import Card from "@/components/ui/Card.vue";
+import Switch from "@/components/ui/Switch.vue";
 import { formatTime } from "@/lib/format";
 import { useConfigStore } from "@/stores/config";
 import { useStatusStore } from "@/stores/status";
+import { useToastStore } from "@/stores/toasts";
 
 const statusStore = useStatusStore();
 const configStore = useConfigStore();
+const toastStore = useToastStore();
+
+async function saveSyncContent(key: "syncText" | "syncImage" | "syncFiles", enabled: boolean) {
+  if (configStore.saving || configStore.config[key] === enabled) return;
+  await configStore.save({ ...configStore.config, [key]: enabled });
+  if (configStore.error) toastStore.error("保存失败");
+}
 
 const address = computed(() => {
   const ip = statusStore.status.localIp;
@@ -26,22 +35,22 @@ const address = computed(() => {
 const syncContentItems = computed(() => [
   {
     label: "文本剪贴板",
+    key: "syncText" as const,
     hint: "复制文本后自动广播给已信任设备",
-    state: configStore.config.syncText ? "已启用" : "已关闭",
     enabled: configStore.config.syncText,
     icon: FileText,
   },
   {
     label: "图片",
+    key: "syncImage" as const,
     hint: "支持截图和图片复制",
-    state: configStore.config.syncImage ? "已启用" : "已关闭",
     enabled: configStore.config.syncImage,
     icon: ImageIcon,
   },
   {
     label: "文件传输",
+    key: "syncFiles" as const,
     hint: "复制文件后同步到对方历史，点击文件历史后开始下载",
-    state: configStore.config.syncFiles ? "已启用" : "已关闭",
     enabled: configStore.config.syncFiles,
     icon: Folder,
   },
@@ -58,7 +67,7 @@ const syncContentItems = computed(() => [
               <p class="text-xs font-medium text-[color:var(--accent-text)]">局域网剪贴板同步</p>
               <h2 class="mt-2 text-2xl font-semibold text-white">CopyShare</h2>
               <p class="mt-3 max-w-2xl text-sm leading-6 text-slate-400">
-                监听本机文本剪贴板，通过 WebSocket 同步给已信任的局域网设备。
+                监听本机文本剪贴板，通过 WebSocket 同步给已信任的局域网设备
               </p>
             </div>
             <SyncSwitch
@@ -71,15 +80,15 @@ const syncContentItems = computed(() => [
 
           <div data-home-stats-grid class="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-3">
             <div class="rounded-lg border border-[color:var(--main-line-soft)] bg-[color:var(--stat-bg)] px-4 py-3">
-              <p class="text-xs text-slate-500">同步状态</p>
+              <p class="text-xs text-slate-400">同步状态</p>
               <p class="mt-1.5 text-xl font-semibold text-white">{{ statusStore.statusLabel }}</p>
             </div>
             <div class="rounded-lg border border-[color:var(--main-line-soft)] bg-[color:var(--stat-bg)] px-4 py-3">
-              <p class="text-xs text-slate-500">已连接设备</p>
+              <p class="text-xs text-slate-400">已连接设备</p>
               <p class="mt-1.5 text-xl font-semibold text-white">{{ statusStore.status.connectedCount }} 台</p>
             </div>
             <div class="rounded-lg border border-[color:var(--main-line-soft)] bg-[color:var(--stat-bg)] px-4 py-3">
-              <p class="text-xs text-slate-500">最近同步</p>
+              <p class="text-xs text-slate-400">最近同步</p>
               <p class="mt-1.5 truncate text-xl font-semibold text-white">{{ formatTime(statusStore.status.lastSyncAt) }}</p>
             </div>
           </div>
@@ -170,7 +179,7 @@ const syncContentItems = computed(() => [
           <div>
             <p class="text-sm font-semibold text-white">同步内容</p>
             <p class="mt-2 text-sm leading-6 text-slate-400">
-              当前版本明确展示可同步内容，避免只在设置里隐藏开关。
+              按需开启文本、图片和文件同步
             </p>
           </div>
           <RouterLink to="/settings">
@@ -191,15 +200,16 @@ const syncContentItems = computed(() => [
               <div class="grid h-9 w-9 place-items-center rounded-md border border-[color:var(--accent-line)] bg-[color:var(--accent-soft)]">
                 <component :is="item.icon" class="h-4 w-4 text-[color:var(--accent-text)]" />
               </div>
-              <span
-                class="rounded-md px-2 py-1 text-xs font-medium"
-                :class="item.enabled ? 'bg-emerald-500/[0.14] text-emerald-200' : 'bg-[color:var(--field-bg)] text-slate-400'"
-              >
-                {{ item.state }}
-              </span>
+              <Switch
+                control-only
+                :model-value="item.enabled"
+                :label="`同步${item.label}`"
+                :disabled="configStore.saving"
+                @update:model-value="saveSyncContent(item.key, $event)"
+              />
             </div>
             <p class="text-sm font-semibold text-white">{{ item.label }}</p>
-            <p class="mt-2 text-xs leading-5 text-slate-500">{{ item.hint }}</p>
+            <p class="mt-2 text-xs leading-5 text-slate-400">{{ item.hint }}</p>
           </article>
         </div>
       </Card>

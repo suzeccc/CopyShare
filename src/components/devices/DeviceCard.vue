@@ -35,7 +35,7 @@ const status = computed(() => {
       if (props.device.status === "online") {
         return {
           label: "待连接",
-          detail: "已在局域网发现此设备。点击连接后，再按现有流程确认是否信任。",
+          detail: "已在局域网发现此设备。点击连接后，再按现有流程确认是否信任",
           badgeClass: "border-[color:var(--accent-line)] bg-[color:var(--accent-soft)] text-[color:var(--accent-text)]",
           dotClass: "bg-[color:var(--theme-accent)] shadow-[0_0_14px_var(--accent-glow)]",
           cardClass: "border-[color:var(--accent-line)] bg-[color:var(--panel-bg-soft)]",
@@ -44,7 +44,7 @@ const status = computed(() => {
 
       return {
         label: "已离线",
-        detail: "设备已断开连接，等待重新连接。",
+        detail: "设备已断开连接，等待重新连接",
         badgeClass: "border-white/35 bg-white/[0.08] text-white",
         dotClass: "bg-white shadow-[0_0_12px_rgba(255,255,255,0.45)]",
         cardClass: "border-[color:var(--main-line-soft)] bg-[color:var(--panel-bg-soft)]",
@@ -54,7 +54,7 @@ const status = computed(() => {
     if (props.device.trusted && props.device.remoteTrusted) {
       return {
         label: "已连接",
-        detail: "连接正常，剪贴板状态会实时更新。",
+        detail: "连接正常，剪贴板状态会实时更新",
         badgeClass: "border-white/15 bg-white/[0.07] text-slate-100",
         dotClass: "bg-[#8fd6a8] shadow-[0_0_10px_rgba(143,214,168,0.34)]",
         cardClass: "border-[color:var(--main-line-soft)] bg-[color:var(--panel-bg-soft)]",
@@ -64,7 +64,7 @@ const status = computed(() => {
     if (props.device.trusted) {
       return {
         label: "等待对方信任",
-        detail: "本机已信任此设备，等待对方也信任本机后开始双向同步。",
+        detail: "本机已信任此设备，等待对方也信任本机后开始双向同步",
         badgeClass: "border-amber-300/35 bg-amber-400/10 text-amber-100",
         dotClass: "bg-amber-300 shadow-[0_0_14px_rgba(252,211,77,0.45)]",
         cardClass: "border-amber-300/25 bg-[color:var(--panel-bg-soft)]",
@@ -74,7 +74,7 @@ const status = computed(() => {
     if (props.device.remoteTrusted) {
       return {
         label: "对方已信任，等待本机确认",
-        detail: "对方已经信任本机，点击信任设备后即可双向同步。",
+        detail: "对方已经信任本机，点击信任设备后即可双向同步",
         badgeClass: "border-[color:var(--accent-line)] bg-[color:var(--accent-soft)] text-[color:var(--accent-text)]",
         dotClass: "bg-[color:var(--theme-accent)] shadow-[0_0_14px_var(--accent-glow)]",
         cardClass: "border-[color:var(--accent-line)] bg-[color:var(--panel-bg-soft)]",
@@ -83,7 +83,7 @@ const status = computed(() => {
 
     return {
       label: "等待确认",
-      detail: "连接已建立，等待同步权限确认。",
+      detail: "连接已建立，等待同步权限确认",
       badgeClass: "border-[color:var(--accent-line)] bg-[color:var(--accent-soft)] text-[color:var(--accent-text)]",
       dotClass: "bg-[color:var(--theme-accent)] shadow-[0_0_14px_var(--accent-glow)]",
       cardClass: "border-[color:var(--accent-line)] bg-[color:var(--panel-bg-soft)]",
@@ -93,7 +93,7 @@ const status = computed(() => {
   if (props.mode === "connected") {
     return {
       label: "已连接",
-      detail: "双方设备已互相信任，剪贴板状态会实时更新。",
+      detail: "双方设备已互相信任，剪贴板状态会实时更新",
       badgeClass: "border-emerald-400/45 bg-emerald-400/10 text-emerald-100",
       dotClass: "bg-emerald-300 shadow-[0_0_14px_rgba(110,231,183,0.65)]",
       cardClass: "border-[color:var(--main-line-soft)] bg-[#2a2a2a] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]",
@@ -102,7 +102,7 @@ const status = computed(() => {
 
   return {
     label: "等待确认",
-    detail: "连接已建立。要双向同步，两台电脑都需要信任对方。",
+    detail: "连接已建立。要双向同步，两台电脑都需要信任对方",
     badgeClass: "border-[color:var(--accent-line)] bg-[color:var(--accent-soft)] text-[color:var(--accent-text)]",
     dotClass: "bg-[color:var(--theme-accent)] shadow-[0_0_14px_var(--accent-glow)]",
     cardClass: "border-[color:var(--accent-line)] bg-[color:var(--panel-bg-soft)]",

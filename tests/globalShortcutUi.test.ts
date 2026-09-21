@@ -30,8 +30,8 @@ for (const source of [models, configType, configStore]) {
     assert.match(source, new RegExp(`${field}Shortcut|${field.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`)}_shortcut`));
   }
 }
-assert.match(config, /CURRENT_CONFIG_VERSION:\s*u16\s*=\s*10/);
-assert.match(configStore, /configVersion:\s*10/);
+assert.match(config, /CURRENT_CONFIG_VERSION:\s*u16\s*=\s*12/);
+assert.match(configStore, /configVersion:\s*12/);
 
 assert.match(shortcutStore, /GlobalShortcutController/);
 assert.match(shortcutStore, /global-shortcut-triggered/);

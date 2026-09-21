@@ -8,12 +8,15 @@ import Search from "lucide-vue-next/dist/esm/icons/search.js";
 import Star from "lucide-vue-next/dist/esm/icons/star.js";
 import Video from "lucide-vue-next/dist/esm/icons/video.js";
 import X from "lucide-vue-next/dist/esm/icons/x.js";
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
 
 import Button from "@/components/ui/Button.vue";
 import Card from "@/components/ui/Card.vue";
 import CopyTextButton from "@/components/ui/CopyTextButton.vue";
 import ClipboardFileDownloadStatus from "@/components/history/ClipboardFileDownloadStatus.vue";
+import DirectImagePreview from "@/components/history/DirectImagePreview.vue";
+import MediaPreviewToolbar from "@/components/history/MediaPreviewToolbar.vue";
+import { adjacentMediaPreviewItem, mediaPreviewItems, nextVideoPlaybackRate } from "@/lib/mediaPreviewControls";
 import HistoryFileThumb from "@/components/history/HistoryFileThumb.vue";
 import HistoryImageThumb from "@/components/history/HistoryImageThumb.vue";
 import {
@@ -40,7 +43,6 @@ import {
   openExternalUrl,
   openHistoryFileLocation,
   openTransferFolder,
-  resumeFileTransfer,
 } from "@/lib/tauri";
 import { useHistoryStore } from "@/stores/history";
 import { useLibraryStore } from "@/stores/library";
@@ -55,29 +57,18 @@ const activeClipboardCategory = ref<ClipboardCategory>(CLIPBOARD_CATEGORIES[0]);
 const clipboardCategories = CLIPBOARD_CATEGORIES;
 const expandedClipboardItemIds = ref<Set<string>>(new Set());
 const previewImageItem = ref<ClipboardPreviewItem | null>(null);
-const previewImageScale = ref(1);
-const previewImageOffset = {
-  x: ref(0),
-  y: ref(0),
-};
-const previewImageDrag = {
-  active: ref(false),
-  pointerId: ref<number | null>(null),
-  startClientX: ref(0),
-  startClientY: ref(0),
-  startOffsetX: ref(0),
-  startOffsetY: ref(0),
-};
 const previewVideoItem = ref<ClipboardPreviewItem | null>(null);
 const previewVideoSrc = ref("");
 const previewVideoError = ref("");
+const previewVideoRef = ref<HTMLVideoElement | null>(null);
+const previewVideoDialog = ref<HTMLElement | null>(null);
+let videoPreviousFocus: HTMLElement | null = null;
+const playbackRate = ref(1);
+const videoNavigating = ref(false);
+let videoPreviewRequest = 0;
 const activeClipboardCategoryIndex = computed(() =>
   Math.max(0, clipboardCategories.indexOf(activeClipboardCategory.value)),
 );
-const previewImageTransform = computed(() => ({
-  transform: `translate(${previewImageOffset.x.value}px, ${previewImageOffset.y.value}px) scale(${previewImageScale.value})`,
-}));
-
 const allClipboardItems = computed(() =>
   getRecentClipboardItems(historyStore.items, historyStore.items.length),
 );
@@ -90,6 +81,11 @@ const filteredRecentSyncItems = computed(() =>
 const filteredAllClipboardItems = computed(() =>
   filterClipboardItems(allClipboardItems.value, activeClipboardCategory.value, clipboardSearch.value),
 );
+const videoGallery = computed(() => mediaPreviewItems(
+  showClipboardHistoryModal.value ? filteredAllClipboardItems.value : filteredRecentSyncItems.value, "video",
+));
+const previousVideo = computed(() => adjacentMediaPreviewItem(videoGallery.value, previewVideoItem.value?.id ?? "", -1));
+const nextVideo = computed(() => adjacentMediaPreviewItem(videoGallery.value, previewVideoItem.value?.id ?? "", 1));
 
 function savedLibraryItem(item: ClipboardPreviewItem) {
   return libraryStore.savedItemForHistory(item.id);
@@ -132,6 +128,7 @@ async function toggleHistoryPin(item: ClipboardPreviewItem) {
 }
 
 onMounted(async () => {
+  window.addEventListener("keydown", handleVideoDialogKeydown, true);
   try {
     await Promise.all([
       libraryStore.loaded ? Promise.resolve() : libraryStore.load(),
@@ -142,7 +139,11 @@ onMounted(async () => {
   }
 });
 
-onUnmounted(() => libraryStore.disposeSubscription());
+onUnmounted(() => {
+  window.removeEventListener("keydown", handleVideoDialogKeydown, true);
+  closeClipboardVideoPreview();
+  libraryStore.disposeSubscription();
+});
 
 type SyncStatusPreviewItem = { syncStatus: "synced" | "unsynced" };
 
@@ -174,9 +175,9 @@ function clipboardFileSummary(item: ClipboardPreviewItem) {
 function clipboardFileNameClass(item: ClipboardPreviewItem) {
   return isClipboardFileCardInteractive(
     item,
-    historyStore.fileDownloadActivity(item.fileTransferId),
+    historyStore.fileDownloadActivity(item.fileTransferId, item.fileTransferFileId),
   )
-    ? "cursor-pointer underline-offset-2 transition-colors duration-150 hover:text-[color:var(--accent-text)] hover:underline"
+    ? "cursor-pointer underline underline-offset-2 transition-colors duration-150 hover:text-[color:var(--accent-text)]"
     : "";
 }
 
@@ -194,32 +195,52 @@ function toggleClipboardItemExpanded(item: ClipboardPreviewItem) {
   expandedClipboardItemIds.value = next;
 }
 
-function openClipboardImagePreview(item: ClipboardPreviewItem) {
-  if (item.contentType !== "image") {
-    return;
-  }
-
-  previewImageScale.value = 1;
-  previewImageOffset.x.value = 0;
-  previewImageOffset.y.value = 0;
-  previewImageDrag.active.value = false;
-  previewImageDrag.pointerId.value = null;
-  previewImageItem.value = item;
+function clipboardFileTitle(item: ClipboardPreviewItem) {
+  return {
+    none: "",
+    copy: "复制内容",
+    download: "开始下载",
+    resume: "继续下载",
+    downloading: "文件正在下载",
+    openDownloadFolder: "打开文件位置",
+    openSourceLocation: "打开文件位置",
+    unavailable: "文件下载已失效",
+  }[getClipboardFileCardAction(item, historyStore.fileDownloadActivity(item.fileTransferId, item.fileTransferFileId))];
 }
 
-function closeClipboardImagePreview() {
-  previewImageItem.value = null;
-  previewImageScale.value = 1;
-  previewImageOffset.x.value = 0;
-  previewImageOffset.y.value = 0;
-  previewImageDrag.active.value = false;
-  previewImageDrag.pointerId.value = null;
+function openClipboardImagePreview(item: ClipboardPreviewItem) {
+  if (item.contentType === "image") {
+    previewImageItem.value = item;
+  }
 }
 
 function closeClipboardVideoPreview() {
+  videoPreviewRequest++;
+  previewVideoRef.value?.pause();
+  videoNavigating.value = false;
   previewVideoItem.value = null;
   previewVideoSrc.value = "";
   previewVideoError.value = "";
+  if (videoPreviousFocus?.isConnected) videoPreviousFocus.focus();
+  videoPreviousFocus = null;
+}
+
+function handleVideoDialogKeydown(event: KeyboardEvent) {
+  if (!previewVideoItem.value) return;
+  if (event.key === "Escape") {
+    event.preventDefault();
+    event.stopPropagation();
+    if (document.fullscreenElement) void document.exitFullscreen();
+    else closeClipboardVideoPreview();
+  } else if (event.key === "Tab") {
+    const targets = previewVideoDialog.value?.querySelectorAll<HTMLElement>("button:not(:disabled), video[controls]");
+    if (!targets?.length) return;
+    const boundary = event.shiftKey ? targets[0] : targets[targets.length - 1];
+    if (document.activeElement === boundary || !previewVideoDialog.value?.contains(document.activeElement)) {
+      event.preventDefault();
+      (event.shiftKey ? targets[targets.length - 1] : targets[0]).focus();
+    }
+  }
 }
 
 async function openClipboardVideoFallbackLocation(item: ClipboardPreviewItem) {
@@ -241,15 +262,26 @@ async function openClipboardVideoPreview(item: ClipboardPreviewItem) {
     return;
   }
 
+  const request = ++videoPreviewRequest;
+  if (!previewVideoItem.value && document.activeElement instanceof HTMLElement) {
+    videoPreviousFocus = document.activeElement;
+  }
+  videoNavigating.value = true;
   try {
-    previewVideoError.value = "";
     const filePath = await getHistoryFilePreviewPath(item.id);
+    if (request !== videoPreviewRequest) return;
+    previewVideoRef.value?.pause();
+    previewVideoError.value = "";
+    playbackRate.value = 1;
     previewVideoSrc.value = convertLocalFileSrc(filePath);
     previewVideoItem.value = item;
+    await nextTick();
+    if (request === videoPreviewRequest) previewVideoDialog.value?.querySelector<HTMLButtonElement>("[data-clipboard-video-preview-close]")?.focus();
   } catch (error) {
+    if (request !== videoPreviewRequest) return;
     const action = getClipboardFileCardAction(
       item,
-      historyStore.fileDownloadActivity(item.fileTransferId),
+      historyStore.fileDownloadActivity(item.fileTransferId, item.fileTransferFileId),
     );
     if (action === "download" || action === "resume") {
       await handleClipboardItemClick(item);
@@ -261,7 +293,26 @@ async function openClipboardVideoPreview(item: ClipboardPreviewItem) {
     }
     toastStore.error(`无法预览视频：${String(error)}`);
     await openClipboardVideoFallbackLocation(item);
+  } finally {
+    if (request === videoPreviewRequest) videoNavigating.value = false;
   }
+}
+
+function changeVideo(direction: -1 | 1) {
+  const item = adjacentMediaPreviewItem(videoGallery.value, previewVideoItem.value?.id ?? "", direction);
+  if (item && !videoNavigating.value) void openClipboardVideoPreview(item);
+}
+
+function setPlaybackRate(rate: number) {
+  playbackRate.value = rate;
+  if (previewVideoRef.value) previewVideoRef.value.playbackRate = rate;
+}
+
+function replayVideo() {
+  const video = previewVideoRef.value;
+  if (!video || !Number.isFinite(video.duration)) return;
+  video.currentTime = 0;
+  void video.play().catch(error => toastStore.error(`无法播放此视频：${String(error)}`));
 }
 
 async function handleClipboardVideoPreviewError() {
@@ -269,13 +320,14 @@ async function handleClipboardVideoPreviewError() {
     return;
   }
 
-  previewVideoError.value = "无法播放此视频，可能是文件编码不受当前播放器支持。";
-  toastStore.error("无法播放此视频，已打开文件位置");
+  previewVideoError.value = "无法播放此视频，可能是文件编码不受当前播放器支持";
+  toastStore.error("无法播放此视频");
   await openClipboardVideoFallbackLocation(previewVideoItem.value);
 }
 
 function handleClipboardVideoLoaded() {
   previewVideoError.value = "";
+  setPlaybackRate(playbackRate.value);
 }
 
 async function openClipboardLink(item: ClipboardPreviewItem) {
@@ -291,6 +343,14 @@ async function openClipboardLink(item: ClipboardPreviewItem) {
   }
 }
 
+async function openClipboardFileLocation(item: ClipboardPreviewItem) {
+  try {
+    await openHistoryFileLocation(item.id);
+  } catch (error) {
+    toastStore.error(`打开文件位置失败：${String(error)}`);
+  }
+}
+
 async function handleClipboardItemClick(item: ClipboardPreviewItem) {
   if (item.contentType !== "fileList") {
     return;
@@ -298,18 +358,13 @@ async function handleClipboardItemClick(item: ClipboardPreviewItem) {
 
   const action = getClipboardFileCardAction(
     item,
-    historyStore.fileDownloadActivity(item.fileTransferId),
+    historyStore.fileDownloadActivity(item.fileTransferId, item.fileTransferFileId),
   );
   if (action === "none") {
     return;
   }
   if (action === "openSourceLocation") {
-    try {
-      await openHistoryFileLocation(item.id);
-      toastStore.success("已打开文件位置");
-    } catch (error) {
-      toastStore.error(`打开文件位置失败：${String(error)}`);
-    }
+    await openClipboardFileLocation(item);
     return;
   }
   if (action === "downloading") {
@@ -319,7 +374,6 @@ async function handleClipboardItemClick(item: ClipboardPreviewItem) {
   if (action === "openDownloadFolder") {
     try {
       await openTransferFolder();
-      toastStore.success("已打开文件下载位置");
     } catch (error) {
       toastStore.error(`打开文件下载位置失败：${String(error)}`);
     }
@@ -335,11 +389,9 @@ async function handleClipboardItemClick(item: ClipboardPreviewItem) {
       return;
     }
     try {
-      const task = await resumeFileTransfer(item.fileTransferId);
-      historyStore.updateFileDownloadTask(task);
-      toastStore.success(
-        task.status === "waitingForPeer" ? "已继续等待发送设备上线" : "正在继续下载",
-      );
+      await copyHistoryItem(item.id);
+      historyStore.beginFileDownload(item.fileTransferId, item.fileTransferFileId);
+      toastStore.success("正在继续下载");
     } catch (error) {
       toastStore.error(`继续下载失败：${String(error)}`);
     }
@@ -347,69 +399,27 @@ async function handleClipboardItemClick(item: ClipboardPreviewItem) {
   }
 
   if (action === "download") {
-    historyStore.beginFileDownload(item.fileTransferId);
+    historyStore.beginFileDownload(item.fileTransferId, item.fileTransferFileId);
   }
 
   try {
     const result = await copyHistoryItem(item.id);
     if (result === "downloadStarted") {
-      historyStore.beginFileDownload(item.fileTransferId);
+      historyStore.beginFileDownload(item.fileTransferId, item.fileTransferFileId);
       toastStore.success("开始下载");
     } else if (result === "downloading") {
-      historyStore.beginFileDownload(item.fileTransferId);
+      historyStore.beginFileDownload(item.fileTransferId, item.fileTransferFileId);
       toastStore.info("文件正在下载");
     } else {
       toastStore.success("文件已复制");
     }
   } catch (error) {
-    historyStore.failFileDownload(item.fileTransferId, String(error));
+    historyStore.failFileDownload(
+      item.fileTransferId,
+      item.fileTransferFileId,
+      String(error),
+    );
     toastStore.error("文件下载失败");
-  }
-}
-
-function handleClipboardImagePreviewWheel(event: WheelEvent) {
-  const delta = event.deltaY < 0 ? 0.12 : -0.12;
-  const next = Math.min(3, Math.max(0.35, previewImageScale.value + delta));
-  previewImageScale.value = Number(next.toFixed(2));
-}
-
-function startClipboardImageDrag(event: PointerEvent) {
-  if (event.button !== 0) {
-    return;
-  }
-
-  event.preventDefault();
-  previewImageDrag.active.value = true;
-  previewImageDrag.pointerId.value = event.pointerId;
-  previewImageDrag.startClientX.value = event.clientX;
-  previewImageDrag.startClientY.value = event.clientY;
-  previewImageDrag.startOffsetX.value = previewImageOffset.x.value;
-  previewImageDrag.startOffsetY.value = previewImageOffset.y.value;
-  if (event.currentTarget instanceof HTMLElement) {
-    event.currentTarget.setPointerCapture(event.pointerId);
-  }
-}
-
-function moveClipboardImageDrag(event: PointerEvent) {
-  if (!previewImageDrag.active.value || previewImageDrag.pointerId.value !== event.pointerId) {
-    return;
-  }
-
-  previewImageOffset.x.value =
-    previewImageDrag.startOffsetX.value + event.clientX - previewImageDrag.startClientX.value;
-  previewImageOffset.y.value =
-    previewImageDrag.startOffsetY.value + event.clientY - previewImageDrag.startClientY.value;
-}
-
-function endClipboardImageDrag(event: PointerEvent) {
-  if (previewImageDrag.pointerId.value !== event.pointerId) {
-    return;
-  }
-
-  previewImageDrag.active.value = false;
-  previewImageDrag.pointerId.value = null;
-  if (event.currentTarget instanceof HTMLElement && event.currentTarget.hasPointerCapture(event.pointerId)) {
-    event.currentTarget.releasePointerCapture(event.pointerId);
   }
 }
 
@@ -515,10 +525,10 @@ function clipboardTime(value: string | undefined) {
           v-for="(item, index) in filteredRecentSyncItems"
           :key="item.id"
           data-clipboard-history-row
-          class="clipboard-preview-card group relative min-h-[86px] overflow-hidden rounded-xl border border-[color:var(--clipboard-card-line)] bg-[color:var(--clipboard-card-bg)] px-5 py-2.5 shadow-[var(--clipboard-card-shadow)] transition duration-150 ease-out hover:z-10 hover:scale-[1.01] hover:border-[color:var(--clipboard-card-line-hover)] hover:bg-[color:var(--clipboard-card-bg-hover)] hover:shadow-[var(--clipboard-card-shadow-hover)]"
+          class="clipboard-preview-card group relative min-h-[86px] overflow-hidden rounded-xl border border-[color:var(--clipboard-card-line)] bg-[color:var(--clipboard-card-bg)] px-5 py-2.5 shadow-[var(--clipboard-card-shadow)] transition-colors duration-150 ease-out hover:z-10 hover:border-[color:var(--clipboard-card-line-hover)] hover:bg-[color:var(--clipboard-card-bg-hover)] hover:shadow-[var(--clipboard-card-shadow-hover)]"
           :class="{
-            'cursor-pointer': isClipboardFileCardInteractive(item, historyStore.fileDownloadActivity(item.fileTransferId)),
-            'cursor-wait': isClipboardFileCardInteractive(item, historyStore.fileDownloadActivity(item.fileTransferId)) && historyStore.isFileDownloadActive(item.fileTransferId),
+            'cursor-pointer': isClipboardFileCardInteractive(item, historyStore.fileDownloadActivity(item.fileTransferId, item.fileTransferFileId)),
+            'cursor-wait': isClipboardFileCardInteractive(item, historyStore.fileDownloadActivity(item.fileTransferId, item.fileTransferFileId)) && historyStore.isFileDownloadActive(item.fileTransferId, item.fileTransferFileId),
           }"
           :style="`--clipboard-row-index: ${index}`"
           @click="handleClipboardItemClick(item)"
@@ -543,6 +553,7 @@ function clipboardTime(value: string | undefined) {
                   :class="{ active: libraryStore.isHistoryItemSaved(item.id) }"
                   :disabled="isHistoryFavoriteBusy(item)"
                   :aria-label="libraryStore.isHistoryItemSaved(item.id) ? '移出收藏夹' : '收藏'"
+                  :title="libraryStore.isHistoryItemSaved(item.id) ? '移出收藏夹' : '收藏'"
                   @click.stop="toggleHistoryFavorite(item)"
                 >
                   <Star
@@ -557,6 +568,7 @@ function clipboardTime(value: string | undefined) {
                   :class="{ active: item.isPinned }"
                   :disabled="historyStore.isPinning(item.id)"
                   :aria-label="item.isPinned ? '取消置顶' : '置顶历史记录'"
+                  :title="item.isPinned ? '取消置顶' : '置顶历史记录'"
                   @click.stop="toggleHistoryPin(item)"
                 >
                   <Pin
@@ -571,6 +583,7 @@ function clipboardTime(value: string | undefined) {
                   :content-type="item.contentType"
                   :history-item-id="item.id"
                   :file-transfer-id="item.fileTransferId"
+                  :file-transfer-file-id="item.fileTransferFileId"
                   :file-transfer-status="item.fileTransferStatus"
                   icon-only
                   label="复制内容"
@@ -581,21 +594,21 @@ function clipboardTime(value: string | undefined) {
             <div v-if="item.contentType === 'image'" class="mt-2 flex min-w-0 items-center gap-3">
               <button
                 data-clipboard-image-preview-button
-                class="rounded-lg outline-none transition hover:scale-[1.03] focus-visible:ring-2 focus-visible:ring-[#60cdff]/60"
+                class="rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-[#60cdff]/60"
                 type="button"
-                aria-label="鏀惧ぇ棰勮鍥剧墖"
+                aria-label="放大预览图片"
+                title="预览图片"
                 @click="openClipboardImagePreview(item)"
               >
                 <HistoryImageThumb :history-id="item.id" />
               </button>
               <div
-                data-i18n-ignore
                 data-clipboard-image-summary
                 class="flex min-w-0 items-baseline gap-2.5 text-[13px] font-medium leading-[19px] text-[color:var(--clipboard-card-text)]"
               >
-                <span data-clipboard-image-name class="min-w-0 truncate">
-                  {{ clipboardFileSummary(item).name }}
-                </span>
+                <button data-clipboard-image-name type="button" title="打开文件位置" class="min-w-0 truncate text-left underline underline-offset-2 hover:text-[color:var(--accent-text)]" @click.stop="openClipboardFileLocation(item)">
+                  <span data-i18n-ignore>{{ clipboardFileSummary(item).name }}</span>
+                </button>
                 <span
                   v-if="clipboardFileSummary(item).size"
                   data-clipboard-image-size
@@ -607,16 +620,16 @@ function clipboardTime(value: string | undefined) {
             </div>
             <div
               v-else-if="item.contentType === 'fileList'"
-              data-i18n-ignore
               data-clipboard-file-summary
               class="mt-2 flex min-w-0 select-none items-center gap-3 text-[13px] font-medium leading-[19px] text-[color:var(--clipboard-card-text)]"
             >
               <button
                 v-if="isClipboardVideoFile(item)"
                 data-clipboard-file-media-button
-                class="rounded-lg outline-none transition hover:scale-[1.03] focus-visible:ring-2 focus-visible:ring-[#60cdff]/60"
+                class="rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-[#60cdff]/60"
                 type="button"
                 aria-label="预览视频"
+                title="预览视频"
                 @click.stop="openClipboardVideoPreview(item)"
               >
                 <HistoryFileThumb
@@ -633,23 +646,15 @@ function clipboardTime(value: string | undefined) {
               />
               <div class="flex min-w-0 items-baseline gap-2.5">
                 <button
-                  v-if="isClipboardVideoFile(item)"
                   data-clipboard-file-name
                   class="min-w-0 truncate text-left"
                   :class="clipboardFileNameClass(item)"
                   type="button"
-                  @click.stop="openClipboardVideoPreview(item)"
+                  :title="clipboardFileTitle(item)"
+                  @click.stop="handleClipboardItemClick(item)"
                 >
-                  {{ clipboardFileSummary(item).name }}
+                  <span data-i18n-ignore>{{ clipboardFileSummary(item).name }}</span>
                 </button>
-                <span
-                  v-else
-                  data-clipboard-file-name
-                  class="min-w-0 truncate"
-                  :class="clipboardFileNameClass(item)"
-                >
-                  {{ clipboardFileSummary(item).name }}
-                </span>
                 <span
                   v-if="clipboardFileSummary(item).size"
                   data-clipboard-file-size
@@ -735,7 +740,7 @@ function clipboardTime(value: string | undefined) {
         </article>
       </TransitionGroup>
       <p v-else class="rounded-xl border border-dashed border-[color:var(--main-line-soft)] px-3 py-8 text-center text-sm text-slate-500">
-        暂无匹配内容。
+        暂无匹配内容
       </p>
     </Card>
 
@@ -747,7 +752,7 @@ function clipboardTime(value: string | undefined) {
         @click.self="showClipboardHistoryModal = false"
       >
         <section
-          class="flex max-h-full w-full max-w-4xl flex-col rounded-xl border border-[color:var(--main-line)] bg-[color:var(--dialog-bg)] shadow-[0_24px_80px_rgba(0,0,0,0.5)]"
+          class="flex h-full max-h-full w-full max-w-4xl flex-col rounded-xl border border-[color:var(--main-line)] bg-[color:var(--dialog-bg)] shadow-[0_24px_80px_rgba(0,0,0,0.5)]"
           role="dialog"
           aria-modal="true"
           aria-label="全部剪贴内容"
@@ -804,7 +809,7 @@ function clipboardTime(value: string | undefined) {
             </div>
           </div>
 
-          <div v-if="filteredAllClipboardItems.length" class="min-h-0 overflow-x-hidden overflow-y-auto p-5">
+          <div v-if="filteredAllClipboardItems.length" class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto p-5">
             <TransitionGroup
               name="clipboard-card-stagger"
               tag="div"
@@ -815,10 +820,10 @@ function clipboardTime(value: string | undefined) {
                 v-for="(item, index) in filteredAllClipboardItems"
                 :key="item.id"
                 data-clipboard-history-row
-                class="clipboard-preview-card group relative min-h-[86px] overflow-hidden rounded-xl border border-[color:var(--clipboard-card-line)] bg-[color:var(--clipboard-card-bg)] px-5 py-2.5 shadow-[var(--clipboard-card-shadow)] transition duration-150 ease-out hover:z-10 hover:scale-[1.01] hover:border-[color:var(--clipboard-card-line-hover)] hover:bg-[color:var(--clipboard-card-bg-hover)] hover:shadow-[var(--clipboard-card-shadow-hover)]"
+                class="clipboard-preview-card group relative min-h-[86px] overflow-hidden rounded-xl border border-[color:var(--clipboard-card-line)] bg-[color:var(--clipboard-card-bg)] px-5 py-2.5 shadow-[var(--clipboard-card-shadow)] transition-colors duration-150 ease-out hover:z-10 hover:border-[color:var(--clipboard-card-line-hover)] hover:bg-[color:var(--clipboard-card-bg-hover)] hover:shadow-[var(--clipboard-card-shadow-hover)]"
                 :class="{
-                  'cursor-pointer': isClipboardFileCardInteractive(item, historyStore.fileDownloadActivity(item.fileTransferId)),
-                  'cursor-wait': isClipboardFileCardInteractive(item, historyStore.fileDownloadActivity(item.fileTransferId)) && historyStore.isFileDownloadActive(item.fileTransferId),
+                  'cursor-pointer': isClipboardFileCardInteractive(item, historyStore.fileDownloadActivity(item.fileTransferId, item.fileTransferFileId)),
+                  'cursor-wait': isClipboardFileCardInteractive(item, historyStore.fileDownloadActivity(item.fileTransferId, item.fileTransferFileId)) && historyStore.isFileDownloadActive(item.fileTransferId, item.fileTransferFileId),
                 }"
                 :style="`--clipboard-row-index: ${index}`"
                 @click="handleClipboardItemClick(item)"
@@ -843,6 +848,7 @@ function clipboardTime(value: string | undefined) {
                         :class="{ active: libraryStore.isHistoryItemSaved(item.id) }"
                         :disabled="isHistoryFavoriteBusy(item)"
                         :aria-label="libraryStore.isHistoryItemSaved(item.id) ? '移出收藏夹' : '收藏'"
+                        :title="libraryStore.isHistoryItemSaved(item.id) ? '移出收藏夹' : '收藏'"
                         @click.stop="toggleHistoryFavorite(item)"
                       >
                         <Star
@@ -857,6 +863,7 @@ function clipboardTime(value: string | undefined) {
                         :class="{ active: item.isPinned }"
                         :disabled="historyStore.isPinning(item.id)"
                         :aria-label="item.isPinned ? '取消置顶' : '置顶历史记录'"
+                        :title="item.isPinned ? '取消置顶' : '置顶历史记录'"
                         @click.stop="toggleHistoryPin(item)"
                       >
                         <Pin
@@ -871,6 +878,7 @@ function clipboardTime(value: string | undefined) {
                         :content-type="item.contentType"
                         :history-item-id="item.id"
                         :file-transfer-id="item.fileTransferId"
+                        :file-transfer-file-id="item.fileTransferFileId"
                         :file-transfer-status="item.fileTransferStatus"
                         icon-only
                         label="复制内容"
@@ -881,21 +889,21 @@ function clipboardTime(value: string | undefined) {
                   <div v-if="item.contentType === 'image'" class="mt-2 flex min-w-0 items-center gap-3">
                     <button
                       data-clipboard-image-preview-button
-                      class="rounded-lg outline-none transition hover:scale-[1.03] focus-visible:ring-2 focus-visible:ring-[#60cdff]/60"
+                      class="rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-[#60cdff]/60"
                       type="button"
-                      aria-label="鏀惧ぇ棰勮鍥剧墖"
+                      aria-label="放大预览图片"
+                      title="预览图片"
                       @click="openClipboardImagePreview(item)"
                     >
                       <HistoryImageThumb :history-id="item.id" />
                     </button>
                     <div
-                      data-i18n-ignore
                       data-clipboard-image-summary
                       class="flex min-w-0 items-baseline gap-2.5 text-[13px] font-medium leading-[19px] text-[color:var(--clipboard-card-text)]"
                     >
-                      <span data-clipboard-image-name class="min-w-0 truncate">
-                        {{ clipboardFileSummary(item).name }}
-                      </span>
+                      <button data-clipboard-image-name type="button" title="打开文件位置" class="min-w-0 truncate text-left underline underline-offset-2 hover:text-[color:var(--accent-text)]" @click.stop="openClipboardFileLocation(item)">
+                        <span data-i18n-ignore>{{ clipboardFileSummary(item).name }}</span>
+                      </button>
                       <span
                         v-if="clipboardFileSummary(item).size"
                         data-clipboard-image-size
@@ -907,16 +915,16 @@ function clipboardTime(value: string | undefined) {
                   </div>
                   <div
                     v-else-if="item.contentType === 'fileList'"
-                    data-i18n-ignore
                     data-clipboard-file-summary
                     class="mt-2 flex min-w-0 select-none items-center gap-3 text-[13px] font-medium leading-[19px] text-[color:var(--clipboard-card-text)]"
                   >
                     <button
                       v-if="isClipboardVideoFile(item)"
                       data-clipboard-file-media-button
-                      class="rounded-lg outline-none transition hover:scale-[1.03] focus-visible:ring-2 focus-visible:ring-[#60cdff]/60"
+                      class="rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-[#60cdff]/60"
                       type="button"
                       aria-label="预览视频"
+                      title="预览视频"
                       @click.stop="openClipboardVideoPreview(item)"
                     >
                       <HistoryFileThumb
@@ -933,23 +941,15 @@ function clipboardTime(value: string | undefined) {
                     />
                     <div class="flex min-w-0 items-baseline gap-2.5">
                       <button
-                        v-if="isClipboardVideoFile(item)"
                         data-clipboard-file-name
                         class="min-w-0 truncate text-left"
                         :class="clipboardFileNameClass(item)"
                         type="button"
-                        @click.stop="openClipboardVideoPreview(item)"
+                        :title="clipboardFileTitle(item)"
+                        @click.stop="handleClipboardItemClick(item)"
                       >
-                        {{ clipboardFileSummary(item).name }}
+                        <span data-i18n-ignore>{{ clipboardFileSummary(item).name }}</span>
                       </button>
-                      <span
-                        v-else
-                        data-clipboard-file-name
-                        class="min-w-0 truncate"
-                        :class="clipboardFileNameClass(item)"
-                      >
-                        {{ clipboardFileSummary(item).name }}
-                      </span>
                       <span
                         v-if="clipboardFileSummary(item).size"
                         data-clipboard-file-size
@@ -1035,58 +1035,19 @@ function clipboardTime(value: string | undefined) {
               </article>
             </TransitionGroup>
           </div>
-          <p v-else class="m-5 rounded-xl border border-dashed border-[color:var(--main-line-soft)] px-3 py-8 text-center text-sm text-[color:var(--subtle-text)]">
-            暂无匹配内容。
+          <p v-else class="m-5 grid min-h-0 flex-1 place-items-center rounded-xl border border-dashed border-[color:var(--main-line-soft)] px-3 text-center text-sm text-[color:var(--subtle-text)]">
+            暂无匹配内容
           </p>
         </section>
       </div>
     </Transition>
-    <Transition name="trust-prompt">
-      <div
-        v-if="previewImageItem"
-        data-clipboard-image-preview-modal
-        class="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 px-6 py-8 backdrop-blur-md"
-        @click.self="closeClipboardImagePreview"
-      >
-        <section
-          class="relative grid max-h-full max-w-[min(92vw,1100px)] rounded-xl border border-[color:var(--main-line)] bg-[#202020] p-4 shadow-[0_24px_90px_rgba(0,0,0,0.62)]"
-          role="dialog"
-          aria-modal="true"
-          aria-label="图片预览"
-        >
-          <button
-            data-clipboard-image-preview-close
-            class="absolute right-3 top-3 z-10 grid h-8 w-8 shrink-0 place-items-center rounded-md bg-black/20 text-slate-300 transition hover:bg-white/[0.08] hover:text-white"
-            type="button"
-            aria-label="关闭图片预览"
-            title="关闭"
-            @click="closeClipboardImagePreview"
-          >
-            <X class="h-4 w-4" />
-          </button>
-          <div
-            class="grid max-h-[78vh] max-w-[86vw] place-items-center overflow-auto rounded-xl bg-black/20 p-2"
-            :class="previewImageDrag.active.value ? 'cursor-grabbing' : 'cursor-grab'"
-            data-clipboard-image-preview-zoom-area
-            @wheel.prevent="handleClipboardImagePreviewWheel"
-            @pointerdown="startClipboardImageDrag"
-            @pointermove="moveClipboardImageDrag"
-            @pointerup="endClipboardImageDrag"
-            @pointercancel="endClipboardImageDrag"
-          >
-            <HistoryImageThumb
-              :history-id="previewImageItem.id"
-              :max-size="1400"
-              variant="preview"
-              :alt="previewImageItem.text"
-              class="origin-center select-none transition-transform duration-75 ease-out"
-              :style="previewImageTransform"
-              draggable="false"
-            />
-          </div>
-        </section>
-      </div>
-    </Transition>
+    <DirectImagePreview
+      v-if="previewImageItem"
+      :history-id="previewImageItem.id"
+      :alt="previewImageItem.text"
+      :items="showClipboardHistoryModal ? filteredAllClipboardItems : filteredRecentSyncItems"
+      @close="previewImageItem = null"
+    />
     <Transition name="trust-prompt">
       <div
         v-if="previewVideoItem"
@@ -1095,6 +1056,7 @@ function clipboardTime(value: string | undefined) {
         @click.self="closeClipboardVideoPreview"
       >
         <section
+          ref="previewVideoDialog"
           class="relative grid w-full max-w-[min(92vw,1100px)] gap-3 rounded-xl border border-[color:var(--main-line)] bg-[#202020] p-4 shadow-[0_24px_90px_rgba(0,0,0,0.62)]"
           role="dialog"
           aria-modal="true"
@@ -1123,14 +1085,34 @@ function clipboardTime(value: string | undefined) {
           <div class="overflow-hidden rounded-xl bg-black shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
             <video
               v-if="previewVideoSrc"
+              :key="previewVideoItem.id"
+              ref="previewVideoRef"
               :src="previewVideoSrc"
-              class="max-h-[74vh] w-full bg-black"
+              class="max-h-[62vh] w-full bg-black"
               preload="metadata"
               controls
               autoplay
               playsinline
               @loadedmetadata="handleClipboardVideoLoaded"
               @error="handleClipboardVideoPreviewError"
+            />
+          </div>
+          <div class="flex justify-center">
+            <MediaPreviewToolbar
+              kind="video"
+              :history-id="previewVideoItem.id"
+              :value="playbackRate"
+              :previous-disabled="!previousVideo || videoNavigating"
+              :next-disabled="!nextVideo || videoNavigating"
+              :decrease-disabled="playbackRate <= 0.25"
+              :increase-disabled="playbackRate >= 3"
+              :fullscreen-target="previewVideoRef"
+              @previous="changeVideo(-1)"
+              @next="changeVideo(1)"
+              @decrease="setPlaybackRate(nextVideoPlaybackRate(playbackRate, -1))"
+              @increase="setPlaybackRate(nextVideoPlaybackRate(playbackRate, 1))"
+              @reset="setPlaybackRate(1)"
+              @rotate="replayVideo"
             />
           </div>
           <p

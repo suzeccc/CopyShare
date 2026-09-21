@@ -209,7 +209,7 @@ pub fn notify_test(app: &AppHandle) -> Result<(), String> {
     let config = load_notification_config(app);
     let body = i18n::translate(
         &config,
-        "如果你看到这条消息，桌面右下角通知已生效。",
+        "如果你看到这条消息，桌面右下角通知已生效",
     );
     notify(app, &config, "CopyShare 测试通知", &body, SETTINGS_ROUTE)
 }

@@ -15,6 +15,8 @@ assert.match(tauriApi, /type CopyHistoryResult = "copied" \| "downloadStarted" \
 assert.match(tauriApi, /copyHistoryItem\(historyId: string\): Promise<CopyHistoryResult>/);
 
 assert.match(historyTypes, /fileTransferId\?: string/);
+assert.match(historyTypes, /fileTransferFileId\?: string/);
+assert.match(historyTypes, /clipboardBatchId\?: string/);
 assert.match(historyTypes, /fileTransferStatus\?: FileTransferStatus/);
 assert.match(historyPreview, /direction:\s*item\.direction/);
 assert.match(fileTransferTypes, /clipboardSync: boolean/);

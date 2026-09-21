@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
+import { Menu } from "@tauri-apps/api/menu";
 import ShieldCheck from "lucide-vue-next/dist/esm/icons/shield-check.js";
 import ShieldQuestion from "lucide-vue-next/dist/esm/icons/shield-question-mark.js";
 import ShieldX from "lucide-vue-next/dist/esm/icons/shield-x.js";
@@ -8,7 +9,9 @@ import WifiOff from "lucide-vue-next/dist/esm/icons/wifi-off.js";
 import X from "lucide-vue-next/dist/esm/icons/x.js";
 
 import Button from "@/components/ui/Button.vue";
+import { translateSource } from "@/i18n";
 import FloatingPanel from "@/components/layout/FloatingPanel.vue";
+import FloatingBall from "@/components/layout/FloatingBall.vue";
 import Sidebar from "@/components/layout/Sidebar.vue";
 import TitleBar from "@/components/layout/TitleBar.vue";
 import WindowTitleBar from "@/components/layout/WindowTitleBar.vue";
@@ -23,11 +26,15 @@ import { namedTrustDevices } from "@/lib/trustPrompt";
 import type { ShortcutAction } from "@/lib/globalShortcut";
 import {
   enterFloatingWindow,
+  enterBallWindow,
+  dockBallWindow,
   exitApp,
   getClipboardHistory,
   hideMainWindow,
+  isMainWindowVisible,
   onAppEvent,
   onMainWindowCloseRequested,
+  onMainWindowFocusChanged,
   readClipboardText,
   recognizeClipboardImage,
   restoreMainWindow,
@@ -37,7 +44,7 @@ import {
   updateFloatingClipboardHistoryWindow,
 } from "@/lib/tauri";
 import { getLatencyLabel, type AppWindowMode } from "@/lib/windowMode";
-import type { WindowTransitionPointer } from "@/lib/windowTransition";
+import { WINDOW_MODE_ENTER_MS, WINDOW_MODE_EXIT_MS, type WindowTransitionPointer } from "@/lib/windowTransition";
 import router from "@/router";
 import { useHistoryStore } from "@/stores/history";
 import { useConfigStore } from "@/stores/config";
@@ -51,6 +58,8 @@ import type { CloseAction } from "@/types/config";
 
 type SavedCloseAction = Exclude<CloseAction, "ask">;
 
+const emit = defineEmits<{ (event: "ready"): void }>();
+const props = defineProps<{ startupAnimationComplete: Promise<void> }>();
 const statusStore = useStatusStore();
 const configStore = useConfigStore();
 const historyStore = useHistoryStore();
@@ -60,16 +69,28 @@ const libraryStore = useLibraryStore();
 const ocrStore = useOcrStore();
 const translationStore = useTranslationStore();
 const route = useRoute();
-const windowMode = ref<AppWindowMode>("main");
+const windowMode = ref<AppWindowMode>(configStore.config.startupWindowMode === "ball" ? "floating" : configStore.config.startupWindowMode ?? "floating");
 const isSwitchingWindowMode = ref(false);
+const isResizingWindow = ref(false);
+const panelTransitionPhase = ref<"exit" | "enter" | null>(null);
+const isCollapsingToBall = ref(false);
+const windowModeFailed = ref(false);
+const ballReturnMode = ref<"main" | "floating">("floating");
+const ballPulse = ref(0);
 const systemClipboardItems = ref<ClipboardPreviewItem[]>([]);
 const mainScrollRef = ref<HTMLElement | null>(null);
 const showCloseActionDialog = ref(false);
 const rememberCloseAction = ref(false);
 const closeActionSaving = ref(false);
 let clipboardHistoryTimer: number | undefined;
+let clipboardHistoryPollingGeneration = 0;
+let clipboardHistoryPollingDisposed = false;
+let clipboardHistoryRefreshCount = 0;
+let windowFocusUnlisten: (() => void) | undefined;
 let closeRequestUnlisten: (() => void) | undefined;
 let globalShortcutUnlisten: (() => void) | undefined;
+let windowModeChange: Promise<void> = Promise.resolve();
+let ballMenu: Menu | null = null;
 
 const clipboardHistoryItems = computed(() =>
   getFloatingClipboardItems(
@@ -89,11 +110,13 @@ const latencyLabel = computed(() =>
   }),
 );
 const isFloating = computed(() => windowMode.value === "floating");
+const isBall = computed(() => windowMode.value === "ball");
 const trustPromptDevices = computed(() => namedTrustDevices(devicesStore.pendingTrust));
 const trustPromptDevice = computed(() => trustPromptDevices.value[0] ?? null);
 const trustPromptExtraCount = computed(() =>
   Math.max(trustPromptDevices.value.length - 1, 0),
 );
+const keepFloatingAfterOnboarding = ref(false);
 
 watch(
   windowMode,
@@ -116,6 +139,13 @@ watch(
 watch(
   () => route.fullPath,
   async () => {
+    if (windowMode.value !== "main") {
+      if (keepFloatingAfterOnboarding.value) {
+        keepFloatingAfterOnboarding.value = false;
+      } else {
+        await switchWindowMode("main", restoreMainWindow);
+      }
+    }
     await nextTick();
     if (!mainScrollRef.value) {
       return;
@@ -141,17 +171,53 @@ watch(
   { flush: "post" },
 );
 
+watch(
+  () => configStore.config.onboardingCompleted,
+  (completed, previous) => {
+    if (!completed || previous || windowMode.value !== "main") return;
+    keepFloatingAfterOnboarding.value = true;
+    void switchWindowMode("floating", () => enterFloatingWindow("top-right"));
+  },
+);
+
+watch(() => configStore.config.uiLanguage, () => {
+  if (ballMenu) void ballMenu.close();
+  ballMenu = null;
+});
+
+watch(() => historyStore.items[0]?.id, (id, previous) => {
+  if (isBall.value && id && previous && id !== previous) ballPulse.value += 1;
+});
+
+watch(trustPromptDevice, (device) => {
+  if (device && isBall.value) void switchWindowMode("main", restoreMainWindow);
+});
+
 onBeforeUnmount(() => {
+  clipboardHistoryPollingDisposed = true;
   delete document.documentElement.dataset.windowMode;
   delete document.body.dataset.windowMode;
   delete document.documentElement.dataset.appTheme;
   delete document.body.dataset.appTheme;
-  window.clearInterval(clipboardHistoryTimer);
+  stopClipboardHistoryPolling();
+  windowFocusUnlisten?.();
   closeRequestUnlisten?.();
   globalShortcutUnlisten?.();
+  if (ballMenu) void ballMenu.close();
 });
 
 onMounted(async () => {
+  windowModeChange = initializeStartupWindow();
+  await windowModeChange;
+  emit("ready");
+  try {
+    windowFocusUnlisten = await onMainWindowFocusChanged(() => {
+      void startClipboardHistoryPolling();
+    });
+    if (clipboardHistoryPollingDisposed) windowFocusUnlisten();
+  } catch (error) {
+    console.error("failed to register main-window focus listener", error);
+  }
   try {
     closeRequestUnlisten = await onMainWindowCloseRequested(async (event) => {
       event.preventDefault();
@@ -168,10 +234,44 @@ onMounted(async () => {
   } catch (error) {
     console.error("failed to register global shortcut listener", error);
   }
+  await startClipboardHistoryPolling();
 });
 
-async function refreshSystemClipboardHistory() {
+async function initializeStartupWindow() {
+  await props.startupAnimationComplete;
+  if (!configStore.config.onboardingCompleted) windowMode.value = "main";
+  if (!("__TAURI_INTERNALS__" in window)) return;
+
   try {
+    if (windowMode.value === "ball") {
+      await enterBallWindow("top-right");
+    } else if (windowMode.value === "floating") {
+      await enterFloatingWindow("top-right");
+    } else {
+      await restoreMainWindow();
+    }
+  } catch (error) {
+    console.error("failed to apply startup window mode", error);
+    try {
+      await restoreMainWindow();
+      windowMode.value = "main";
+    } catch (restoreError) {
+      console.error("failed to restore startup window", restoreError);
+      windowModeFailed.value = true;
+    }
+  } finally {
+    await showMainWindow().catch(console.error);
+  }
+}
+
+async function refreshSystemClipboardHistory(visibleOnly = false) {
+  if (visibleOnly && clipboardHistoryRefreshCount > 0) return;
+  clipboardHistoryRefreshCount += 1;
+  try {
+    if (visibleOnly && !(await isMainWindowVisible())) {
+      stopClipboardHistoryPolling();
+      return;
+    }
     systemClipboardItems.value = (await getClipboardHistory()).map((item) => ({
       ...item,
       contentHash: "",
@@ -180,50 +280,97 @@ async function refreshSystemClipboardHistory() {
     }));
   } catch {
     systemClipboardItems.value = [];
+  } finally {
+    clipboardHistoryRefreshCount -= 1;
   }
+}
+
+function stopClipboardHistoryPolling() {
+  clipboardHistoryPollingGeneration += 1;
+  window.clearInterval(clipboardHistoryTimer);
+  clipboardHistoryTimer = undefined;
+}
+
+async function startClipboardHistoryPolling() {
+  stopClipboardHistoryPolling();
+  const generation = clipboardHistoryPollingGeneration;
+  if (clipboardHistoryPollingDisposed || !isFloating.value) return;
+  try {
+    if (!(await isMainWindowVisible())) return;
+  } catch {
+    return;
+  }
+  if (generation !== clipboardHistoryPollingGeneration || !isFloating.value) return;
+  void refreshSystemClipboardHistory(true);
+  clipboardHistoryTimer = window.setInterval(() => {
+    void refreshSystemClipboardHistory(true);
+  }, 1200);
 }
 
 watch(
   isFloating,
-  (floating) => {
-    window.clearInterval(clipboardHistoryTimer);
-    clipboardHistoryTimer = undefined;
-
-    if (!floating) {
-      return;
-    }
-
-    void refreshSystemClipboardHistory();
-    clipboardHistoryTimer = window.setInterval(() => {
-      void refreshSystemClipboardHistory();
-    }, 1200);
+  () => {
+    void startClipboardHistoryPolling();
   },
   { immediate: true },
 );
 
-async function switchWindowMode(
+function switchWindowMode(
   nextMode: AppWindowMode,
   resizeWindow: (pointer?: WindowTransitionPointer) => Promise<void>,
   pointer?: WindowTransitionPointer,
 ) {
-  if (isSwitchingWindowMode.value) {
-    return;
-  }
-
-  if (windowMode.value === nextMode) {
-    return;
-  }
-
-  isSwitchingWindowMode.value = true;
-
-  try {
-    await resizeWindow(pointer);
-    windowMode.value = nextMode;
-  } catch (error) {
-    console.error(error);
-  } finally {
-    isSwitchingWindowMode.value = false;
-  }
+  windowModeChange = windowModeChange.then(async () => {
+    if (windowMode.value === nextMode && !windowModeFailed.value) {
+      return;
+    }
+    const previousMode = windowMode.value;
+    const animatePanels = previousMode !== nextMode
+      && previousMode !== "ball"
+      && nextMode !== "ball";
+    isSwitchingWindowMode.value = true;
+    if (animatePanels) {
+      panelTransitionPhase.value = "exit";
+      await nextTick();
+      await new Promise((resolve) => window.setTimeout(resolve, WINDOW_MODE_EXIT_MS));
+    }
+    if (nextMode === "ball") {
+      if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        isCollapsingToBall.value = true;
+        await new Promise((resolve) => window.setTimeout(resolve, 100));
+      }
+      isCollapsingToBall.value = false;
+    }
+    panelTransitionPhase.value = null;
+    isResizingWindow.value = true;
+    await nextTick();
+    try {
+      await resizeWindow(pointer);
+      windowMode.value = nextMode;
+      windowModeFailed.value = false;
+      await nextTick();
+    } catch (error) {
+      console.error("failed to switch window mode", error);
+      try {
+        await (previousMode === "ball" ? enterBallWindow() : previousMode === "floating" ? enterFloatingWindow() : restoreMainWindow());
+        windowModeFailed.value = false;
+      } catch (restoreError) {
+        console.error("failed to restore window mode", restoreError);
+        windowModeFailed.value = true;
+      }
+      toastStore.error("窗口切换失败，请重试");
+    } finally {
+      panelTransitionPhase.value = animatePanels && !windowModeFailed.value ? "enter" : null;
+      isResizingWindow.value = false;
+      await nextTick();
+      if (panelTransitionPhase.value === "enter") {
+        await new Promise((resolve) => window.setTimeout(resolve, WINDOW_MODE_ENTER_MS));
+      }
+      panelTransitionPhase.value = null;
+      isSwitchingWindowMode.value = false;
+    }
+  });
+  return windowModeChange;
 }
 
 async function toggleQuickPanelFromShortcut() {
@@ -235,16 +382,15 @@ async function toggleQuickPanelFromShortcut() {
 }
 
 async function showShortcutPage(path: "/ocr" | "/translate" | "/library") {
-  if (isFloating.value) {
-    await restoreMainWindow();
-    windowMode.value = "main";
-  }
+  await switchWindowMode("main", restoreMainWindow);
+  if (windowMode.value !== "main") return false;
   await router.push(path);
   await showMainWindow();
+  return true;
 }
 
 async function recognizeClipboardFromShortcut() {
-  await showShortcutPage("/ocr");
+  if (!(await showShortcutPage("/ocr"))) return;
   if (ocrStore.status === "loading") return;
 
   ocrStore.beginRecognition();
@@ -260,7 +406,7 @@ async function recognizeClipboardFromShortcut() {
 }
 
 async function translateClipboardFromShortcut() {
-  await showShortcutPage("/translate");
+  if (!(await showShortcutPage("/translate"))) return;
   if (translationStore.loading) return;
 
   translationStore.loading = true;
@@ -331,6 +477,29 @@ async function switchToMainMode(pointer: WindowTransitionPointer) {
   await switchWindowMode("main", restoreMainWindow, pointer);
 }
 
+async function switchToBallMode() {
+  if (windowMode.value === "ball") return;
+  ballReturnMode.value = windowMode.value === "main" ? "main" : "floating";
+  await switchWindowMode("ball", () => enterBallWindow());
+}
+
+async function restoreFromBall() {
+  const mode = ballReturnMode.value;
+  await switchWindowMode(mode, mode === "main" ? restoreMainWindow : () => enterFloatingWindow());
+}
+
+async function openBallMenu() {
+  try {
+    ballMenu ??= await Menu.new({ items: [
+      { text: translateSource("打开主面板"), action: () => { void switchWindowMode("main", restoreMainWindow); } },
+      { text: translateSource("隐藏到托盘"), action: () => { void hideMainWindow(); } },
+    ] });
+    await ballMenu.popup();
+  } catch (error) {
+    toastStore.error(`打开浮窗球菜单失败：${String(error)}`);
+  }
+}
+
 async function runCloseAction(action: SavedCloseAction) {
   if (action === "minimize") {
     await hideMainWindow();
@@ -376,6 +545,7 @@ async function chooseCloseAction(action: SavedCloseAction) {
 async function handleCloseWindow() {
   const closeAction = configStore.config.closeAction ?? "ask";
   if (closeAction === "ask") {
+    if (isBall.value) await switchWindowMode("main", restoreMainWindow);
     rememberCloseAction.value = false;
     showCloseActionDialog.value = true;
     return;
@@ -405,14 +575,28 @@ async function rejectPromptDevice() {
 
 <template>
   <div
-    class="app-window-shell relative flex h-screen flex-col overflow-hidden rounded-[18px] text-slate-100 transition-[background-color,border-color,padding] duration-200 ease-out"
+    class="app-window-shell relative flex h-screen flex-col overflow-hidden text-slate-100 transition-[background-color,border-color,padding] duration-200 ease-out"
+    :data-panel-transition="panelTransitionPhase"
     :class="[
-      isFloating ? 'bg-transparent p-2' : 'border border-[color:var(--main-line)] bg-[color:var(--main-bg)]',
+      isBall ? 'rounded-full bg-transparent p-0' : isFloating ? 'rounded-[18px] bg-transparent p-2' : 'rounded-[18px] border border-[color:var(--main-line)] bg-[color:var(--main-bg)]',
       isSwitchingWindowMode ? 'pointer-events-none' : '',
+      isResizingWindow ? 'is-mode-resizing' : '',
+      isCollapsingToBall ? 'is-collapsing-to-ball' : '',
     ]"
   >
+    <FloatingBall
+      v-if="isBall"
+      v-show="!isResizingWindow && !windowModeFailed"
+      :running="statusStore.status.running"
+      :connected-count="statusStore.status.connectedCount"
+      :pulse="ballPulse"
+      @open="restoreFromBall"
+      @menu="openBallMenu"
+      @dock="dockBallWindow"
+    />
     <FloatingPanel
-      v-if="isFloating"
+      v-else-if="isFloating"
+      v-show="!isResizingWindow && !windowModeFailed"
       :status-label="statusStore.statusLabel"
       :running="statusStore.status.running"
       :connected-count="statusStore.status.connectedCount"
@@ -420,11 +604,11 @@ async function rejectPromptDevice() {
       :clipboard-items="clipboardItems"
       :clipboard-history-items="clipboardHistoryItems"
       @restore="switchToMainMode"
-      @hide="hideMainWindow"
+      @hide="switchToBallMode"
       @close="handleCloseWindow"
     />
 
-    <div v-else class="main-window-content flex min-h-0 flex-1 flex-col overflow-hidden">
+    <div v-else class="main-window-content flex min-h-0 flex-1 flex-col overflow-hidden" v-show="!isResizingWindow && !windowModeFailed">
       <WindowTitleBar @close="handleCloseWindow" />
       <div class="flex min-h-0 flex-1 overflow-hidden">
         <Sidebar />
@@ -444,6 +628,14 @@ async function rejectPromptDevice() {
       </div>
     </div>
 
+    <section v-if="windowModeFailed" role="alert" class="absolute inset-2 flex flex-col items-center justify-center gap-4 rounded-lg border border-[color:var(--main-line)] bg-[color:var(--main-bg)] p-5 text-center">
+      <p class="text-sm text-slate-200">窗口尺寸调整失败，请重试</p>
+      <div class="flex gap-2">
+        <Button :disabled="isSwitchingWindowMode" @click="switchWindowMode(windowMode, isBall ? () => enterBallWindow() : isFloating ? enterFloatingWindowAtPointer : restoreMainWindow)">重新调整窗口</Button>
+        <Button variant="ghost" @click="handleCloseWindow">关闭</Button>
+      </div>
+    </section>
+
     <Transition name="trust-prompt">
       <div
         v-if="showCloseActionDialog"
@@ -455,7 +647,7 @@ async function rejectPromptDevice() {
             <div>
               <p class="text-base font-semibold text-white">关闭 CopyShare？</p>
               <p class="mt-2 text-sm leading-6 text-slate-300">
-                可以最小化到托盘继续同步，也可以直接退出应用。
+                可以最小化到托盘继续同步，也可以直接退出应用
               </p>
             </div>
             <button
@@ -503,7 +695,7 @@ async function rejectPromptDevice() {
 
     <Transition name="trust-prompt">
       <div
-        v-if="devicesStore.disconnectNotice"
+        v-if="!isBall && devicesStore.disconnectNotice"
         data-device-disconnect-notice
         class="absolute z-[55] flex items-start gap-3 rounded-lg border border-[color:var(--disconnect-notice-line)] bg-[color:var(--disconnect-notice-bg)] px-3 py-3 text-[color:var(--disconnect-notice-text)] shadow-[var(--disconnect-notice-shadow)] ring-1 ring-[color:var(--disconnect-notice-ring)] backdrop-blur-xl"
         :class="isFloating ? 'inset-x-2 bottom-2 text-xs' : 'right-12 top-14 w-[min(410px,calc(100%-1.5rem))] text-sm'"
@@ -528,7 +720,7 @@ async function rejectPromptDevice() {
 
     <Transition name="trust-prompt">
       <div
-        v-if="!isFloating && trustPromptDevice"
+        v-if="windowMode === 'main' && trustPromptDevice"
         data-trust-prompt
         class="absolute inset-0 z-50 flex items-center justify-center bg-[color:var(--dialog-overlay-bg)] px-6 backdrop-blur-sm"
       >
@@ -544,7 +736,7 @@ async function rejectPromptDevice() {
             <div class="min-w-0">
               <p class="text-base font-semibold text-white">是否信任这台设备？</p>
               <p class="mt-1 text-sm leading-6 text-slate-300">
-                信任后才会同步本机剪贴板。另一台电脑也需要信任本机，才能双向同步。
+                信任后才会同步本机剪贴板。另一台电脑也需要信任本机，才能双向同步
               </p>
             </div>
           </div>
@@ -561,7 +753,7 @@ async function rejectPromptDevice() {
           </div>
 
           <p v-if="trustPromptExtraCount" class="mt-3 text-xs text-slate-400">
-            还有 {{ trustPromptExtraCount }} 台设备等待确认。
+            还有 {{ trustPromptExtraCount }} 台设备等待确认
           </p>
 
           <div class="mt-5 flex justify-end gap-3">

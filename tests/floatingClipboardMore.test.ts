@@ -16,7 +16,7 @@ assert.match(floatingPanel, /v-if="clipboardHistoryItems\.length > clipboardItem
 assert.match(floatingPanel, /MoreHorizontal/);
 assert.match(floatingPanel, /openFloatingClipboardHistoryWindow/);
 assert.match(floatingPanel, /openFloatingClipboardHistoryWindow\(\{\s*items:\s*clipboardHistoryItems\s*\}\)/);
-assert.match(floatingPanel, /shouldShowFloatingClipboardItemMore/);
+assert.match(floatingPanel, /v-clipboard-overflow/);
 assert.match(floatingPanel, /data-floating-clipboard-item-more-button/);
 assert.match(floatingPanel, /data-floating-clipboard-image-name/);
 assert.match(floatingPanel, /data-floating-clipboard-file-name/);
@@ -92,6 +92,14 @@ assert.match(floatingClipboardWindow, /FLOATING_CLIPBOARD_HISTORY_LIMIT/);
 assert.match(floatingClipboardWindow, /payload\.items\.slice\(0,\s*FLOATING_CLIPBOARD_HISTORY_LIMIT\)/);
 assert.match(floatingClipboardWindow, /data-floating-clipboard-history-row/);
 assert.match(floatingClipboardWindow, /data-floating-clipboard-history-content/);
+const metadataRow = floatingClipboardWindow.slice(
+  floatingClipboardWindow.indexOf("data-floating-clipboard-history-row"),
+  floatingClipboardWindow.indexOf("</article>", floatingClipboardWindow.indexOf("data-floating-clipboard-history-row")),
+);
+assert.ok(metadataRow.indexOf("data-floating-clipboard-type") < metadataRow.indexOf("data-floating-history-media-preview-button"));
+assert.ok(metadataRow.indexOf("data-floating-clipboard-time") < metadataRow.indexOf("data-floating-clipboard-user"));
+assert.ok(metadataRow.indexOf("data-floating-clipboard-user") < metadataRow.indexOf("data-floating-clipboard-sync-status"));
+assert.match(metadataRow, /data-floating-clipboard-footer[^>]*col-span-2[^>]*justify-between/);
 assert.match(
   floatingClipboardWindow,
   /data-floating-clipboard-history-content[\s\S]*?min-w-0[\s\S]*?overflow-hidden/,
@@ -100,15 +108,22 @@ assert.match(
   floatingClipboardWindow,
   /data-floating-clipboard-actions[\s\S]*?shrink-0/,
 );
-assert.match(floatingClipboardWindow, /shouldShowFloatingClipboardHistoryItemMore/);
+assert.match(floatingClipboardWindow, /v-clipboard-overflow/);
 assert.match(floatingClipboardWindow, /data-floating-clipboard-item-more-button/);
-assert.match(floatingClipboardWindow, /v-if="shouldShowFloatingClipboardHistoryItemMore\(item\)"/);
+assert.match(floatingClipboardWindow, /data-clipboard-preview-text/);
 assert.match(floatingClipboardWindow, /@click\.stop="openFullClipboardItem\(item\)"/);
 assert.match(floatingClipboardWindow, /selectedClipboardItem/);
 assert.match(floatingClipboardWindow, /data-floating-clipboard-full-content/);
 assert.match(floatingClipboardWindow, /content-type="text"/);
 
 const stylesheet = readFileSync("src/style.css", "utf8");
+for (const page of [floatingPanel, floatingClipboardWindow]) {
+  const fullContent = page.slice(page.indexOf("data-floating-clipboard-full-content"));
+  assert.match(fullContent, /<header[^>]*data-window-drag-region[^>]*@mousedown\.capture="handleWindowDrag"/);
+  assert.match(fullContent, /<pre data-floating-clipboard-full-text data-i18n-ignore/);
+  assert.doesNotMatch(fullContent.match(/<pre[^>]*>/)?.[0] ?? "", /data-window-drag-region|select-none/);
+}
+assert.match(stylesheet, /\[data-floating-clipboard-full-text\] \{\s*user-select: text;\s*-webkit-user-select: text;\s*cursor: text;/);
 assert.match(stylesheet, /--floating-clipboard-history-bg:/);
 assert.match(stylesheet, /\.floating-clipboard-history-surface\s*\{/);
 assert.match(stylesheet, /background:\s*var\(--floating-clipboard-history-bg\)/);

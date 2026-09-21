@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import ChevronDown from "lucide-vue-next/dist/esm/icons/chevron-down.js";
+import ChevronUp from "lucide-vue-next/dist/esm/icons/chevron-up.js";
 import LoaderCircle from "lucide-vue-next/dist/esm/icons/loader-circle.js";
 import { nextTick, ref, watch } from "vue";
 
@@ -52,13 +54,19 @@ async function beginPortEdit() {
   portDraft.value = configStore.config.port;
   editingPort.value = true;
   await nextTick();
-  portInput.value?.select();
+  portInput.value?.focus();
 }
 
 function cancelPortEdit() {
   if (portSaving.value) return;
   portDraft.value = configStore.config.port;
   editingPort.value = false;
+}
+
+function adjustPort(delta: number) {
+  if (portSaving.value) return;
+  portDraft.value = clampPort(portDraft.value + delta);
+  portInput.value?.focus();
 }
 
 async function savePort() {
@@ -123,7 +131,7 @@ async function savePort() {
       <form
         v-if="editingPort"
         data-titlebar-port-editor
-        class="relative flex h-8 w-[108px] items-center gap-2 rounded-lg border border-[color:var(--accent-line)] bg-[color:var(--main-bg-muted)] px-3 shadow-[0_0_0_2px_var(--accent-soft)]"
+        class="relative flex h-8 w-[92px] items-center gap-1 rounded-lg border border-[color:var(--accent-line)] bg-[color:var(--main-bg-muted)] px-1.5 shadow-[0_0_0_2px_var(--accent-soft)]"
         :aria-busy="portSaving"
         @submit.prevent="savePort"
       >
@@ -132,8 +140,9 @@ async function savePort() {
         <input
           id="titlebar-listen-port"
           ref="portInput"
+          data-titlebar-port-input
           v-model.number="portDraft"
-          class="min-w-0 flex-1 bg-transparent pr-3 text-right font-mono text-[13px] font-bold tabular-nums text-white outline-none"
+          class="min-w-0 flex-1 appearance-none border-0 bg-transparent text-right font-mono text-[13px] font-bold tabular-nums text-white outline-none shadow-none ring-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
           type="number"
           min="1"
           max="65535"
@@ -142,16 +151,41 @@ async function savePort() {
           @blur="savePort"
           @keydown.esc.prevent="cancelPortEdit"
         >
+        <span
+          data-titlebar-port-stepper
+          class="grid h-6 w-4 shrink-0 overflow-hidden rounded-[3px] border border-[color:var(--main-line-soft)] bg-[color:var(--main-bg-deep)]"
+        >
+          <button
+            type="button"
+            class="grid place-items-center border-b border-[color:var(--main-line-soft)] text-[color:var(--muted-text)] transition-colors hover:bg-[color:var(--main-bg-muted)] hover:text-white disabled:opacity-40"
+            aria-label="增加监听端口"
+            :disabled="portSaving || portDraft >= 65535"
+            @mousedown.prevent
+            @click="adjustPort(1)"
+          >
+            <ChevronUp class="h-2.5 w-2.5" />
+          </button>
+          <button
+            type="button"
+            class="grid place-items-center text-[color:var(--muted-text)] transition-colors hover:bg-[color:var(--main-bg-muted)] hover:text-white disabled:opacity-40"
+            aria-label="减少监听端口"
+            :disabled="portSaving || portDraft <= 1"
+            @mousedown.prevent
+            @click="adjustPort(-1)"
+          >
+            <ChevronDown class="h-2.5 w-2.5" />
+          </button>
+        </span>
         <LoaderCircle
           v-if="portSaving"
-          class="absolute right-2 h-3 w-3 animate-spin text-[color:var(--accent-text)]"
+          class="absolute right-2 h-3 w-3 animate-spin bg-[color:var(--main-bg-muted)] text-[color:var(--accent-text)]"
         />
       </form>
       <button
         v-else
         data-titlebar-port
         type="button"
-        class="inline-flex h-8 w-[108px] cursor-pointer items-center gap-2 rounded-lg border border-[color:var(--main-line-soft)] bg-[color:var(--stat-bg)] px-3 text-slate-300 transition duration-150 hover:border-[color:var(--main-line)] hover:bg-[color:var(--main-bg-muted)] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-line)] disabled:cursor-not-allowed disabled:opacity-50"
+        class="inline-flex h-8 w-[92px] cursor-pointer items-center gap-1.5 rounded-lg border border-[color:var(--main-line-soft)] bg-[color:var(--stat-bg)] px-2.5 text-slate-300 transition duration-150 hover:border-[color:var(--main-line)] hover:bg-[color:var(--main-bg-muted)] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--accent-line)] disabled:cursor-not-allowed disabled:opacity-50"
         title="点击修改监听端口"
         :aria-label="`监听端口 ${configStore.config.port}，点击修改监听端口`"
         :disabled="portSaving"
@@ -172,3 +206,13 @@ async function savePort() {
     </div>
   </header>
 </template>
+
+<style scoped>
+input[data-titlebar-port-input],
+input[data-titlebar-port-input]:focus,
+input[data-titlebar-port-input]:focus-visible {
+  border: 0;
+  outline: 0;
+  box-shadow: none;
+}
+</style>

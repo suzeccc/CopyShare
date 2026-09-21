@@ -32,7 +32,8 @@ assert.match(clipboardPage, /historyStore\.isFileDownloadActive/);
 assert.match(clipboardPage, /historyStore\.beginFileDownload/);
 assert.match(clipboardPage, /openTransferFolder/);
 assert.match(clipboardPage, /getClipboardFileCardAction/);
-assert.match(clipboardPage, /resumeFileTransfer/);
+assert.doesNotMatch(clipboardPage, /resumeFileTransfer/);
+assert.match(clipboardPage, /item\.fileTransferFileId/);
 assert.match(clipboardPage, /data-clipboard-file-summary/);
 assert.match(clipboardPage, /clipboardFileNameClass/);
 assert.match(clipboardPage, /clipboardFileNameClass[\s\S]*isClipboardFileCardInteractive/);
@@ -50,17 +51,20 @@ assert.doesNotMatch(clipboardPage, /v-if="item\.contentType !== 'fileList'"/);
 assert.match(floatingPanel, /ClipboardFileDownloadStatus/);
 assert.match(floatingPanel, /historyStore\.isFileDownloadActive/);
 assert.match(floatingPanel, /openTransferFolder/);
-assert.match(floatingPanel, /resumeFileTransfer/);
+assert.doesNotMatch(floatingPanel, /resumeFileTransfer/);
+assert.match(floatingPanel, /item\.fileTransferFileId/);
 assert.match(floatingPanel, /data-floating-clipboard-file-summary/);
 assert.match(floatingPanel, /compact/);
 
 assert.match(copyButton, /fileTransferId/);
+assert.match(copyButton, /fileTransferFileId/);
 assert.match(copyButton, /fileDownloadActive/);
 assert.match(copyButton, /LoaderCircle/);
-assert.match(copyButton, /resumeFileTransfer/);
+assert.doesNotMatch(copyButton, /resumeFileTransfer/);
 
 assert.match(floatingHistory, /CopyTextButton/);
 assert.match(floatingHistory, /:file-transfer-status="item\.fileTransferStatus"/);
+assert.match(floatingHistory, /:file-transfer-file-id="item\.fileTransferFileId"/);
 
 for (const surface of [clipboardPage, floatingPanel, copyButton]) {
   assert.match(surface, /toastStore\.success\("开始下载"\)/);

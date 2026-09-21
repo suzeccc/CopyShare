@@ -14,7 +14,7 @@ assert.equal(toast.message, "复制成功");
 assert.match(toast.id, /^toast-/);
 assert.equal(typeof toast.createdAt, "number");
 assert.equal(TOAST_TIMEOUT_MS, 1800);
-assert.equal(TOAST_LIMIT, 3);
+assert.equal(TOAST_LIMIT, 1);
 assert.equal(
   limitToastQueue([
     createToast("success", "1"),
@@ -22,7 +22,7 @@ assert.equal(
     createToast("success", "3"),
     createToast("success", "4"),
   ]).map((item) => item.message).join(","),
-  "2,3,4",
+  "4",
 );
 
 const toastStore = readFileSync("src/stores/toasts.ts", "utf8");

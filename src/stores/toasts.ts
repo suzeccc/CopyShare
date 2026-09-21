@@ -16,6 +16,9 @@ export const useToastStore = defineStore("toasts", {
   }),
   actions: {
     show(kind: ToastKind, message: string) {
+      const current = this.items[0];
+      if (current?.kind === kind && current.message === message) return current.id;
+      if (current) this.remove(current.id);
       const toast = createToast(kind, message);
       this.items = limitToastQueue([...this.items, toast]);
 

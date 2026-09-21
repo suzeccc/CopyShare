@@ -62,7 +62,7 @@ assert.match(clipboardPage, /border-\[color:var\(--clipboard-card-line\)\]/);
 assert.match(clipboardPage, /hover:bg-\[color:var\(--clipboard-card-bg-hover\)\]/);
 assert.match(clipboardPage, /hover:border-\[color:var\(--clipboard-card-line-hover\)\]/);
 assert.match(clipboardPage, /hover:shadow-\[var\(--clipboard-card-shadow-hover\)\]/);
-assert.match(clipboardPage, /hover:scale-\[1\.01\]/);
+assert.doesNotMatch(clipboardPage, /hover:scale-\[1\.0[13]\]/);
 assert.match(clipboardPage, /hover:z-10/);
 assert.match(clipboardPage, /clipboard-preview-card-accent/);
 assert.match(clipboardPage, /min-h-\[86px\]/);

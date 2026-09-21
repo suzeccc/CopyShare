@@ -33,6 +33,11 @@ pub async fn get_status(state: State<'_, AppState>) -> AppResult<AppStatus> {
 }
 
 #[tauri::command]
+pub fn set_floating_ball_shape(app: AppHandle, enabled: bool) -> AppResult<()> {
+    window_position::set_floating_ball_shape(&app, enabled)
+}
+
+#[tauri::command]
 pub async fn start_sync(app: AppHandle, state: State<'_, AppState>) -> AppResult<AppStatus> {
     let app_state = state.inner().clone();
     sync::start_sync_runtime(app.clone(), app_state.clone()).await?;
@@ -179,7 +184,6 @@ pub async fn update_config(
     } else {
         next_config.device_id.trim().to_string()
     };
-    next_config.sync_text = true;
     config::normalize_config(&mut next_config);
     let current_auto_start =
         autostart::is_autostart_enabled(&app).unwrap_or(current.auto_start);
@@ -234,7 +238,7 @@ async fn collect_network_diagnostics(state: AppState) -> AppResult<NetworkDiagno
 
 #[tauri::command]
 pub async fn get_history(state: State<'_, AppState>) -> AppResult<Vec<HistoryItem>> {
-    Ok(history::history_items_for_frontend(&state.history().await))
+    Ok(state.frontend_history().await)
 }
 
 #[tauri::command]
@@ -244,11 +248,30 @@ pub async fn set_history_item_pinned(
     history_id: String,
     pinned: bool,
 ) -> AppResult<Vec<HistoryItem>> {
-    let mut items = state.history().await;
-    history::set_history_item_pinned(&mut items, &history_id, pinned)?;
-    history::save_history(&app, &items)?;
-    state.replace_history(items.clone()).await;
-    let frontend_items = history::history_items_for_frontend(&items);
+    let system_item = if state.history_item(&history_id).await.is_none() {
+        Some(clipboard::read_clipboard_history_text(100).await?
+            .into_iter().find(|item| item.id == history_id)
+            .ok_or_else(|| AppError::InvalidInput("历史记录不存在".into()))?)
+    } else {
+        None
+    };
+    let source_device = state.config().await.device_name;
+    let app_for_history = app.clone();
+    let frontend_items = state
+        .mutate_history(move |items| {
+            let mut next = items.clone();
+            if !next.iter().any(|item| item.id == history_id) {
+                if let Some(item) = system_item {
+                    next.push(history::make_system_text_history_item(item, source_device));
+                }
+            }
+            history::set_history_item_pinned(&mut next, &history_id, pinned)?;
+            history::save_history(&app_for_history, &next)?;
+            history::release_image_content(&mut next);
+            *items = next;
+            Ok(history::history_items_for_frontend(items))
+        })
+        .await?;
     app.emit("history-updated", frontend_items.clone())?;
     Ok(frontend_items)
 }
@@ -308,10 +331,8 @@ pub async fn collect_history_item(
     pin: bool,
 ) -> AppResult<LibrarySnapshot> {
     let history = state
-        .history()
+        .history_item(&history_id)
         .await
-        .into_iter()
-        .find(|item| item.id == history_id)
         .ok_or_else(|| AppError::InvalidInput("历史项不存在或已经失效".into()))?;
     mutate_library(&app, state.inner(), move |root, items| {
         library::collect_history_item(root, items, &history, pin)
@@ -412,6 +433,7 @@ pub async fn copy_library_item(
         .ok_or_else(|| AppError::InvalidInput("收藏项不存在".into()))?;
     let root = app.path().app_data_dir()?;
     let copy_root = root.clone();
+    let image_summary = item.title.clone();
     let payload = tauri::async_runtime::spawn_blocking(move || {
         library::copy_payload(&copy_root, &item)
     })
@@ -423,7 +445,7 @@ pub async fn copy_library_item(
             library::clear_file_copy_cache(&root)
         }
         LibraryCopyPayload::Image(image) => {
-            clipboard::write_clipboard_image_base64(&app, &image)?;
+            clipboard::write_clipboard_image_base64(&app, &image, Some(&image_summary))?;
             library::clear_file_copy_cache(&root)
         }
         LibraryCopyPayload::Files(paths) => {
@@ -470,11 +492,33 @@ pub async fn get_clipboard_history() -> AppResult<Vec<ClipboardTextItem>> {
 }
 
 #[tauri::command]
+pub async fn get_library_video_preview_path(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    asset_index: usize,
+) -> AppResult<String> {
+    let item = state
+        .library()
+        .await
+        .items
+        .into_iter()
+        .find(|item| item.id == id)
+        .ok_or_else(|| AppError::InvalidInput("收藏项不存在".into()))?;
+    let root = app.path().app_data_dir()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        library::video_preview_path(&root, &item, asset_index)
+    })
+    .await
+    .map_err(|error| AppError::Tauri(format!("收藏视频读取失败：{error}")))?
+}
+
+#[tauri::command]
 pub fn read_clipboard_text(app: AppHandle) -> AppResult<String> {
     let text = clipboard::read_clipboard_text(&app)?;
     if text.trim().is_empty() {
         return Err(AppError::InvalidInput(
-            "剪贴板中没有可翻译的文本。".to_string(),
+            "剪贴板中没有可翻译的文本".to_string(),
         ));
     }
     Ok(text)
@@ -483,7 +527,7 @@ pub fn read_clipboard_text(app: AppHandle) -> AppResult<String> {
 #[tauri::command]
 pub async fn recognize_clipboard_image(app: AppHandle) -> AppResult<OcrResponse> {
     let image = clipboard::read_clipboard_image_base64(&app)?
-        .ok_or_else(|| AppError::Ocr("剪贴板中没有图片，请先复制或截图。".to_string()))?;
+        .ok_or_else(|| AppError::Ocr("剪贴板中没有图片，请先复制或截图".to_string()))?;
 
     #[cfg(target_os = "linux")]
     let tessdata_dir = Some(
@@ -594,6 +638,7 @@ pub async fn get_transfer_save_dir(state: State<'_, AppState>) -> AppResult<Stri
 pub async fn select_transfer_save_dir(
     app: AppHandle,
     state: State<'_, AppState>,
+    persist: Option<bool>,
 ) -> AppResult<Option<AppConfig>> {
     use tauri_plugin_dialog::DialogExt;
 
@@ -606,9 +651,11 @@ pub async fn select_transfer_save_dir(
     let mut next_config = state.config().await;
     next_config.file_save_dir = Some(path.to_string_lossy().to_string());
     config::normalize_config(&mut next_config);
-    config::save_config(&app, &next_config)?;
-    state.set_config(next_config.clone()).await;
-    app.emit("config-updated", next_config.clone())?;
+    if persist.unwrap_or(true) {
+        config::save_config(&app, &next_config)?;
+        state.set_config(next_config.clone()).await;
+        app.emit("config-updated", next_config.clone())?;
+    }
     Ok(Some(next_config))
 }
 
@@ -632,16 +679,23 @@ pub async fn open_transfer_folder(state: State<'_, AppState>) -> AppResult<()> {
 
 #[tauri::command]
 pub async fn open_history_file_location(
+    app: AppHandle,
     state: State<'_, AppState>,
     history_id: String,
 ) -> AppResult<()> {
     let item = state
-        .history()
+        .history_item(&history_id)
         .await
-        .into_iter()
-        .find(|item| item.id == history_id)
         .ok_or_else(|| AppError::InvalidInput("history item does not exist".to_string()))?;
-    file_transfer::open_history_file_location(&item)
+    if item.content_type == ClipboardContentType::Image {
+        let root = app.path().app_data_dir()?;
+        tauri::async_runtime::spawn_blocking(move || {
+            let path = history::image_file_location(&root, &item)?;
+            file_transfer::reveal_path_with_system_file_manager(&path)
+        }).await.map_err(|error| AppError::Tauri(error.to_string()))?
+    } else {
+        file_transfer::open_history_file_location(&item)
+    }
 }
 
 #[tauri::command]
@@ -653,10 +707,10 @@ pub async fn create_mobile_session(
     let current = clipboard::read_clipboard_text(&app).unwrap_or_default();
     push_unique_clipboard_text(&mut contents, current);
 
-    if let Ok(history_items) = clipboard::read_clipboard_history_text(5).await {
+    if let Ok(history_items) = clipboard::read_clipboard_history_text(10).await {
         for item in history_items {
             push_unique_clipboard_text(&mut contents, item.text);
-            if contents.len() >= 5 {
+            if contents.len() >= 10 {
                 break;
             }
         }
@@ -696,8 +750,13 @@ pub async fn confirm_mobile_clipboard_write(
 
 #[tauri::command]
 pub async fn clear_history(app: AppHandle, state: State<'_, AppState>) -> AppResult<()> {
-    history::clear_history(&app)?;
-    state.replace_history(Vec::new()).await;
+    state
+        .mutate_history(move |items| {
+            history::clear_history(&app)?;
+            items.clear();
+            Ok(())
+        })
+        .await?;
     Ok(())
 }
 
@@ -707,8 +766,10 @@ pub async fn get_cache_size(app: AppHandle) -> AppResult<u64> {
 }
 
 #[tauri::command]
-pub async fn clear_cache(app: AppHandle) -> AppResult<u64> {
-    history::clear_cache(&app)
+pub async fn clear_cache(app: AppHandle, state: State<'_, AppState>) -> AppResult<u64> {
+    state
+        .mutate_history(move |_| history::clear_cache(&app))
+        .await
 }
 
 #[tauri::command]
@@ -718,10 +779,8 @@ pub async fn copy_history_item(
     history_id: String,
 ) -> AppResult<CopyHistoryResult> {
     let item = state
-        .history()
+        .history_item(&history_id)
         .await
-        .into_iter()
-        .find(|item| item.id == history_id)
         .ok_or(AppError::InvalidInput("历史记录不存在".to_string()))?;
 
     match item.content_type {
@@ -735,12 +794,13 @@ pub async fn copy_history_item(
             Ok(CopyHistoryResult::Copied)
         }
         ClipboardContentType::Image => {
-            if item.content.trim().is_empty() {
-                return Err(AppError::InvalidInput(
-                    "这条图片历史没有可复制的图片内容，请重新复制或同步一次图片".to_string(),
-                ));
-            }
-            clipboard::write_clipboard_image_base64(&app, &item.content)?;
+            let root = app.path().app_data_dir()?;
+            let summary = item.summary.clone();
+            let content =
+                tauri::async_runtime::spawn_blocking(move || history::image_content(&root, &item))
+                    .await
+                    .map_err(|error| AppError::Tauri(format!("图片历史读取失败：{error}")))??;
+            clipboard::write_clipboard_image_base64(&app, &content, Some(&summary))?;
             Ok(CopyHistoryResult::Copied)
         }
         ClipboardContentType::FileList => {
@@ -767,13 +827,15 @@ pub async fn get_history_image_thumbnail(
     max_size: Option<u32>,
 ) -> AppResult<String> {
     let item = state
-        .history()
+        .history_item(&history_id)
         .await
-        .into_iter()
-        .find(|item| item.id == history_id)
         .ok_or(AppError::InvalidInput("历史记录不存在".to_string()))?;
 
-    history::get_history_image_thumbnail(&app, &item, max_size)
+    tauri::async_runtime::spawn_blocking(move || {
+        history::get_history_image_thumbnail(&app, &item, max_size)
+    })
+    .await
+    .map_err(|error| AppError::Tauri(format!("图片缩略图读取失败：{error}")))?
 }
 
 #[tauri::command]
@@ -784,13 +846,15 @@ pub async fn get_history_file_thumbnail(
     max_size: Option<u32>,
 ) -> AppResult<String> {
     let item = state
-        .history()
+        .history_item(&history_id)
         .await
-        .into_iter()
-        .find(|item| item.id == history_id)
         .ok_or(AppError::InvalidInput("历史记录不存在".to_string()))?;
 
-    history::get_history_file_thumbnail(&app, &item, max_size)
+    tauri::async_runtime::spawn_blocking(move || {
+        history::get_history_file_thumbnail(&app, &item, max_size)
+    })
+    .await
+    .map_err(|error| AppError::Tauri(format!("文件缩略图读取失败：{error}")))?
 }
 
 #[tauri::command]
@@ -799,13 +863,52 @@ pub async fn get_history_file_preview_path(
     history_id: String,
 ) -> AppResult<String> {
     let item = state
-        .history()
+        .history_item(&history_id)
         .await
-        .into_iter()
-        .find(|item| item.id == history_id)
         .ok_or(AppError::InvalidInput("历史记录不存在".to_string()))?;
 
     history::get_history_file_preview_path(&item)
+}
+
+#[tauri::command]
+pub async fn save_history_media(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    state: State<'_, AppState>,
+    history_id: String,
+) -> AppResult<bool> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let item = state
+        .history_item(&history_id)
+        .await
+        .ok_or(AppError::InvalidInput("历史记录不存在".to_string()))?;
+    let root = app.path().app_data_dir()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let (name, extension) = match item.content_type {
+            ClipboardContentType::Image => ("CopyShare.png".to_string(), "png".to_string()),
+            ClipboardContentType::FileList => {
+                let path = std::path::PathBuf::from(history::get_history_file_preview_path(&item)?);
+                (
+                    path.file_name().unwrap_or_default().to_string_lossy().to_string(),
+                    path.extension().unwrap_or_default().to_string_lossy().to_string(),
+                )
+            }
+            _ => return Err(AppError::InvalidInput("只能另存图片或视频".to_string())),
+        };
+        let Some(path) = app.dialog().file()
+            .set_parent(&window)
+            .set_file_name(name)
+            .add_filter("Media", &[&extension])
+            .blocking_save_file() else {
+                return Ok(false);
+            };
+        let path = path.into_path().map_err(|error| AppError::InvalidInput(error.to_string()))?;
+        history::save_history_media(&root, &item, &path)?;
+        Ok(true)
+    })
+    .await
+    .map_err(|error| AppError::Tauri(format!("另存任务执行失败：{error}")))?
 }
 
 #[tauri::command]
@@ -867,7 +970,6 @@ pub async fn show_main_window(app: AppHandle) -> AppResult<()> {
     if let Some(window) = app.get_webview_window("main") {
         window.show()?;
         window.unminimize()?;
-        window.center()?;
         window.set_focus()?;
     }
     Ok(())
@@ -887,6 +989,49 @@ pub fn exit_app(app: AppHandle) {
 }
 
 #[tauri::command]
+pub async fn prepare_app_update(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    if window.label() != "main" {
+        return Err(AppError::InvalidInput(
+            "更新只能在主窗口中操作".to_string(),
+        ));
+    }
+    // ponytail: snapshot guard; add an installation gate if new transfers must also be blocked.
+    let tasks = file_transfer::get_file_transfers().await?;
+    if tasks.iter().any(|task| update_blocks_transfer(&task.status)) {
+        return Err(AppError::InvalidInput(
+            "请等待文件传输完成或暂停后再安装更新".to_string(),
+        ));
+    }
+    state.save_history(&app).await?;
+    Ok(())
+}
+
+fn update_blocks_transfer(status: &crate::models::FileTransferStatus) -> bool {
+    use crate::models::FileTransferStatus;
+    matches!(
+        status,
+        FileTransferStatus::Accepted
+            | FileTransferStatus::Transferring
+            | FileTransferStatus::WaitingForPeer
+            | FileTransferStatus::Retrying
+    )
+}
+
+#[tauri::command]
+pub async fn restart_app(app: AppHandle, window: tauri::WebviewWindow) -> AppResult<()> {
+    if window.label() != "main" {
+        return Err(AppError::InvalidInput(
+            "更新只能在主窗口中操作".to_string(),
+        ));
+    }
+    app.restart();
+}
+
+#[tauri::command]
 pub async fn send_test_notification(app: AppHandle) -> AppResult<()> {
     notifications::notify_test(&app).map_err(AppError::Tauri)
 }
@@ -899,4 +1044,31 @@ pub async fn move_floating_window_to_cursor(app: AppHandle) -> AppResult<()> {
 #[tauri::command]
 pub async fn move_main_window_to_center(app: AppHandle) -> AppResult<()> {
     window_position::move_main_window_to_center(&app)
+}
+
+#[tauri::command]
+pub async fn wait_for_primary_mouse_release() {
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
+        while unsafe { GetAsyncKeyState(VK_LBUTTON.0 as i32) } < 0 {
+            tokio::time::sleep(Duration::from_millis(30)).await;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::update_blocks_transfer;
+    use crate::models::FileTransferStatus::*;
+
+    #[test]
+    fn update_requires_running_and_reconnecting_transfers_to_pause() {
+        for status in [Accepted, Transferring, WaitingForPeer, Retrying] {
+            assert!(update_blocks_transfer(&status));
+        }
+        for status in [Pending, Paused, Completed, Failed, Canceled, Rejected] {
+            assert!(!update_blocks_transfer(&status));
+        }
+    }
 }

@@ -1,4 +1,4 @@
-import type { SyncState } from "@/types/status";
+import type { AppStatus, SyncState } from "@/types/status";
 
 type ConnectionBadgeView = {
   containerClass: string;
@@ -22,4 +22,10 @@ const badgeViews: Record<SyncState, ConnectionBadgeView> = {
 
 export function getConnectionBadgeView(state: SyncState): ConnectionBadgeView {
   return badgeViews[state];
+}
+
+export function getConnectionStatusLabel(status: Pick<AppStatus, "state" | "connectedCount">): string {
+  if (status.state === "error") return "连接异常";
+  if (status.state === "stopped") return "已停止";
+  return status.connectedCount > 0 ? "同步中" : "待连接";
 }

@@ -3,25 +3,22 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useRoute } from "vue-router";
 import FolderOpen from "lucide-vue-next/dist/esm/icons/folder-open.js";
 import Minus from "lucide-vue-next/dist/esm/icons/minus.js";
-import RotateCcw from "lucide-vue-next/dist/esm/icons/rotate-ccw.js";
-import ZoomIn from "lucide-vue-next/dist/esm/icons/zoom-in.js";
-import ZoomOut from "lucide-vue-next/dist/esm/icons/zoom-out.js";
 import X from "lucide-vue-next/dist/esm/icons/x.js";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
-import HistoryImageThumb from "@/components/history/HistoryImageThumb.vue";
-import {
-  getNextMediaPreviewImageOffset,
-  getNextMediaPreviewImageScale,
-  MEDIA_PREVIEW_IMAGE_MIN_SCALE,
-  shouldPanMediaPreviewImage,
-  type MediaPreviewImagePoint,
-} from "@/lib/mediaPreviewImagePanZoom";
-import type { MediaPreviewKind, MediaPreviewPayload } from "@/lib/tauri";
+import type { MediaPreviewPayload } from "@/lib/tauri";
+import type { ClipboardPreviewItem } from "@/lib/historyPreview";
+import { splitClipboardFileSummary } from "@/lib/historyPreview";
+import MediaPreviewToolbar from "@/components/history/MediaPreviewToolbar.vue";
+import DirectImagePreview from "@/components/history/DirectImagePreview.vue";
+import { adjacentMediaPreviewItem, mediaPreviewItems, nextVideoPlaybackRate } from "@/lib/mediaPreviewControls";
 import {
   closeWindow,
+  convertLocalFileSrc,
+  getHistoryFilePreviewPath,
+  MEDIA_PREVIEW_ITEMS_STORAGE_KEY,
   getConfig,
-  minimizeWindow,
+  hideWindow,
   onAppEvent,
   openHistoryFileLocation,
   startWindowDrag,
@@ -33,47 +30,45 @@ import type { AppConfig, AppTheme } from "@/types/config";
 const route = useRoute();
 const toastStore = useToastStore();
 
-const previewKind = ref<MediaPreviewKind>("image");
 const historyId = ref("");
-const title = ref("媒体预览");
+const kind = ref<MediaPreviewPayload["kind"]>("video");
+const title = ref("视频预览");
 const videoSrc = ref("");
 const videoError = ref("");
 const videoRef = ref<HTMLVideoElement | null>(null);
-const imagePreviewScale = ref(MEDIA_PREVIEW_IMAGE_MIN_SCALE);
-const imagePreviewOffset = ref<MediaPreviewImagePoint>({ x: 0, y: 0 });
-const isImagePreviewPanning = ref(false);
-const imagePreviewDragPointerId = ref<number | null>(null);
+const videoSession = ref(0);
+const playlist = ref<ClipboardPreviewItem[]>([]);
+const playbackRate = ref(1);
+const navigating = ref(false);
+let videoRequest = 0;
+const previousVideo = computed(() => adjacentMediaPreviewItem(playlist.value, historyId.value, -1));
+const nextVideo = computed(() => adjacentMediaPreviewItem(playlist.value, historyId.value, 1));
 let mediaPreviewUnlisten: UnlistenFn | null = null;
 let themeUnlisten: UnlistenFn | null = null;
 let isUnmounted = false;
-let imagePreviewDragOriginPointer: MediaPreviewImagePoint | null = null;
-let imagePreviewDragOriginOffset: MediaPreviewImagePoint | null = null;
-
-const isImage = computed(() => previewKind.value === "image");
-const isVideo = computed(() => previewKind.value === "video");
-const subtitle = computed(() => (isImage.value ? "图片预览" : "视频预览"));
-const imagePreviewZoomLabel = computed(() => `${Math.round(imagePreviewScale.value * 100)}%`);
-const imagePreviewTransformStyle = computed(() => ({
-  cursor: shouldPanMediaPreviewImage(imagePreviewScale.value)
-    ? isImagePreviewPanning.value
-      ? "grabbing"
-      : "grab"
-    : "zoom-in",
-  transform: `translate3d(${imagePreviewOffset.value.x}px, ${imagePreviewOffset.value.y}px, 0) scale(${imagePreviewScale.value})`,
-  transition: isImagePreviewPanning.value ? "none" : "transform 140ms ease",
-}));
 
 function queryValue(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
 function payloadFromRoute(): MediaPreviewPayload {
-  const kind = queryValue(route.query.kind) === "video" ? "video" : "image";
+  const kind = route.query.kind === "image" ? "image" : "video";
+  let items: ClipboardPreviewItem[] = [];
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(MEDIA_PREVIEW_ITEMS_STORAGE_KEY) ?? "[]");
+    if (Array.isArray(stored)) items = stored.filter(item =>
+      item && typeof item.id === "string" && typeof item.text === "string"
+        && item.contentType === (kind === "image" ? "image" : "fileList"),
+    );
+  } catch {
+    // A stale playlist must not prevent opening the requested video.
+  }
   return {
     kind,
     historyId: queryValue(route.query.historyId),
-    title: queryValue(route.query.title) || "媒体预览",
-    src: queryValue(route.query.src) || undefined,
+    title: queryValue(route.query.title) || (kind === "image" ? "图片预览" : "视频预览"),
+    src: queryValue(route.query.src),
+    items,
   };
 }
 
@@ -88,41 +83,60 @@ function releaseVideoElement() {
   video.load();
 }
 
-function resetImagePreviewTransform() {
-  finishImagePreviewDrag();
-  imagePreviewScale.value = MEDIA_PREVIEW_IMAGE_MIN_SCALE;
-  imagePreviewOffset.value = { x: 0, y: 0 };
+function applyMediaPreviewPayload(payload: MediaPreviewPayload) {
+  videoRequest++;
+  navigating.value = false;
+  releaseVideoElement();
+  videoSession.value++;
+  historyId.value = payload.historyId;
+  kind.value = payload.kind;
+  title.value = payload.title || (payload.kind === "image" ? "图片预览" : "视频预览");
+  videoSrc.value = payload.src || "";
+  videoError.value = "";
+  playbackRate.value = 1;
+  playlist.value = mediaPreviewItems(payload.items ?? [], payload.kind);
 }
 
-function setImagePreviewScale(nextScale: number) {
-  imagePreviewScale.value = nextScale;
-  if (nextScale === MEDIA_PREVIEW_IMAGE_MIN_SCALE) {
-    imagePreviewOffset.value = { x: 0, y: 0 };
-    finishImagePreviewDrag();
+async function changeVideo(direction: -1 | 1) {
+  if (navigating.value) return;
+  const item = adjacentMediaPreviewItem(playlist.value, historyId.value, direction);
+  if (!item) return;
+  const request = ++videoRequest;
+  navigating.value = true;
+  try {
+    const path = await getHistoryFilePreviewPath(item.id);
+    if (request !== videoRequest || isUnmounted) return;
+    applyMediaPreviewPayload({
+      kind: "video", historyId: item.id,
+      title: splitClipboardFileSummary(item.text).name || "视频预览",
+      src: convertLocalFileSrc(path), items: playlist.value,
+    });
+  } catch (error) {
+    if (request === videoRequest && !isUnmounted) toastStore.error(`无法预览视频：${String(error)}`);
+  } finally {
+    if (request === videoRequest) navigating.value = false;
   }
 }
 
-function zoomImageIn() {
-  setImagePreviewScale(getNextMediaPreviewImageScale(imagePreviewScale.value, -120));
+function setPlaybackRate(rate: number) {
+  playbackRate.value = rate;
+  if (videoRef.value) videoRef.value.playbackRate = rate;
 }
 
-function zoomImageOut() {
-  setImagePreviewScale(getNextMediaPreviewImageScale(imagePreviewScale.value, 120));
-}
-
-function applyMediaPreviewPayload(payload: MediaPreviewPayload) {
-  resetImagePreviewTransform();
-  releaseVideoElement();
-  previewKind.value = payload.kind;
-  historyId.value = payload.historyId;
-  title.value = payload.title || "媒体预览";
-  videoSrc.value = payload.kind === "video" ? payload.src ?? "" : "";
-  videoError.value = "";
+function replayVideo() {
+  const video = videoRef.value;
+  if (!video || !Number.isFinite(video.duration)) return;
+  video.currentTime = 0;
+  void video.play().catch(error => toastStore.error(`无法播放此视频：${String(error)}`));
 }
 
 function applyMediaPreviewTheme(theme: AppTheme) {
   document.documentElement.dataset.appTheme = theme;
   document.body.dataset.appTheme = theme;
+}
+
+function applyPreviewCanvas() {
+  document.documentElement.dataset.windowMode = "media-preview";
 }
 
 async function bindMediaPreviewTheme() {
@@ -167,69 +181,18 @@ function handleWindowDrag(event: MouseEvent) {
   startWindowDragFromMouseEvent(event, startWindowDrag);
 }
 
-function finishImagePreviewDrag(event?: Event) {
-  if (
-    event instanceof PointerEvent &&
-    event.currentTarget instanceof HTMLElement &&
-    imagePreviewDragPointerId.value === event.pointerId &&
-    event.currentTarget.hasPointerCapture(event.pointerId)
-  ) {
-    event.currentTarget.releasePointerCapture(event.pointerId);
-  }
-  isImagePreviewPanning.value = false;
-  imagePreviewDragPointerId.value = null;
-  imagePreviewDragOriginPointer = null;
-  imagePreviewDragOriginOffset = null;
-}
-
-function pointerFromEvent(event: MouseEvent | PointerEvent): MediaPreviewImagePoint {
-  return { x: event.clientX, y: event.clientY };
-}
-
-function handleImagePreviewWheel(event: WheelEvent) {
-  setImagePreviewScale(getNextMediaPreviewImageScale(imagePreviewScale.value, event.deltaY));
-}
-
-function handleImagePreviewDragPress(event: PointerEvent) {
-  if (event.button !== 0) {
-    return;
-  }
-
-  event.preventDefault();
-  event.stopPropagation();
-  if (event.currentTarget instanceof HTMLElement) {
-    event.currentTarget.setPointerCapture(event.pointerId);
-  }
-  isImagePreviewPanning.value = true;
-  imagePreviewDragPointerId.value = event.pointerId;
-  imagePreviewDragOriginPointer = pointerFromEvent(event);
-  imagePreviewDragOriginOffset = { ...imagePreviewOffset.value };
-}
-
-function handleImagePreviewDragMove(event: PointerEvent) {
-  if (
-    !isImagePreviewPanning.value ||
-    imagePreviewDragPointerId.value !== event.pointerId ||
-    !imagePreviewDragOriginPointer ||
-    !imagePreviewDragOriginOffset
-  ) {
-    return;
-  }
-
-  imagePreviewOffset.value = getNextMediaPreviewImageOffset(
-    imagePreviewDragOriginOffset,
-    imagePreviewDragOriginPointer,
-    pointerFromEvent(event),
-  );
-}
-
 function handleVideoPreviewError() {
   if (videoError.value) {
     return;
   }
 
-  videoError.value = "无法播放此视频，可能是文件编码不受当前播放器支持。";
+  videoError.value = "无法播放此视频，可能是文件编码不受当前播放器支持";
   toastStore.error("无法播放此视频");
+}
+
+function handleImageChange(id: string) {
+  historyId.value = id;
+  title.value = splitClipboardFileSummary(playlist.value.find(item => item.id === id)?.text ?? "").name || "图片预览";
 }
 
 async function revealSourceFile() {
@@ -246,26 +209,14 @@ async function revealSourceFile() {
 
 function handlePreviewKeydown(event: KeyboardEvent) {
   if (event.key === "Escape") {
-    void closeWindow();
-    return;
-  }
-  if (!isImage.value) {
-    return;
-  }
-  if (event.key === "+" || event.key === "=") {
-    event.preventDefault();
-    zoomImageIn();
-  } else if (event.key === "-") {
-    event.preventDefault();
-    zoomImageOut();
-  } else if (event.key === "0") {
-    event.preventDefault();
-    resetImagePreviewTransform();
+    if (document.fullscreenElement) void document.exitFullscreen();
+    else void closeWindow();
   }
 }
 
 onMounted(async () => {
   isUnmounted = false;
+  applyPreviewCanvas();
   applyMediaPreviewPayload(payloadFromRoute());
   window.addEventListener("keydown", handlePreviewKeydown);
   void bindMediaPreviewTheme();
@@ -274,12 +225,12 @@ onMounted(async () => {
 
 onUnmounted(() => {
   isUnmounted = true;
+  videoRequest++;
   mediaPreviewUnlisten?.();
   mediaPreviewUnlisten = null;
   themeUnlisten?.();
   themeUnlisten = null;
   window.removeEventListener("keydown", handlePreviewKeydown);
-  finishImagePreviewDrag();
   releaseVideoElement();
 });
 </script>
@@ -287,47 +238,50 @@ onUnmounted(() => {
 <template>
   <section
     data-media-preview-window
-    data-media-preview-transparent-canvas
-    class="relative h-screen w-screen overflow-hidden bg-transparent text-slate-100"
+    class="media-preview-glass relative grid h-screen w-screen grid-rows-[auto_minmax(0,1fr)] overflow-hidden text-[color:var(--clipboard-card-text)]"
   >
-    <div
-      data-media-preview-viewer-frame
-      aria-hidden="true"
-      class="pointer-events-none absolute inset-2 rounded-[18px] border border-white/[0.20] bg-[#101317]/[0.94] shadow-[0_24px_70px_rgba(0,0,0,0.48),inset_0_1px_0_rgba(255,255,255,0.045)] backdrop-blur-2xl"
-    />
-
     <header
-      class="absolute inset-x-2 top-2 z-30 flex h-[58px] items-center justify-between gap-3 px-4 sm:px-5"
+      data-media-preview-titlebar
+      class="media-preview-glass-titlebar z-30 flex h-[52px] min-w-0 items-center justify-between gap-3 px-3"
       data-window-drag-region
       @mousedown.capture="handleWindowDrag"
     >
       <div
-        data-media-preview-glass-chrome
         class="flex min-w-0 items-center"
         data-window-drag-region
       >
         <div class="flex min-w-0 flex-row-reverse items-center justify-end gap-2.5" data-window-drag-region>
-          <p data-i18n-ignore class="max-w-[220px] truncate border-l border-white/[0.13] pl-2.5 text-[11px] font-medium text-white/48 sm:max-w-[380px] sm:text-[12px]">{{ title }}</p>
-          <p class="shrink-0 text-[14px] font-semibold tracking-[-0.01em] text-white/95 sm:text-[15px]">{{ subtitle }}</p>
+          <p data-i18n-ignore class="truncate border-l border-[color:var(--main-line)] pl-2.5 text-[12px] text-[color:var(--muted-text)]">{{ title }}</p>
+          <p class="shrink-0 text-[14px] font-semibold">{{ kind === "image" ? "图片预览" : "视频预览" }}</p>
         </div>
       </div>
       <div
-        data-media-preview-glass-chrome
-        class="flex shrink-0 items-center gap-1.5"
+        class="flex shrink-0 items-center gap-1"
       >
         <button
+          v-if="historyId"
+          data-media-preview-open-location-button
+          class="media-preview-window-control"
+          type="button"
+          aria-label="打开文件位置"
+          title="打开文件位置"
+          @click="revealSourceFile"
+        >
+          <FolderOpen class="h-4 w-4" />
+        </button>
+        <button
           data-media-preview-minimize-button
-          class="grid h-8 w-8 place-items-center rounded-full border border-white/[0.10] text-white/58 transition duration-150 hover:border-white/20 hover:bg-white/[0.08] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+          class="media-preview-window-control"
           type="button"
           aria-label="隐藏预览"
           title="隐藏"
           data-window-control
-          @click="minimizeWindow"
+          @click="hideWindow"
         >
           <Minus class="h-4 w-4" />
         </button>
         <button
-          class="grid h-9 w-9 place-items-center rounded-full border border-white/[0.20] bg-white/[0.025] text-white/78 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] transition duration-150 hover:border-white/35 hover:bg-white/[0.10] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
+          class="media-preview-window-control"
           type="button"
           aria-label="关闭预览"
           title="关闭"
@@ -339,47 +293,25 @@ onUnmounted(() => {
       </div>
     </header>
 
-    <main class="absolute inset-x-6 bottom-[66px] top-[70px] overflow-visible">
-      <div
-        v-if="isImage"
-        data-media-preview-image-drag-surface
-        data-media-preview-stage
-        class="relative grid h-full touch-none place-items-center overflow-hidden rounded-xl border border-white/[0.10] bg-[#07090c] shadow-[inset_0_1px_0_rgba(255,255,255,0.025),0_12px_30px_rgba(0,0,0,0.24)]"
-        @wheel.prevent="handleImagePreviewWheel"
-        @pointerdown.left="handleImagePreviewDragPress"
-        @pointermove="handleImagePreviewDragMove"
-        @pointerup="finishImagePreviewDrag"
-        @pointercancel="finishImagePreviewDrag"
-        @lostpointercapture="finishImagePreviewDrag"
-        @contextmenu="finishImagePreviewDrag"
-        @dragstart.prevent="finishImagePreviewDrag"
-      >
-        <HistoryImageThumb
-          v-if="historyId"
-          data-media-preview-image
-          :history-id="historyId"
-          :max-size="1600"
-          variant="preview"
-          :alt="title"
-          class="media-preview-image !h-full !w-full !max-h-full !max-w-full !rounded-none !border-0 !bg-transparent select-none will-change-transform"
-          :style="imagePreviewTransformStyle"
-          draggable="false"
-        />
-      </div>
-
-      <div v-else class="grid h-full grid-rows-[minmax(0,1fr)_auto] gap-3">
-        <div data-media-preview-stage class="overflow-hidden rounded-xl border border-white/[0.10] bg-black shadow-[0_12px_30px_rgba(0,0,0,0.24)]">
+    <main v-if="kind === 'image'" data-media-preview-image class="min-h-0 min-w-0 overflow-hidden">
+      <DirectImagePreview :key="videoSession" embedded :history-id="historyId" :alt="title" :items="playlist" @change="handleImageChange" @close="closeWindow" />
+    </main>
+    <main v-else class="min-h-0 min-w-0 overflow-hidden p-3">
+      <div class="flex h-full flex-col gap-3">
+        <div data-media-preview-stage class="min-h-0 flex-1 overflow-hidden rounded-xl bg-transparent">
           <video
             v-if="videoSrc"
             ref="videoRef"
+            :key="videoSession"
             data-media-preview-video
             :src="videoSrc"
-            class="h-full max-h-full w-full bg-black object-contain"
+            class="h-full max-h-full w-full rounded-xl bg-transparent object-contain shadow-[0_16px_48px_rgba(0,0,0,0.42)]"
             preload="metadata"
             controls
             autoplay
             playsinline
             @error="handleVideoPreviewError"
+            @loadedmetadata="setPlaybackRate(playbackRate)"
           />
           <p
             v-else
@@ -388,12 +320,31 @@ onUnmounted(() => {
             暂无可预览的视频文件
           </p>
         </div>
+        <div class="z-30 flex shrink-0 justify-center" data-media-preview-video-toolbar>
+          <MediaPreviewToolbar
+            kind="video"
+            :history-id="historyId"
+            :value="playbackRate"
+            :previous-disabled="!previousVideo || navigating"
+            :next-disabled="!nextVideo || navigating"
+            :decrease-disabled="playbackRate <= 0.25"
+            :increase-disabled="playbackRate >= 3"
+            :fullscreen-target="videoRef"
+            @previous="changeVideo(-1)"
+            @next="changeVideo(1)"
+            @decrease="setPlaybackRate(nextVideoPlaybackRate(playbackRate, -1))"
+            @increase="setPlaybackRate(nextVideoPlaybackRate(playbackRate, 1))"
+            @reset="setPlaybackRate(1)"
+            @rotate="replayVideo"
+          />
+        </div>
         <div
           v-if="videoError"
-          class="flex items-center justify-between gap-3 rounded-xl border border-amber-200/20 bg-[#18140b]/70 px-3 py-2 text-xs font-medium text-amber-100 shadow-[0_10px_28px_rgba(0,0,0,0.24)] backdrop-blur-xl"
+          class="flex items-center justify-between gap-3 rounded-xl border border-[color:var(--main-line)] bg-[color:var(--floating-control-bg)] px-3 py-2 text-xs font-medium text-[color:var(--clipboard-card-text)]"
         >
           <span>{{ videoError }}</span>
           <button
+            v-if="historyId"
             class="shrink-0 rounded-md border border-amber-200/20 px-2 py-1 transition hover:bg-amber-200/10"
             type="button"
             @click="revealSourceFile"
@@ -404,73 +355,60 @@ onUnmounted(() => {
       </div>
     </main>
 
-    <div
-      v-if="isImage"
-      data-media-preview-glass-toolbar
-      class="absolute bottom-[28px] left-1/2 z-40 flex h-12 -translate-x-1/2 items-center gap-0.5 rounded-[24px] border border-white/[0.13] bg-[#20262c]/[0.94] px-2 text-white shadow-[0_14px_36px_rgba(0,0,0,0.44),inset_0_1px_0_rgba(255,255,255,0.055)] backdrop-blur-2xl"
-    >
-      <button
-        class="grid h-9 w-9 place-items-center rounded-full text-white/68 transition hover:bg-white/[0.09] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/25 disabled:cursor-default disabled:opacity-30"
-        type="button"
-        aria-label="缩小图片"
-        title="缩小"
-        :disabled="imagePreviewScale === MEDIA_PREVIEW_IMAGE_MIN_SCALE"
-        @click="zoomImageOut"
-      >
-        <ZoomOut class="h-[18px] w-[18px]" />
-      </button>
-      <span
-        data-media-preview-zoom-label
-        class="min-w-[58px] px-1 text-center font-mono text-[12px] font-semibold tabular-nums text-white/88"
-      >
-        {{ imagePreviewZoomLabel }}
-      </span>
-      <button
-        class="grid h-9 w-9 place-items-center rounded-full text-white/68 transition hover:bg-white/[0.09] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/25"
-        type="button"
-        aria-label="放大图片"
-        title="放大"
-        @click="zoomImageIn"
-      >
-        <ZoomIn class="h-[18px] w-[18px]" />
-      </button>
-      <span aria-hidden="true" class="mx-1.5 h-6 w-px bg-white/[0.10]" />
-      <button
-        class="grid h-9 w-9 place-items-center rounded-full text-white/68 transition hover:bg-white/[0.09] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/25"
-        type="button"
-        aria-label="重置图片"
-        title="重置缩放"
-        @click="resetImagePreviewTransform"
-      >
-        <RotateCcw class="h-[18px] w-[18px]" />
-      </button>
-      <button
-        v-if="historyId"
-        class="grid h-9 w-9 place-items-center rounded-full text-white/68 transition hover:bg-white/[0.09] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/25"
-        type="button"
-        aria-label="打开文件位置"
-        title="打开文件位置"
-        @click="revealSourceFile"
-      >
-        <FolderOpen class="h-[18px] w-[18px]" />
-      </button>
-    </div>
-
-    <span
-      class="pointer-events-none absolute bottom-[18px] right-5 z-30 hidden items-center gap-1.5 text-[11px] font-medium text-white/45 sm:flex"
-    >
-      <kbd class="rounded border border-white/[0.18] bg-white/[0.035] px-1.5 py-0.5 font-mono text-[9px] text-white/60">Esc</kbd>
-      关闭
-    </span>
   </section>
 </template>
 
 <style scoped>
-.media-preview-image :deep(img) {
-  width: 100%;
-  height: 100%;
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
+:global(html[data-window-mode="media-preview"]),
+:global(html[data-window-mode="media-preview"] body),
+:global(html[data-window-mode="media-preview"] #app) {
+  background: transparent !important;
+}
+
+.media-preview-glass {
+  border: 1px solid var(--floating-control-line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--main-bg) 58%, transparent);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 8%);
+  backdrop-filter: blur(24px) saturate(120%);
+}
+
+.media-preview-glass-titlebar {
+  border-bottom: 1px solid var(--main-line-soft);
+  background: color-mix(in srgb, var(--panel-bg) 60%, transparent);
+}
+
+.media-preview-glass :deep(.preview-toolbar),
+.media-preview-glass :deep(.preview-navigation) {
+  border-color: var(--floating-control-line);
+  background: color-mix(in srgb, var(--field-bg) 78%, transparent);
+  color: var(--clipboard-card-text);
+}
+
+.media-preview-glass :deep(.preview-action:hover:not(:disabled)),
+.media-preview-glass :deep(.preview-value:hover) {
+  background: var(--floating-control-bg-hover);
+  color: var(--clipboard-card-text);
+}
+
+[data-media-preview-video]:fullscreen { background: #000; }
+
+.media-preview-window-control {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: 6px;
+  color: var(--muted-text);
+}
+
+.media-preview-window-control:hover {
+  background: var(--floating-control-bg-hover);
+  color: var(--clipboard-card-text);
+}
+
+.media-preview-window-control:focus-visible {
+  outline: 2px solid var(--accent-text);
+  outline-offset: 2px;
 }
 </style>

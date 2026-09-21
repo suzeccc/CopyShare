@@ -1,9 +1,25 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import {
   shouldStartWindowDrag,
   startWindowDragFromMouseEvent,
 } from "../src/lib/windowDrag.ts";
+
+const style = readFileSync("src/style.css", "utf8");
+
+assert.match(
+  style,
+  /\.floating-window-surface \{[\s\S]*contain: paint;[\s\S]*backdrop-filter: none;[\s\S]*-webkit-backdrop-filter: none;/,
+);
+assert.match(
+  style,
+  /html\[data-window-mode="floating"\] \.app-window-shell \{ filter: none; \}[\s\S]*html\[data-window-mode="floating"\] \.floating-window-surface \{[\s\S]*transform: none;[\s\S]*will-change: auto;/,
+);
+assert.match(
+  style,
+  /html\[data-window-mode="floating"\] \.floating-clipboard-row:hover \{\s*transform: none;/,
+);
 
 type MockTarget = {
   closest: (selector: string) => Element | null;

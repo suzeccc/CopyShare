@@ -2,6 +2,7 @@ use std::{
     cmp::Reverse,
     collections::HashSet,
     fs,
+    io::{self, Read, Write},
     path::{Component, Path, PathBuf},
 };
 
@@ -32,6 +33,7 @@ const LIBRARY_ITEM_LIMIT: usize = 5_000;
 const FILE_COUNT_LIMIT: usize = 100;
 const FILE_SIZE_LIMIT: u64 = 500 * 1024 * 1024;
 const FILE_TOTAL_SIZE_LIMIT: u64 = 1024 * 1024 * 1024;
+const ASSET_BUFFER_SIZE: usize = 64 * 1024;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum LibraryCopyPayload {
@@ -260,48 +262,98 @@ fn store_asset(
     file_name: &str,
     bytes: &[u8],
 ) -> AppResult<LibraryAssetRef> {
-    let sha256 = sha256_hex(bytes);
+    store_asset_reader(root, kind, file_name, bytes)
+}
+
+fn copy_and_hash(mut reader: impl Read, mut writer: impl Write) -> AppResult<(u64, String)> {
+    let mut hasher = Sha256::new();
+    let mut size = 0_u64;
+    let mut buffer = [0_u8; ASSET_BUFFER_SIZE];
+    loop {
+        let read = match reader.read(&mut buffer) {
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            result => result?,
+        };
+        if read == 0 {
+            break;
+        }
+        writer.write_all(&buffer[..read])?;
+        hasher.update(&buffer[..read]);
+        size += read as u64;
+    }
+    Ok((size, format!("{:x}", hasher.finalize())))
+}
+
+fn store_asset_reader(
+    root: &Path,
+    kind: LibraryAssetKind,
+    file_name: &str,
+    reader: impl Read,
+) -> AppResult<LibraryAssetRef> {
     let directory = root.join(LIBRARY_ASSET_DIR);
     fs::create_dir_all(&directory)?;
-    let hash_prefix = format!("{sha256}.");
-    let stored_name = fs::read_dir(&directory)?
-        .filter_map(Result::ok)
-        .find(|entry| {
-            entry.file_type().map(|kind| kind.is_file()).unwrap_or(false)
-                && entry.file_name().to_string_lossy().starts_with(&hash_prefix)
-        })
-        .map(|entry| entry.file_name().to_string_lossy().to_string())
-        .unwrap_or_else(|| format!("{sha256}.{}", safe_extension(file_name)));
-    let relative_path = format!("{LIBRARY_ASSET_DIR}/{stored_name}");
-    let target = directory.join(&stored_name);
-
-    if target.exists() {
-        if sha256_hex(&fs::read(&target)?) != sha256 {
-            return Err(AppError::InvalidInput("收藏资源校验失败".into()));
+    let temp = directory.join(format!(".{}.tmp", Uuid::new_v4()));
+    let result = (|| {
+        let mut output = fs::File::create(&temp)?;
+        // Bound a file that grows after the initial metadata check as well.
+        let limit = if kind == LibraryAssetKind::File {
+            FILE_SIZE_LIMIT + 1
+        } else {
+            u64::MAX
+        };
+        let (size, sha256) = copy_and_hash(reader.take(limit), &mut output)?;
+        if kind == LibraryAssetKind::File && size > FILE_SIZE_LIMIT {
+            return Err(AppError::InvalidInput("单个文件不能超过 500 MiB".into()));
         }
-    } else {
-        let temp = directory.join(format!(".{stored_name}.{}.tmp", Uuid::new_v4()));
-        fs::write(&temp, bytes)?;
-        if sha256_hex(&fs::read(&temp)?) != sha256 {
-            let _ = fs::remove_file(&temp);
+        output.sync_all()?;
+        drop(output);
+        if copy_and_hash(fs::File::open(&temp)?, io::sink())? != (size, sha256.clone()) {
             return Err(AppError::InvalidInput("收藏资源写入校验失败".into()));
         }
-        if let Err(error) = fs::rename(&temp, &target) {
-            let _ = fs::remove_file(&temp);
-            if !target.exists() {
-                return Err(error.into());
+        let hash_prefix = format!("{sha256}.");
+        let stored_name = fs::read_dir(&directory)?
+            .filter_map(Result::ok)
+            .find(|entry| {
+                entry
+                    .file_type()
+                    .map(|kind| kind.is_file())
+                    .unwrap_or(false)
+                    && entry
+                        .file_name()
+                        .to_string_lossy()
+                        .starts_with(&hash_prefix)
+            })
+            .map(|entry| entry.file_name().to_string_lossy().to_string())
+            .unwrap_or_else(|| format!("{sha256}.{}", safe_extension(file_name)));
+        let relative_path = format!("{LIBRARY_ASSET_DIR}/{stored_name}");
+        let target = directory.join(&stored_name);
+
+        if target.exists() {
+            if copy_and_hash(fs::File::open(&target)?, io::sink())? != (size, sha256.clone()) {
+                return Err(AppError::InvalidInput("收藏资源校验失败".into()));
+            }
+        } else {
+            if let Err(error) = fs::rename(&temp, &target) {
+                if !target.exists() {
+                    return Err(error.into());
+                }
+                if copy_and_hash(fs::File::open(&target)?, io::sink())? != (size, sha256.clone()) {
+                    return Err(AppError::InvalidInput("收藏资源校验失败".into()));
+                }
             }
         }
-    }
 
-    Ok(LibraryAssetRef {
-        asset_id: sha256.clone(),
-        kind,
-        file_name: file_name.to_string(),
-        relative_path,
-        sha256,
-        size: bytes.len() as u64,
-    })
+        Ok(LibraryAssetRef {
+            asset_id: sha256.clone(),
+            kind,
+            file_name: file_name.to_string(),
+            relative_path,
+            sha256,
+            size,
+        })
+    })();
+    let _ = fs::remove_file(&temp);
+    result
 }
 
 fn resolve_asset_path(root: &Path, asset: &LibraryAssetRef) -> AppResult<PathBuf> {
@@ -443,8 +495,9 @@ fn saved_item_from_history(root: &Path, history: &HistoryItem) -> AppResult<Libr
             item.content_hash = text_hash(&LibraryRole::Saved, content);
         }
         ClipboardContentType::Image => {
+            let content = crate::history::image_content(root, history)?;
             let bytes = base64::engine::general_purpose::STANDARD
-                .decode(history.content.trim())
+                .decode(content.trim())
                 .map_err(|error| AppError::InvalidInput(format!("图片数据无效：{error}")))?;
             image::load_from_memory(&bytes)
                 .map_err(|error| AppError::InvalidInput(format!("图片数据损坏：{error}")))?;
@@ -490,14 +543,19 @@ fn saved_item_from_history(root: &Path, history: &HistoryItem) -> AppResult<Libr
                 sources.push((entry.name, path));
             }
 
+            total_size = 0;
             for (file_name, path) in sources {
-                let bytes = fs::read(&path)?;
-                item.assets.push(store_asset(
+                let asset = store_asset_reader(
                     root,
                     LibraryAssetKind::File,
                     &file_name,
-                    &bytes,
-                )?);
+                    fs::File::open(&path)?,
+                )?;
+                total_size = total_size.saturating_add(asset.size);
+                if total_size > FILE_TOTAL_SIZE_LIMIT {
+                    return Err(AppError::InvalidInput("单次收藏文件总量不能超过 1 GiB".into()));
+                }
+                item.assets.push(asset);
             }
             item.title = if item.title.is_empty() {
                 "文件".into()
@@ -729,12 +787,15 @@ fn materialize_file_copy(root: &Path, item: &LibraryItem) -> AppResult<Vec<PathB
         let mut paths = Vec::with_capacity(item.assets.len());
         for (index, asset) in item.assets.iter().enumerate() {
             let source = resolve_asset_path(root, asset)?;
-            let bytes = fs::read(source)?;
-            verify_asset_bytes(asset, &bytes)?;
             let directory = session.join(index.to_string());
             fs::create_dir(&directory)?;
             let destination = directory.join(copy_file_name(asset)?);
-            fs::write(&destination, bytes)?;
+            fs::copy(source, &destination)?;
+            if copy_and_hash(fs::File::open(&destination)?, io::sink())?
+                != (asset.size, asset.sha256.clone())
+            {
+                return Err(AppError::InvalidInput(format!("收藏资源损坏：{}", asset.file_name)));
+            }
             paths.push(destination);
         }
         Ok(paths)
@@ -893,6 +954,28 @@ pub fn image_thumbnail(root: &Path, item: &LibraryItem, max_size: u32) -> AppRes
     Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
 }
 
+pub fn video_preview_path(root: &Path, item: &LibraryItem, asset_index: usize) -> AppResult<String> {
+    if item.content_type != ClipboardContentType::FileList {
+        return Err(AppError::InvalidInput("收藏项不是文件".into()));
+    }
+    let asset = item
+        .assets
+        .get(asset_index)
+        .filter(|asset| {
+            asset.kind == LibraryAssetKind::File
+                && crate::history::is_video_file_name(&asset.file_name)
+        })
+        .ok_or_else(|| AppError::InvalidInput("收藏项不是视频文件".into()))?;
+    let path = resolve_asset_path(root, asset)?;
+    if copy_and_hash(fs::File::open(&path)?, io::sink())? != (asset.size, asset.sha256.clone()) {
+        return Err(AppError::InvalidInput(format!(
+            "收藏资源损坏：{}",
+            asset.file_name
+        )));
+    }
+    Ok(path.to_string_lossy().into_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -930,6 +1013,8 @@ mod tests {
             content_type,
             sync_status: SyncStatus::Synced,
             file_transfer_id: None,
+            file_transfer_file_id: None,
+            clipboard_batch_id: None,
             file_transfer_status: None,
             is_pinned: false,
             pinned_at: None,
@@ -1273,6 +1358,111 @@ mod tests {
         assert!(!resolve_asset_path(&root, &first).unwrap().exists());
         assert_eq!(library_storage_size(&root).unwrap(), 0);
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn video_preview_uses_managed_asset_after_original_is_gone() {
+        let root = temp_dir("video-preview");
+        let original = root.join("original.mp4");
+        fs::write(&original, b"video-data").unwrap();
+        let asset = store_asset_reader(
+            &root,
+            LibraryAssetKind::File,
+            "clip.mp4",
+            fs::File::open(&original).unwrap(),
+        )
+        .unwrap();
+        fs::remove_file(&original).unwrap();
+
+        let mut item = new_snippet("clip", "text", vec![], "").unwrap();
+        item.role = LibraryRole::Saved;
+        item.content_type = ClipboardContentType::FileList;
+        item.assets = vec![asset.clone()];
+        let path = video_preview_path(&root, &item, 0).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"video-data");
+        assert!(video_preview_path(&root, &item, 1).is_err());
+        item.assets[0].file_name = "clip.txt".into();
+        assert!(video_preview_path(&root, &item, 0).is_err());
+        item.assets[0] = asset;
+        fs::write(&path, b"damaged").unwrap();
+        assert!(video_preview_path(&root, &item, 0).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn streamed_file_assets_round_trip_and_reject_corruption() {
+        let root = temp_dir("streamed-file");
+        let source = root.join("source.bin");
+        let bytes = (0..ASSET_BUFFER_SIZE * 3 + 17)
+            .map(|index| (index % 251) as u8)
+            .collect::<Vec<_>>();
+        fs::write(&source, &bytes).unwrap();
+        let asset = store_asset_reader(
+            &root,
+            LibraryAssetKind::File,
+            "source.bin",
+            fs::File::open(&source).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(asset.size, bytes.len() as u64);
+        assert_eq!(asset.sha256, sha256_hex(&bytes));
+        let managed = resolve_asset_path(&root, &asset).unwrap();
+        assert_eq!(fs::read(&managed).unwrap(), bytes);
+        let duplicate = store_asset_reader(
+            &root,
+            LibraryAssetKind::File,
+            "other.bin",
+            fs::File::open(&source).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(asset.relative_path, duplicate.relative_path);
+
+        let mut item = new_snippet("file", "unused", vec![], "").unwrap();
+        item.content_type = ClipboardContentType::FileList;
+        item.assets = vec![asset];
+        let LibraryCopyPayload::Files(paths) = copy_payload(&root, &item).unwrap() else {
+            panic!("expected files")
+        };
+        assert_eq!(fs::read(&paths[0]).unwrap(), bytes);
+        discard_file_copy_cache(&paths).unwrap();
+        fs::write(&managed, b"damaged").unwrap();
+        assert!(copy_payload(&root, &item).is_err());
+        assert_eq!(
+            fs::read_dir(root.join(LIBRARY_COPY_CACHE_DIR))
+                .unwrap()
+                .count(),
+            0
+        );
+        assert!(store_asset_reader(
+            &root,
+            LibraryAssetKind::File,
+            "source.bin",
+            fs::File::open(&source).unwrap()
+        )
+        .is_err());
+        assert_eq!(
+            fs::read_dir(root.join(LIBRARY_ASSET_DIR)).unwrap().count(),
+            1
+        );
+
+        struct InterruptedOnce(std::io::Cursor<Vec<u8>>, bool);
+        impl Read for InterruptedOnce {
+            fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+                assert!(buffer.len() <= ASSET_BUFFER_SIZE);
+                if !self.1 {
+                    self.1 = true;
+                    return Err(io::ErrorKind::Interrupted.into());
+                }
+                self.0.read(buffer)
+            }
+        }
+        let result = copy_and_hash(
+            InterruptedOnce(std::io::Cursor::new(bytes.clone()), false),
+            io::sink(),
+        )
+        .unwrap();
+        assert_eq!(result, (bytes.len() as u64, sha256_hex(&bytes)));
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

@@ -3,7 +3,7 @@ export type MediaPreviewImagePoint = {
   y: number;
 };
 
-export const MEDIA_PREVIEW_IMAGE_MIN_SCALE = 1;
+export const MEDIA_PREVIEW_IMAGE_MIN_SCALE = 0.35;
 export const MEDIA_PREVIEW_IMAGE_MAX_SCALE = 5;
 export const MEDIA_PREVIEW_IMAGE_WHEEL_STEP = 0.15;
 
@@ -38,8 +38,4 @@ export function getNextMediaPreviewImageOffset(
     x: originOffset.x + nextPointer.x - originPointer.x,
     y: originOffset.y + nextPointer.y - originPointer.y,
   };
-}
-
-export function shouldPanMediaPreviewImage(scale: number): boolean {
-  return scale >= MEDIA_PREVIEW_IMAGE_MIN_SCALE;
 }

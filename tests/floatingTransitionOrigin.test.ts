@@ -24,4 +24,6 @@ assert.match(floatingPanel, /\(event: "restore", pointer: \{ clientX: number; cl
 assert.match(floatingPanel, /function restoreMainPanel\(event: MouseEvent\) \{[\s\S]*emit\("restore", \{[\s\S]*clientX: event\.clientX,[\s\S]*clientY: event\.clientY,[\s\S]*\}\);[\s\S]*\}/);
 assert.match(floatingPanel, /@click="restoreMainPanel"/);
 
-assert.match(style, /transform-origin: var\(--window-transition-origin, center\)/);
+assert.doesNotMatch(style, /--window-transition-origin/);
+assert.match(style, /transform-origin: top right/);
+assert.match(style, /@keyframes panel-zoom-in/);

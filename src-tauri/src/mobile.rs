@@ -484,6 +484,7 @@ fn mobile_text_item(text: String, source_device: String) -> ClipboardTextItem {
         id: Uuid::new_v4().simple().to_string(),
         text,
         source_device,
+        created_at: Some(Utc::now()),
     }
 }
 
@@ -576,7 +577,7 @@ async fn record_mobile_submitted_history(
 
     let item = mobile_submitted_history_item_from_message(message);
     state.push_history(item.clone()).await;
-    history::save_history(app, &state.history().await)?;
+    state.save_history(app).await?;
     let _ = app.emit("clipboard-synced", history::history_item_for_frontend(&item));
     Ok(())
 }
@@ -821,9 +822,13 @@ async fn route_mobile_request(
     if request.method == "GET" && path.starts_with("/m/") {
         let id = path.trim_start_matches("/m/").trim_matches('/');
         let mut page = i18n::translate(&config, &mobile_page_html(id, &token));
-        if i18n::effective_language(config.ui_language) == UiLanguage::EnUs {
-            page = page.replace("lang=\"zh-CN\"", "lang=\"en-US\"");
-        }
+        let locale = match i18n::effective_language(config.ui_language) {
+            UiLanguage::ZhTw => "zh-TW",
+            UiLanguage::EnUs => "en-US",
+            UiLanguage::JaJp => "ja-JP",
+            _ => "zh-CN",
+        };
+        page = page.replace("lang=\"zh-CN\"", &format!("lang=\"{locale}\""));
         return http_html(200, &page);
     }
 
@@ -944,6 +949,7 @@ fn mobile_page_html(id: &str, token: &str) -> String {
     .item pre {{ margin: 10px 0 0; }}
     .actions {{ display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 10px; }}
     .empty {{ border: 1px dashed rgba(255,255,255,.18); border-radius: 18px; padding: 14px; color: #b9b9b9; }}
+    .notice {{ margin: 12px 0 0; padding: 10px 12px; border: 1px solid rgba(255,210,120,.28); border-radius: 14px; background: rgba(255,210,120,.08); color: #ffe6a8; font-size: 13px; line-height: 1.6; }}
     .status {{ margin-top: 12px; color: #dff6ff; }}
   </style>
 </head>
@@ -951,6 +957,7 @@ fn mobile_page_html(id: &str, token: &str) -> String {
 <main>
   <h1 id="title">CopyShare</h1>
   <p id="hint">正在读取二维码内容...</p>
+  <p class="notice">当前暂时只能同步文本，图片和文件暂不支持</p>
   <section id="app"></section>
   <p class="status" id="status"></p>
 </main>
@@ -1054,7 +1061,7 @@ function syncSelection(items) {{
   }}
 }}
 function renderPcList(items) {{
-  if (!items.length) return '<p class="empty">电脑端没有可读取的文本剪贴板。</p>';
+  if (!items.length) return '<p class="empty">电脑端没有可读取的文本剪贴板</p>';
   syncSelection(items);
   const list = items.map(function(item, index) {{
     const key = itemKey(item, index);
@@ -1110,12 +1117,12 @@ function selectedPcTexts(items) {{
 function copySelectedPcItems() {{
   const selectedTexts = selectedPcTexts(latestPcItems);
   if (!selectedTexts.length) {{
-    setStatus("请先选择要复制的电脑剪贴板内容。");
+    setStatus("请先选择要复制的电脑剪贴板内容");
     return;
   }}
   navigator.clipboard.writeText(selectedTexts.join("\n\n")).then(async function() {{
     await fetch(api, {{ method: "POST", headers: {{ "Content-Type": "application/json" }}, body: JSON.stringify({{ action: "copied" }}) }});
-    setStatus("已复制 " + selectedTexts.length + " 条电脑剪贴板内容。");
+    setStatus("已复制 " + selectedTexts.length + " 条电脑剪贴板内容");
   }}).catch(function(error) {{
     setStatus(error.message || "复制失败");
   }});
@@ -1128,17 +1135,17 @@ function readPhoneClipboard(areaId) {{
   if (!textarea) return;
   if (!navigator.clipboard || !navigator.clipboard.readText) {{
     textarea.focus();
-    setStatus("无法读取手机剪贴板，请长按输入框手动粘贴。");
+    setStatus("无法读取手机剪贴板，请长按输入框手动粘贴");
     return;
   }}
   navigator.clipboard.readText().then(function(text) {{
     textarea.value = text || "";
     textarea.focus();
-    setStatus(textarea.value.trim() ? "已粘贴手机剪贴板内容。" : "手机剪贴板为空。");
+    setStatus(textarea.value.trim() ? "已粘贴手机剪贴板内容" : "手机剪贴板为空");
   }}).catch(function(error) {{
     textarea.focus();
     const detail = error && error.message ? " " + error.message : "";
-    setStatus("无法读取手机剪贴板，请长按输入框手动粘贴。" + detail);
+    setStatus("无法读取手机剪贴板，请长按输入框手动粘贴" + detail);
   }});
 }}
 function senderHtml(areaId) {{
@@ -1155,12 +1162,12 @@ function bindSender(areaId) {{
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || "发送失败");
     field.value = "";
-    setStatus("已发送，已自动写入电脑剪贴板。可以继续发送下一条。");
+    setStatus("已发送，已自动写入电脑剪贴板。可以继续发送下一条");
   }};
 }}
 function renderBoth(data) {{
   title.textContent = "CopyShare 手机连接";
-  hint.textContent = "可复制电脑端多条剪贴板，也可连续发送多条内容到电脑。";
+  hint.textContent = "可复制电脑端多条剪贴板，也可连续发送多条内容到电脑";
   if (app.dataset.mode !== "bidirectional") {{
     app.dataset.mode = "bidirectional";
     app.innerHTML = renderPcShell() + '<h2>发送到电脑</h2>' + senderHtml('phoneContent');
@@ -1170,7 +1177,7 @@ function renderBoth(data) {{
 }}
 function renderSend(data) {{
   title.textContent = "来自 CopyShare";
-  hint.textContent = "可复制电脑端多条剪贴板。二维码会在有效期结束后失效。";
+  hint.textContent = "可复制电脑端多条剪贴板。二维码会在有效期结束后失效";
   if (app.dataset.mode !== "sendToMobile") {{
     app.dataset.mode = "sendToMobile";
     app.innerHTML = renderPcShell();
@@ -1179,7 +1186,7 @@ function renderSend(data) {{
 }}
 function renderReceive() {{
   title.textContent = "发送到电脑";
-  hint.textContent = "发送成功后会自动写入电脑剪贴板，可连续发送多条。";
+  hint.textContent = "发送成功后会自动写入电脑剪贴板，可连续发送多条";
   if (app.dataset.mode !== "receiveFromMobile") {{
     app.dataset.mode = "receiveFromMobile";
     app.innerHTML = senderHtml('content');
@@ -1190,7 +1197,7 @@ function renderClosed() {{
   title.textContent = "CopyShare 手机连接";
   hint.textContent = "电脑端已结束本次连接会话";
   app.dataset.mode = "closed";
-  app.innerHTML = '<p class="empty">电脑端已结束本次连接会话。请在电脑端重新生成二维码后再扫码。</p>';
+  app.innerHTML = '<p class="empty">电脑端已结束本次连接会话。请在电脑端重新生成二维码后再扫码</p>';
   setStatus("");
 }}
 function preview(value) {{
