@@ -12,6 +12,7 @@ use crate::{
 };
 
 const TRAY_ID: &str = "copyshare-main";
+const TRAY_ICON: tauri::image::Image<'static> = tauri::include_image!("icons/16x16.png");
 
 pub fn setup_tray(app: &mut App, state: AppState) -> tauri::Result<()> {
     let config = tauri::async_runtime::block_on(state.config());
@@ -48,7 +49,7 @@ pub fn setup_tray(app: &mut App, state: AppState) -> tauri::Result<()> {
     let state_for_menu = state.clone();
 
     TrayIconBuilder::with_id(TRAY_ID)
-        .icon(app.default_window_icon().unwrap().clone())
+        .icon(TRAY_ICON)
         .tooltip(i18n::translate(&config, "CopyShare - 待启动同步"))
         .menu(&menu)
         .show_menu_on_left_click(true)
