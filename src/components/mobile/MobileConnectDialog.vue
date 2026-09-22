@@ -18,7 +18,8 @@ const toastStore = useToastStore();
 const qr = ref("");
 let pollTimer: number | undefined;
 
-const phaseText = computed(() => getPhaseText(mobileStore.session?.phase));
+const deviceStatusText = computed(() => getDeviceStatusText(mobileStore.session?.phase));
+const deviceStatusClass = computed(() => getDeviceStatusClass(mobileStore.session?.phase));
 const submittedItems = computed(() => mobileStore.session?.submittedItems ?? []);
 const canUseSession = computed(
   () =>
@@ -118,41 +119,29 @@ async function copyLink() {
   }
 }
 
-function getPhaseText(phase: MobileSessionPhase | undefined) {
-  switch (phase) {
-    case "waiting":
-      return "等待扫码";
-    case "opened":
-      return "已连接";
-    case "copied":
-      return "已复制电脑内容";
-    case "submitted":
-      return "正在写入剪贴板";
-    case "written":
-      return "已写入剪贴板";
-    case "expired":
-      return "已过期";
-    case "closed":
-      return "已结束";
-    default:
-      return "正在生成";
+function getDeviceStatus(phase: MobileSessionPhase | undefined): "connected" | "waiting" | "offline" {
+  if (phase === "closed" || phase === "expired") {
+    return "offline";
   }
+  if (!phase || phase === "waiting") {
+    return "waiting";
+  }
+  return "connected";
 }
 
-function phaseClass(phase: MobileSessionPhase | undefined) {
-  if (phase === "written") {
+function getDeviceStatusText(phase: MobileSessionPhase | undefined) {
+  return ({ connected: "已连接", waiting: "待连接", offline: "已离线" })[getDeviceStatus(phase)];
+}
+
+function getDeviceStatusClass(phase: MobileSessionPhase | undefined) {
+  const status = getDeviceStatus(phase);
+  if (status === "connected") {
     return "border-emerald-300/50 bg-emerald-400/14 text-emerald-50";
   }
-  if (phase === "submitted") {
-    return "border-orange-300/50 bg-orange-400/14 text-orange-50";
-  }
-  if (phase === "opened" || phase === "copied") {
+  if (status === "waiting") {
     return "border-[color:var(--accent-line)] bg-[color:var(--accent-soft)] text-[color:var(--accent-text)]";
   }
-  if (phase === "expired" || phase === "closed") {
-    return "border-red-300/50 bg-red-500/12 text-red-50";
-  }
-  return "border-white/10 bg-white/[0.05] text-slate-300";
+  return "border-white/35 bg-white/[0.08] text-white";
 }
 
 function errorMessage(error: unknown, fallback: string) {
@@ -200,8 +189,8 @@ function errorMessage(error: unknown, fallback: string) {
                 <p class="text-xs font-medium text-[color:var(--subtle-text)]">扫码连接</p>
                 <p class="mt-1 text-base font-semibold text-white">CopyShare Mobile</p>
               </div>
-              <span class="shrink-0 rounded-full border px-3 py-1 text-xs font-medium" :class="phaseClass(mobileStore.session?.phase)">
-                {{ phaseText }}
+              <span class="shrink-0 rounded-full border px-3 py-1 text-xs font-medium" :class="deviceStatusClass">
+                {{ deviceStatusText }}
               </span>
             </div>
 

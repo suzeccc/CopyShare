@@ -76,7 +76,6 @@ const panelTransitionPhase = ref<"exit" | "enter" | null>(null);
 const isCollapsingToBall = ref(false);
 const windowModeFailed = ref(false);
 const ballReturnMode = ref<"main" | "floating">("floating");
-const ballPulse = ref(0);
 const systemClipboardItems = ref<ClipboardPreviewItem[]>([]);
 const mainScrollRef = ref<HTMLElement | null>(null);
 const showCloseActionDialog = ref(false);
@@ -183,10 +182,6 @@ watch(
 watch(() => configStore.config.uiLanguage, () => {
   if (ballMenu) void ballMenu.close();
   ballMenu = null;
-});
-
-watch(() => historyStore.items[0]?.id, (id, previous) => {
-  if (isBall.value && id && previous && id !== previous) ballPulse.value += 1;
 });
 
 watch(trustPromptDevice, (device) => {
@@ -328,6 +323,8 @@ function switchWindowMode(
     const animatePanels = previousMode !== nextMode
       && previousMode !== "ball"
       && nextMode !== "ball";
+    const hideNativeWindow = previousMode === "ball" && nextMode !== "ball";
+    let nativeWindowHidden = false;
     isSwitchingWindowMode.value = true;
     if (animatePanels) {
       panelTransitionPhase.value = "exit";
@@ -345,6 +342,10 @@ function switchWindowMode(
     isResizingWindow.value = true;
     await nextTick();
     try {
+      if (hideNativeWindow) {
+        await hideMainWindow();
+        nativeWindowHidden = true;
+      }
       await resizeWindow(pointer);
       windowMode.value = nextMode;
       windowModeFailed.value = false;
@@ -363,6 +364,9 @@ function switchWindowMode(
       panelTransitionPhase.value = animatePanels && !windowModeFailed.value ? "enter" : null;
       isResizingWindow.value = false;
       await nextTick();
+      if (nativeWindowHidden) {
+        await showMainWindow();
+      }
       if (panelTransitionPhase.value === "enter") {
         await new Promise((resolve) => window.setTimeout(resolve, WINDOW_MODE_ENTER_MS));
       }
@@ -589,7 +593,6 @@ async function rejectPromptDevice() {
       v-show="!isResizingWindow && !windowModeFailed"
       :running="statusStore.status.running"
       :connected-count="statusStore.status.connectedCount"
-      :pulse="ballPulse"
       @open="restoreFromBall"
       @menu="openBallMenu"
       @dock="dockBallWindow"
@@ -622,7 +625,11 @@ async function rejectPromptDevice() {
             data-main-scroll-container
             class="min-h-0 flex-1 overflow-auto px-6 pb-6 pt-1.5"
           >
-            <RouterView />
+            <RouterView v-slot="{ Component, route: routedRoute }">
+              <Transition name="page" mode="out-in">
+                <component :is="Component" :key="routedRoute.fullPath" />
+              </Transition>
+            </RouterView>
           </div>
         </main>
       </div>

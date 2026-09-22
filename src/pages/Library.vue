@@ -245,7 +245,7 @@ onUnmounted(() => libraryStore.disposeSubscription());
 </script>
 
 <template>
-  <div data-library-page class="grid gap-4 pb-4 text-[13px]">
+  <div data-library-page class="flex min-h-full flex-col gap-4 pb-4 text-[13px]">
     <section class="relative overflow-hidden rounded-[14px] border border-[color:var(--main-line)] bg-[color:var(--panel-bg)] p-4">
       <div class="absolute inset-y-0 right-0 w-40 bg-gradient-to-l from-[color:var(--accent-soft)] to-transparent opacity-60" />
       <div class="relative flex flex-wrap items-start justify-between gap-4">
@@ -404,7 +404,7 @@ onUnmounted(() => libraryStore.disposeSubscription());
     <Card
       v-else
       data-library-empty
-      class="grid min-h-52 place-items-center text-center"
+      class="flex min-h-[280px] flex-1 items-center justify-center text-center"
     >
       <div class="grid justify-items-center gap-3">
         <div class="grid h-12 w-12 place-items-center rounded-xl border border-[color:var(--main-line-soft)] bg-[color:var(--field-bg)] text-slate-500">

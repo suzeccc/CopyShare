@@ -165,7 +165,7 @@ onBeforeUnmount(() => {
 
 <template>
   <RouterView v-if="isMediaPreviewRoute" />
-  <AppShell v-else v-show="!startupVisible" :startup-animation-complete="startupAnimationComplete" @ready="resolveStartupWindow" />
+  <AppShell v-else v-show="!startupVisible && !onboardingVisible" :startup-animation-complete="startupAnimationComplete" @ready="resolveStartupWindow" />
   <FirstRunWizard v-if="onboardingVisible" />
   <ToastStack />
   <Transition name="trust-prompt">

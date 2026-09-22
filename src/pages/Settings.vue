@@ -11,7 +11,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue"
 import ShortcutSettingsDialog from "@/components/settings/ShortcutSettingsDialog.vue";
 import Button from "@/components/ui/Button.vue";
 import Switch from "@/components/ui/Switch.vue";
-import { setUiLanguage } from "@/i18n";
+import { getEffectiveLocale, setUiLanguage } from "@/i18n";
 import { clampPort } from "@/lib/format";
 import type { AppWindowMode } from "@/lib/windowMode";
 import {
@@ -38,7 +38,10 @@ const configStore = useConfigStore();
 const statusStore = useStatusStore();
 const toastStore = useToastStore();
 
-const draft = reactive({ ...configStore.config });
+const draft = reactive<AppConfig>({
+  ...configStore.config,
+  uiLanguage: (configStore.config.uiLanguage === "system" ? getEffectiveLocale() : configStore.config.uiLanguage) as UiLanguage,
+});
 const themeOptions: Array<{ value: AppTheme; label: string; hint: string }> = [
   { value: "win11Dark", label: "Win11 深色", hint: "深灰卡片与系统设置风格" },
   { value: "macosDark", label: "午夜玻璃", hint: "深色半透明面板与 Apple 风格蓝色强调" },
@@ -69,7 +72,6 @@ const syncDirectionOptions: Array<{ value: SyncDirection; label: string }> = [
   { value: "receiveOnly", label: "只接收" },
 ];
 const languageOptions: Array<{ value: UiLanguage; label: string }> = [
-  { value: "system", label: "跟随系统" },
   { value: "zh-CN", label: "简体中文" },
   { value: "zh-TW", label: "繁體中文" },
   { value: "en-US", label: "English" },
@@ -131,7 +133,10 @@ function applyThemePreview(theme: AppTheme) {
 }
 
 function restoreDraftFromConfig() {
-  Object.assign(draft, configStore.config);
+  Object.assign(draft, {
+    ...configStore.config,
+    uiLanguage: configStore.config.uiLanguage === "system" ? getEffectiveLocale() : configStore.config.uiLanguage,
+  });
   applyThemePreview(configStore.config.theme);
 }
 
@@ -215,10 +220,7 @@ async function loadDefaultTransferSaveDir() {
 
 async function saveBasicSettings(
   patch: Partial<Pick<AppConfig, BasicSettingKey>>,
-  options: {
-    keepSaving?: boolean;
-    silent?: boolean;
-  } = {},
+  options: { keepSaving?: boolean } = {},
 ) {
   if (configStore.saving || (basicSettingsSaving.value && !options.keepSaving)) {
     restoreDraftFromConfig();
@@ -241,9 +243,7 @@ async function saveBasicSettings(
       restoreDraftFromConfig();
       toastStore.error("保存失败");
     } else {
-      if (!options.silent) {
-        toastStore.success("保存成功");
-      }
+      toastStore.success("保存成功");
     }
   } finally {
     if (!options.keepSaving) {
@@ -315,7 +315,7 @@ async function saveUiLanguage(uiLanguage: UiLanguage) {
   const previousLanguage = configStore.config.uiLanguage;
   draft.uiLanguage = uiLanguage;
   setUiLanguage(uiLanguage);
-  await saveBasicSettings({ uiLanguage }, { silent: true });
+  await saveBasicSettings({ uiLanguage });
   if (configStore.error) {
     draft.uiLanguage = previousLanguage;
     setUiLanguage(previousLanguage);
@@ -348,7 +348,7 @@ async function saveTranslationSetting(
     normalizedPatch.translationModel = normalizedPatch.translationModel?.trim() || "gpt-4o-mini";
   }
 
-  await saveBasicSettings(normalizedPatch, { silent: true });
+  await saveBasicSettings(normalizedPatch);
 }
 
 async function saveTranslationEngine(engine: TranslationEngine) {
@@ -380,17 +380,17 @@ async function saveTranslationModel() {
 
 async function saveAutoStart(autoStart: boolean) {
   draft.autoStart = autoStart;
-  await saveBasicSettings({ autoStart }, { silent: true });
+  await saveBasicSettings({ autoStart });
 }
 
 async function saveAutoSync(autoSync: boolean) {
   draft.autoSync = autoSync;
-  await saveBasicSettings({ autoSync }, { silent: true });
+  await saveBasicSettings({ autoSync });
 }
 
 async function saveAutoOpenFolderAfterSave(autoOpenFolderAfterSave: boolean) {
   draft.autoOpenFolderAfterSave = autoOpenFolderAfterSave;
-  await saveBasicSettings({ autoOpenFolderAfterSave }, { silent: true });
+  await saveBasicSettings({ autoOpenFolderAfterSave });
 }
 
 async function saveSyncSetting(
@@ -404,7 +404,6 @@ async function saveSyncSetting(
       | "deduplicateSyncContent"
     >
   >,
-  options: { silent?: boolean } = { silent: true },
 ) {
   if (configStore.saving || syncContentSaving.value) {
     restoreDraftFromConfig();
@@ -424,9 +423,7 @@ async function saveSyncSetting(
       restoreDraftFromConfig();
       toastStore.error("保存失败");
     } else {
-      if (!options.silent) {
-        toastStore.success("保存成功");
-      }
+      toastStore.success("保存成功");
     }
   } finally {
     syncContentSaving.value = false;
@@ -500,7 +497,6 @@ async function openDownloadLocation() {
 
 async function saveNotificationSetting(
   patch: Partial<Pick<AppConfig, NotificationSettingKey>>,
-  options: { silent?: boolean } = { silent: true },
 ) {
   if (configStore.saving || notificationSettingsSaving.value) {
     restoreDraftFromConfig();
@@ -520,9 +516,7 @@ async function saveNotificationSetting(
       restoreDraftFromConfig();
       toastStore.error("保存失败");
     } else {
-      if (!options.silent) {
-        toastStore.success("保存成功");
-      }
+      toastStore.success("保存成功");
     }
   } finally {
     notificationSettingsSaving.value = false;
@@ -652,7 +646,7 @@ async function clearLocalCache() {
                 v-for="option in languageOptions"
                 :key="option.value"
                 :value="option.value"
-                :data-i18n-ignore="option.value !== 'system' || undefined"
+                data-i18n-ignore
               >
                 {{ option.label }}
               </option>

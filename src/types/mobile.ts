@@ -31,4 +31,5 @@ export interface MobileDeviceHistoryItem {
   id: "mobile";
   name: "移动端";
   lastSeenAt: string;
+  status?: "connected" | "waiting" | "offline";
 }

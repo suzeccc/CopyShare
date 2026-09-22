@@ -20,6 +20,7 @@ import { useHistoryStore } from "@/stores/history";
 import { useMobileStore } from "@/stores/mobile";
 import { useStatusStore } from "@/stores/status";
 import { useToastStore } from "@/stores/toasts";
+import type { MobileSessionPhase } from "@/types/mobile";
 import {
   isOperationalNetworkDiagnostic,
   type NetworkDiagnosticReport,
@@ -57,9 +58,20 @@ const mobileHistory = computed(() => {
     .sort((left, right) => Date.parse(right) - Date.parse(left))[0];
 
   return lastSeenAt
-    ? [{ id: "mobile" as const, name: "移动端" as const, lastSeenAt }]
+    ? [{
+        id: "mobile" as const,
+        name: "移动端" as const,
+        lastSeenAt,
+        status: mobileDeviceStatus(mobileStore.session?.phase),
+      }]
     : [];
 });
+
+function mobileDeviceStatus(phase: MobileSessionPhase | undefined): "connected" | "waiting" | "offline" {
+  if (phase === "waiting") return "waiting";
+  if (phase && !["expired", "closed"].includes(phase)) return "connected";
+  return "offline";
+}
 const connectionError = computed(() => devicesStore.error || statusStore.error);
 const networkDiagnosticSummary = computed(() => {
   if (networkDiagnosticsLoading.value) return "正在检查网络环境...";
@@ -157,7 +169,7 @@ async function openSystemNetworkSettings() {
 </script>
 
 <template>
-  <div class="grid gap-6">
+  <div class="flex min-h-full flex-col gap-6">
     <section
       class="grid gap-5"
       :class="[
@@ -261,7 +273,7 @@ async function openSystemNetworkSettings() {
       </Card>
     </section>
 
-    <Card>
+    <Card class="flex min-h-[220px] flex-1 flex-col">
       <div class="mb-4 flex items-center justify-between">
         <div>
           <p class="text-sm font-semibold text-white">历史连接设备列表</p>
@@ -286,8 +298,8 @@ async function openSystemNetworkSettings() {
           @reconnect="showMobileConnectDialog = true"
         />
       </div>
-      <div v-else class="rounded-lg border border-dashed border-[color:var(--main-line-soft)] px-4 py-10 text-center text-sm text-[color:var(--subtle-text)]">
-        输入对方 IP 后点击“连接”，或完成一次手机扫码连接，设备会作为历史记录显示在这里
+      <div v-else class="flex min-h-0 flex-1 items-center justify-center rounded-lg border border-dashed border-[color:var(--main-line-soft)] px-4 py-10 text-center text-sm text-[color:var(--subtle-text)]">
+        连接设备成功后，设备连接记录会显示在这里。设备暂时离线时，也可以查看历史状态并重新发起连接
       </div>
     </Card>
 

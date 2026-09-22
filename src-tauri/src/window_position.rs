@@ -198,7 +198,7 @@ fn center_window_on_current_monitor(window: tauri::WebviewWindow) -> AppResult<(
             ));
         }
 
-        let position = centered_position_in_work_area(
+        let mut position = centered_position_in_work_area(
             NativeRect {
                 left: monitor_info.rcWork.left,
                 top: monitor_info.rcWork.top,
@@ -210,6 +210,8 @@ fn center_window_on_current_monitor(window: tauri::WebviewWindow) -> AppResult<(
                 height: window_rect.bottom - window_rect.top,
             },
         );
+        position.y = (position.y + (10.0 * window.scale_factor().map_err(AppError::from)?) as i32)
+            .min(monitor_info.rcWork.bottom - (window_rect.bottom - window_rect.top));
 
         SetWindowPos(
             hwnd,

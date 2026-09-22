@@ -6,9 +6,11 @@ import { computed } from "vue";
 
 import { useToastStore } from "@/stores/toasts";
 import type { ToastKind } from "@/lib/toasts";
+import { translateSource } from "@/i18n";
 
 const toastStore = useToastStore();
 const toast = computed(() => toastStore.items[0]);
+const toastMessage = computed(() => toast.value ? translateSource(toast.value.message) : "");
 
 function iconFor(kind: ToastKind) {
   if (kind === "success") return CircleCheck;
@@ -34,7 +36,7 @@ function iconClass(kind: ToastKind) {
         class="pointer-events-auto inline-flex min-h-12 max-w-[min(420px,calc(100vw-3rem))] items-center gap-2.5 rounded-[14px] border border-white/10 bg-[rgba(72,75,82,0.92)] px-5 py-3 text-[15px] font-medium text-white shadow-[0_18px_42px_rgba(0,0,0,0.38)] backdrop-blur-md"
       >
         <component :is="iconFor(toast.kind)" class="h-5 w-5 shrink-0" :class="iconClass(toast.kind)" />
-        <span class="min-w-0 truncate">{{ toast.message }}</span>
+        <span class="min-w-0 truncate">{{ toastMessage }}</span>
       </div>
       </Transition>
     </div>

@@ -43,20 +43,23 @@ async function checkForUpdate() {
 </script>
 
 <template>
-  <Card class="!p-0 overflow-hidden">
-    <div class="px-5 py-6 sm:px-6">
-      <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div class="flex min-w-0 items-start gap-4">
-          <img :src="appIconUrl" alt="" class="h-12 w-12 shrink-0 object-contain" draggable="false">
+  <Card class="about-page !p-0 overflow-hidden">
+    <div class="relative px-5 py-6 sm:px-8 sm:py-8">
+      <div class="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
+        <div class="flex min-w-0 items-start gap-4 sm:gap-5">
+          <div class="grid h-14 w-14 shrink-0 place-items-center rounded-2xl border border-[color:var(--accent-line)] bg-[color:var(--accent-soft)] shadow-[0_10px_26px_var(--accent-glow)]">
+            <img :src="appIconUrl" alt="" class="h-10 w-10 object-contain" draggable="false">
+          </div>
           <div class="min-w-0">
-            <h1 class="text-xl font-semibold tracking-tight text-white">关于 CopyShare</h1>
-            <p class="mt-2 max-w-2xl text-[13px] leading-6 text-[color:var(--muted-text)]">
+            <p class="text-xs font-semibold uppercase tracking-[0.16em] text-[color:var(--accent-text)]">关于应用</p>
+            <h1 class="mt-1 text-2xl font-semibold tracking-tight text-white">关于 CopyShare</h1>
+            <p class="mt-2 max-w-2xl text-sm leading-6 text-[color:var(--muted-text)]">
               局域网剪贴板同步工具，用于在已信任设备之间同步文本剪贴板内容
             </p>
           </div>
         </div>
         <Button
-          class="shrink-0 self-start"
+          class="shrink-0 self-start sm:mt-1"
           variant="primary"
           size="sm"
           :disabled="updater.busy || updater.phase === 'ready' || updater.phase === 'installed'"
@@ -68,14 +71,14 @@ async function checkForUpdate() {
         </Button>
       </div>
 
-      <dl class="mt-5 flex flex-wrap items-center gap-x-8 gap-y-3 border-t border-[color:var(--main-line-soft)] pt-4 text-[13px]">
-        <div class="flex items-center gap-3">
-          <dt class="text-[color:var(--muted-text)]">版本信息</dt>
-          <dd class="font-mono text-sm font-semibold text-white">v{{ APP_VERSION }}</dd>
+      <dl class="mt-7 grid gap-3 border-t border-[color:var(--main-line-soft)] pt-5 text-[13px] sm:grid-cols-2 sm:gap-4">
+        <div class="rounded-lg border border-[color:var(--main-line-soft)] bg-[color:var(--panel-bg-soft)] px-4 py-3">
+          <dt class="text-xs font-medium text-[color:var(--muted-text)]">版本信息</dt>
+          <dd class="mt-1 font-mono text-sm font-semibold text-white">v{{ APP_VERSION }}</dd>
         </div>
-        <div class="flex items-center gap-3">
-          <dt class="text-[color:var(--muted-text)]">作者</dt>
-          <dd class="flex items-center gap-2 text-sm font-semibold text-white">
+        <div class="rounded-lg border border-[color:var(--main-line-soft)] bg-[color:var(--panel-bg-soft)] px-4 py-3">
+          <dt class="text-xs font-medium text-[color:var(--muted-text)]">作者</dt>
+          <dd class="mt-1 flex items-center gap-2 text-sm font-semibold text-white">
             <UserRound class="h-4 w-4 text-[color:var(--subtle-text)]" aria-hidden="true" />
             <span data-i18n-ignore>{{ AUTHOR_NAME }}</span>
           </dd>
@@ -133,30 +136,42 @@ async function checkForUpdate() {
       </div>
     </div>
 
-    <div class="border-t border-[color:var(--main-line-soft)] bg-[color:var(--panel-bg-soft)] px-5 py-5 sm:px-6">
-      <p class="text-xs font-medium text-[color:var(--muted-text)]">GitHub 仓库</p>
-      <div class="mt-3 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div class="flex min-w-0 items-start gap-3">
-          <Github class="mt-0.5 h-5 w-5 shrink-0 text-[color:var(--subtle-text)]" aria-hidden="true" />
-          <div class="min-w-0">
-            <p class="break-words text-sm font-semibold text-white" data-i18n-ignore>{{ repositoryName }}</p>
-            <p class="mt-1 break-all font-mono text-xs leading-5 text-[color:var(--muted-text)]">
-              <span data-i18n-ignore>{{ GITHUB_REPOSITORY_URL }}</span>
-            </p>
+    <div class="border-t border-[color:var(--main-line-soft)] bg-[color:var(--main-bg-muted)] px-5 py-6 sm:px-8 sm:py-7">
+      <div class="flex items-end justify-between gap-4">
+        <div>
+          <p class="text-xs font-semibold uppercase tracking-[0.16em] text-[color:var(--accent-text)]">项目来源</p>
+          <h2 class="mt-1 text-base font-semibold text-white">GitHub 仓库</h2>
+        </div>
+        <Github class="h-5 w-5 text-[color:var(--subtle-text)]" aria-hidden="true" />
+      </div>
+
+      <div class="mt-5 rounded-xl border border-[color:var(--main-line-soft)] bg-[color:var(--panel-bg)] p-4 sm:p-5">
+        <div class="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+          <div class="flex min-w-0 items-start gap-3">
+            <div class="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-[color:var(--main-line-soft)] bg-[color:var(--field-bg)] text-[color:var(--accent-text)]">
+              <Github class="h-5 w-5" aria-hidden="true" />
+            </div>
+            <div class="min-w-0">
+              <p class="break-words text-sm font-semibold text-white" data-i18n-ignore>{{ repositoryName }}</p>
+              <p class="mt-1 break-all font-mono text-xs leading-5 text-[color:var(--muted-text)]">
+                <span data-i18n-ignore>{{ GITHUB_REPOSITORY_URL }}</span>
+              </p>
+            </div>
+          </div>
+          <div class="flex shrink-0 flex-wrap gap-2">
+            <Button variant="secondary" size="sm" @click="openRepository">
+              <ExternalLink class="h-4 w-4" aria-hidden="true" />
+              打开仓库
+            </Button>
+            <Button variant="primary" size="sm" @click="openLatestRelease">
+              <RefreshCw class="h-4 w-4" aria-hidden="true" />
+              查看最新版本
+            </Button>
           </div>
         </div>
-        <div class="flex shrink-0 flex-wrap gap-2">
-          <Button variant="secondary" size="sm" @click="openRepository">
-            <ExternalLink class="h-4 w-4" aria-hidden="true" />
-            打开仓库
-          </Button>
-          <Button variant="primary" size="sm" @click="openLatestRelease">
-            <RefreshCw class="h-4 w-4" aria-hidden="true" />
-            查看最新版本
-          </Button>
-        </div>
       </div>
-      <p data-github-star-hint class="mt-4 text-xs leading-5 text-[color:var(--muted-text)]">
+
+      <p data-github-star-hint class="mt-4 border-l-2 border-[color:var(--accent-line)] pl-3 text-xs leading-5 text-[color:var(--muted-text)]">
         如果这个项目帮到了你，欢迎在 GitHub 仓库点一颗 Star
       </p>
     </div>

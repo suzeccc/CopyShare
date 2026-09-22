@@ -12,7 +12,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import ManualConnectForm from "@/components/devices/ManualConnectForm.vue";
 import Button from "@/components/ui/Button.vue";
 import Switch from "@/components/ui/Switch.vue";
-import { setUiLanguage } from "@/i18n";
+import { getEffectiveLocale, setUiLanguage } from "@/i18n";
 import { getTransferSaveDir, selectTransferSaveDir } from "@/lib/tauri";
 import router from "@/router";
 import { useConfigStore } from "@/stores/config";
@@ -43,10 +43,9 @@ const draft = reactive({
   fileSaveDir: configStore.config.fileSaveDir,
   autoStart: configStore.config.autoStart,
   autoSync: configStore.config.autoSync,
-  uiLanguage: configStore.config.uiLanguage,
+  uiLanguage: configStore.config.uiLanguage === "system" ? getEffectiveLocale() : configStore.config.uiLanguage,
 });
 const languageOptions: Array<{ value: UiLanguage; label: string }> = [
-  { value: "system", label: "跟随系统" },
   { value: "zh-CN", label: "简体中文" },
   { value: "zh-TW", label: "繁體中文" },
   { value: "en-US", label: "English" },
@@ -370,7 +369,7 @@ async function finish(skip = false) {
             <span class="onboarding-setting-copy"><strong>界面语言</strong></span>
             <span class="onboarding-language-picker">
               <select v-model="draft.uiLanguage" data-onboarding-language :disabled="busy" @change="setUiLanguage(draft.uiLanguage)">
-                <option v-for="option in languageOptions" :key="option.value" :value="option.value" :data-i18n-ignore="option.value !== 'system' || undefined">{{ option.label }}</option>
+                <option v-for="option in languageOptions" :key="option.value" :value="option.value" data-i18n-ignore>{{ option.label }}</option>
               </select>
               <ChevronDown class="h-4 w-4" aria-hidden="true" />
             </span>
@@ -495,10 +494,7 @@ async function finish(skip = false) {
   place-items: center;
   padding: 18px;
   color: var(--clipboard-card-text);
-  background:
-    radial-gradient(circle at 78% 16%, var(--accent-soft), transparent 34%),
-    var(--dialog-overlay-bg);
-  backdrop-filter: blur(18px);
+  background: transparent;
 }
 
 .onboarding-drag-strip {
@@ -706,6 +702,11 @@ async function finish(skip = false) {
   flex-direction: column;
   justify-content: center;
   padding: 22px 0 28px;
+}
+
+.onboarding-page[data-step="3"] {
+  justify-content: flex-start;
+  padding-top: 38px;
 }
 
 .onboarding-eyebrow {

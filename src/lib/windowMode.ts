@@ -2,7 +2,7 @@ export type AppWindowMode = "main" | "floating" | "ball";
 
 export const MAIN_WINDOW_BOUNDS = {
   width: 1120,
-  height: 720,
+  height: 740,
   minWidth: 960,
   minHeight: 620,
 } as const;
@@ -111,7 +111,7 @@ export function getMainWindowCenteredPosition(area: WindowPositionArea): {
   y: number;
 } {
   const width = MAIN_WINDOW_BOUNDS.width * area.scaleFactor;
-  const height = MAIN_WINDOW_BOUNDS.height * area.scaleFactor;
+  const height = (MAIN_WINDOW_BOUNDS.height - 20) * area.scaleFactor;
 
   return {
     x: Math.round(area.position.x + (area.size.width - width) / 2),
