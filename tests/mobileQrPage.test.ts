@@ -47,7 +47,7 @@ assert.match(page, /data-mobile-content-panel[^>]*w-full[^>]*max-w-full[^>]*over
 assert.match(page, /data-mobile-summary-grid[^>]*lg:grid-cols-\[minmax\(0,1fr\)_minmax\(0,1fr\)\]/);
 assert.match(page, /data-mobile-submit-card[^>]*min-w-0[^>]*overflow-hidden/);
 assert.doesNotMatch(page, /电脑剪贴板|自动写入|Monitor|contentItems/);
-assert.match(page, /case "opened":\s*return "已连接"/);
+assert.match(page, /connected: "已连接", waiting: "待连接", offline: "已离线"/);
 assert.match(page, /data-mobile-qr-rail[\s\S]*data-mobile-content-panel/);
 assert.match(page, /grid-cols-\[minmax\(320px,0\.46fr\)_minmax\(0,0\.54fr\)\]/);
 assert.match(page, /max-w-\[320px\]/);

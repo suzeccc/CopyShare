@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-const shell = readFileSync("src/components/layout/AppShell.vue", "utf8");
+const shell = readFileSync("src/components/layout/AppShell.vue", "utf8").replaceAll("\r\n", "\n");
 const main = readFileSync("src/main.ts", "utf8");
 const store = readFileSync("src/stores/config.ts", "utf8");
 const settings = readFileSync("src/pages/Settings.vue", "utf8");

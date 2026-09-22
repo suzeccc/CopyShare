@@ -57,7 +57,7 @@ test("translation setting interactions do not show success toasts for unchanged 
   const saveTranslationEngineStart = settings.indexOf("async function saveTranslationEngine");
   const saveTranslationSetting = settings.slice(saveTranslationSettingStart, saveTranslationEngineStart);
 
-  assert.match(saveTranslationSetting, /saveBasicSettings\([\s\S]*\{ silent: true \}/);
+  assert.match(saveTranslationSetting, /saveBasicSettings\(normalizedPatch\);/);
   assert.match(settings, /if \(translationApiUrl === configStore\.config\.translationApiUrl\) return;/);
   assert.match(settings, /if \(translationApiKey === configStore\.config\.translationApiKey\) return;/);
   assert.match(settings, /if \(translationModel === configStore\.config\.translationModel\) return;/);

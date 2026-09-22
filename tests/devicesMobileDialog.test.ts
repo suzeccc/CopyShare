@@ -37,7 +37,7 @@ assert.match(dialog, /@click\.self="closeDialog"/);
 assert.match(dialog, /Smartphone/);
 assert.match(dialog, /手机提交/);
 assert.doesNotMatch(dialog, /Monitor|电脑剪贴板/);
-assert.match(dialog, /case "opened":\s*return "已连接"/);
+assert.match(dialog, /connected: "已连接", waiting: "待连接", offline: "已离线"/);
 
 assert.doesNotMatch(sidebar, /label: "手机连接"/);
 assert.doesNotMatch(sidebar, /path: "\/mobile"/);
