@@ -6,7 +6,7 @@
 
 **局域网多设备剪贴板同步、文件传输与内容效率工具**
 
-在已信任的电脑之间同步文本、截图、图片和文件；大文件按需下载并支持断点续传，同时提供剪贴板历史、常用片段、本机 OCR、翻译、手机临时连接和桌面浮窗。
+在已信任的电脑之间同步文本、截图、图片和文件；大文件按需下载并支持断点续传，同时提供剪贴板历史、常用片段、本机 OCR、翻译、手机临时连接和桌面浮窗。界面支持简体中文、繁體中文、English 和日本語。
 
 [![最新版本](https://img.shields.io/github/v/release/suzeccc/CopyShare?style=flat-square&color=22c55e)](https://github.com/suzeccc/CopyShare/releases/latest)
 [![发布构建](https://img.shields.io/github/actions/workflow/status/suzeccc/CopyShare/release.yml?style=flat-square&label=release)](https://github.com/suzeccc/CopyShare/actions/workflows/release.yml)
@@ -126,6 +126,7 @@ CopyShare 面向办公室、宿舍、家庭等可信局域网环境。它不依�
 - 快捷面板支持方向键选择、`Enter` 复制和 `Esc` 关闭。
 - 托盘可打开主窗口、启动/停止同步或退出应用。
 - 关闭主窗口可设置为每次询问、最小化到托盘或直接退出，原生关闭按钮和 `Alt+F4` 使用同一策略。
+- 浮窗球使用半透明毛玻璃背景，状态点显示同步运行和设备连接状态；主面板与浮窗界面切换使用快速淡入效果。
 - 支持桌面通知、单实例运行、开机启动和启动后自动同步。
 
 ### 网络诊断与 Windows 防火墙
@@ -142,7 +143,7 @@ CopyShare 面向办公室、宿舍、家庭等可信局域网环境。它不依�
 - Google 翻译无需配置 API Key；AI 翻译可填写自己的 API 地址、API Key、模型和代理。
 - 电脑可生成临时二维码，手机浏览器扫码后查看电脑提供的文本，或向电脑提交文本。
 - 手机会话可手动关闭，关闭后二维码和会话立即失效。
-- 界面支持简体中文和 English，切换后保存到本机配置。
+- 界面语言可在设置中下拉选择简体中文、繁體中文、English 或日本語，切换后保存到本机配置；系统和剪贴板错误提示会跟随当前界面语言显示。
 
 ### 设置、通知、同步日志与缓存
 

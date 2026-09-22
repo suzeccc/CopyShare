@@ -6,7 +6,7 @@
 
 **LAN clipboard sync, file transfer, and content productivity for multiple devices**
 
-Sync text, screenshots, images, and files between trusted computers. Download large files on demand with resumable transfers, and keep clipboard history, snippets, local OCR, translation, temporary mobile access, and a desktop floating panel close at hand.
+Sync text, screenshots, images, and files between trusted computers. Download large files on demand with resumable transfers, and keep clipboard history, snippets, local OCR, translation, temporary mobile access, and a desktop floating panel close at hand. The interface is available in Simplified Chinese, Traditional Chinese, English, and Japanese.
 
 [![Latest release](https://img.shields.io/github/v/release/suzeccc/CopyShare?style=flat-square&color=22c55e)](https://github.com/suzeccc/CopyShare/releases/latest)
 [![Release build](https://img.shields.io/github/actions/workflow/status/suzeccc/CopyShare/release.yml?style=flat-square&label=release)](https://github.com/suzeccc/CopyShare/actions/workflows/release.yml)
@@ -126,6 +126,7 @@ Shortcuts can be enabled, remapped, and restored individually. If a binding conf
 - The quick panel supports arrow-key selection, `Enter` to copy, and `Esc` to close.
 - The tray can open the main window, start or stop sync, or quit the app.
 - Closing the main window can ask every time, minimize to the tray, or quit immediately. The native close button and `Alt+F4` use the same policy.
+- The floating ball uses a translucent frosted-glass surface with a status dot for sync and device connectivity; switching between the main and floating panels uses a quick fade-in.
 - Desktop notifications, single-instance launch, autostart, and automatic sync after launch are supported.
 
 ### Network diagnostics and Windows firewall
@@ -142,7 +143,7 @@ Shortcuts can be enabled, remapped, and restored individually. If a binding conf
 - Google Translate needs no API key. AI translation accepts your own API endpoint, API key, model, and optional proxy.
 - The computer can generate a temporary QR code. A phone browser can scan it to view text from the computer or submit text back.
 - Mobile sessions can be closed manually; the QR code and session become invalid immediately.
-- The UI supports Simplified Chinese and English, and the choice is saved in local configuration.
+- The language dropdown offers Simplified Chinese, Traditional Chinese, English, and Japanese. The choice is saved locally, and system or clipboard error messages follow the selected interface language.
 
 ### Settings, notifications, sync log, and cache
 
