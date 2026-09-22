@@ -73,8 +73,9 @@ jobs:
         id: app_version
         shell: node {0}
         run: |
+          const path = require("node:path");
           const fs = require("node:fs");
-          const { version } = require("./package.json");
+          const { version } = require(path.join(process.env.GITHUB_WORKSPACE, "package.json"));
           fs.appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\n`);
 
       - name: Build and upload Tauri bundles
