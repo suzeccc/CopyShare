@@ -47,9 +47,55 @@ pub struct ClipboardFileEntry {
 }
 
 pub fn read_clipboard_text(app: &AppHandle) -> AppResult<String> {
-    app.clipboard()
-        .read_text()
-        .map_err(|error| AppError::Clipboard(error.to_string()))
+    let result = app.clipboard().read_text();
+
+    #[cfg(target_os = "windows")]
+    if result
+        .as_ref()
+        .map(|text| text.trim().is_empty())
+        .unwrap_or(true)
+        && clipboard_has_text_data()
+    {
+        return read_clipboard_text_native();
+    }
+
+    result.map_err(|error| AppError::Clipboard(error.to_string()))
+}
+
+#[cfg(target_os = "windows")]
+fn read_clipboard_text_native() -> AppResult<String> {
+    use windows::Win32::{
+        Foundation::HGLOBAL,
+        System::{
+            DataExchange::GetClipboardData,
+            Memory::{GlobalLock, GlobalSize, GlobalUnlock},
+        },
+    };
+
+    const CF_UNICODETEXT: u32 = 13;
+
+    let _clipboard = open_windows_clipboard_with_retry()?;
+    let handle = unsafe { GetClipboardData(CF_UNICODETEXT) }
+        .map_err(|error| AppError::Clipboard(error.to_string()))?;
+    let global = HGLOBAL(handle.0);
+    let size = unsafe { GlobalSize(global) };
+    if size < std::mem::size_of::<u16>() {
+        return Ok(String::new());
+    }
+
+    let ptr = unsafe { GlobalLock(global) };
+    if ptr.is_null() {
+        return Err(AppError::Clipboard("GlobalLock failed".to_string()));
+    }
+
+    let units = unsafe { std::slice::from_raw_parts(ptr as *const u16, size / 2) };
+    let length = units
+        .iter()
+        .position(|unit| *unit == 0)
+        .unwrap_or(units.len());
+    let text = String::from_utf16_lossy(&units[..length]);
+    let _ = unsafe { GlobalUnlock(global) };
+    Ok(text)
 }
 
 pub fn write_clipboard_text(app: &AppHandle, text: &str) -> AppResult<()> {
@@ -207,7 +253,7 @@ pub fn file_paths_to_clipboard_content(paths: &[PathBuf]) -> AppResult<String> {
                 .filter(|name| !name.trim().is_empty())
                 .map(ToOwned::to_owned)
                 .unwrap_or_else(|| path.to_string_lossy().to_string());
-            let size = std::fs::metadata(path).map(|meta| meta.len()).unwrap_or(0);
+            let size = clipboard_path_size(path);
             ClipboardFileEntry {
                 path: path.to_string_lossy().to_string(),
                 name,
@@ -217,6 +263,84 @@ pub fn file_paths_to_clipboard_content(paths: &[PathBuf]) -> AppResult<String> {
         })
         .collect::<Vec<_>>();
     serde_json::to_string(&entries).map_err(Into::into)
+}
+
+pub fn compress_folder_to_temp(path: &Path) -> AppResult<PathBuf> {
+    if !path.is_dir() {
+        return Err(AppError::InvalidInput(format!(
+            "不是文件夹：{}",
+            path.to_string_lossy()
+        )));
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let folder_name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("folder")
+            .chars()
+            .map(|character| {
+                if character.is_control() || "<>:\"/\\|?*".contains(character) {
+                    '_'
+                } else {
+                    character
+                }
+            })
+            .collect::<String>();
+        let archive = std::env::temp_dir().join(format!(
+            "copyshare-folder-{folder_name}-{}.zip",
+            uuid::Uuid::new_v4()
+        ));
+        let escape = |value: &Path| value.to_string_lossy().replace('\'', "''");
+        let command = format!(
+            "Compress-Archive -LiteralPath '{}' -DestinationPath '{}' -Force -ErrorAction Stop",
+            escape(path),
+            escape(&archive),
+        );
+        let status = std::process::Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-WindowStyle",
+                "Hidden",
+                "-Command",
+                &command,
+            ])
+            .status()
+            .map_err(|error| AppError::InvalidInput(format!("压缩文件夹失败：{error}")))?;
+        if !status.success() {
+            let _ = std::fs::remove_file(&archive);
+            return Err(AppError::InvalidInput("压缩文件夹失败".to_string()));
+        }
+        return Ok(archive);
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = path;
+        Err(AppError::InvalidInput("当前系统暂不支持压缩文件夹同步".to_string()))
+    }
+}
+
+pub fn clipboard_path_size(path: &Path) -> u64 {
+    let Ok(metadata) = std::fs::symlink_metadata(path) else {
+        return 0;
+    };
+
+    if metadata.is_file() {
+        return metadata.len();
+    }
+    if !metadata.is_dir() {
+        return 0;
+    }
+
+    std::fs::read_dir(path)
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .map(|entry| clipboard_path_size(&entry.path()))
+        .fold(0_u64, u64::saturating_add)
 }
 
 pub fn summarize_image_file_paths(paths: &[PathBuf]) -> AppResult<Option<String>> {
@@ -957,6 +1081,23 @@ mod tests {
         );
         assert_eq!(summarize_file_entries(&files), "2 个文件 · 3.00 KB");
         assert_eq!(summarize_file_entries(&[]), "文件列表");
+    }
+
+    #[test]
+    fn directory_file_summary_uses_recursive_size() {
+        let root = std::env::temp_dir().join(format!("copyshare-folder-summary-{}", uuid::Uuid::new_v4()));
+        let nested = root.join("nested");
+        std::fs::create_dir_all(&nested).expect("test directory should be created");
+        std::fs::write(root.join("a.txt"), b"alpha").expect("test file should be written");
+        std::fs::write(nested.join("b.txt"), b"beta").expect("nested file should be written");
+
+        let content = file_paths_to_clipboard_content(std::slice::from_ref(&root))
+            .expect("directory file list should serialize");
+        let entries = clipboard_content_to_file_entries(&content).expect("directory entry should parse");
+
+        let _ = std::fs::remove_dir_all(&root);
+        assert_eq!(entries[0].name, root.file_name().unwrap().to_string_lossy());
+        assert_eq!(entries[0].size, 9);
     }
 
     #[test]

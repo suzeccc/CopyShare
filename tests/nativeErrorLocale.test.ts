@@ -12,3 +12,17 @@ assert.equal(translateSource("clipboard error: Unknown error while interacting w
 assert.equal(translateSource(translateSource("clipboard error: Unknown error while interacting with the clipboard: OS 123", "en-US"), "zh-CN"), "剪贴板错误：访问剪贴板时发生未知错误：OS 123");
 assert.equal(translateSource("unrecognized OS message / C:\\file.png", "zh-CN"), "unrecognized OS message / C:\\file.png");
 assert.equal(translateSource("文件传输失败", "en-US"), "File transfer failed");
+const imageReadError = "clipboard error: Unknown error while interacting with the clipboard: failed to read clipboard image data";
+assert.equal(
+  translateSource(imageReadError, "en-US"),
+  "Clipboard error: An unknown error occurred while accessing the clipboard: Failed to read clipboard image data",
+);
+assert.equal(
+  translateSource(imageReadError, "zh-CN"),
+  "剪贴板错误：访问剪贴板时发生未知错误：读取剪贴板图片数据失败",
+);
+const dibv5Error = "clipboard error: When reading the DIBV5 data, it contained fewer bytes than the BITMAPV5HEADER size. This is invalid.";
+assert.equal(translateSource(dibv5Error, "zh-CN"), "剪贴板错误：读取剪贴板图片数据失败");
+assert.equal(translateSource(dibv5Error, "en-US"), "Clipboard error: Failed to read clipboard image data");
+assert.equal(translateSource("invalid input: source file path is not valid", "zh-CN"), "路径无效 is not valid");
+assert.equal(translateSource("invalid input: source file path is not valid", "en-US"), "Invalid path is not valid");

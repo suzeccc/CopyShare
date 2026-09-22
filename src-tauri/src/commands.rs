@@ -704,7 +704,11 @@ pub async fn create_mobile_session(
     state: State<'_, AppState>,
 ) -> AppResult<MobileSessionView> {
     let mut contents = Vec::new();
-    let current = clipboard::read_clipboard_text(&app).unwrap_or_default();
+    let current = match clipboard::read_clipboard_text(&app) {
+        Ok(text) => text,
+        Err(_) if !clipboard::clipboard_has_text_data() => String::new(),
+        Err(error) => return Err(error),
+    };
     push_unique_clipboard_text(&mut contents, current);
 
     if let Ok(history_items) = clipboard::read_clipboard_history_text(10).await {

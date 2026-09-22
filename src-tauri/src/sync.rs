@@ -10,6 +10,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio::sync::{oneshot, watch};
 use tokio_tungstenite::{accept_async, connect_async, tungstenite::Message, WebSocketStream};
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use uuid::Uuid;
 
 use crate::{
@@ -1012,7 +1013,41 @@ async fn poll_local_clipboard(
         if !files.is_empty() {
             let content = clipboard::file_paths_to_clipboard_content(&files)?;
             if let Some(message) = state.observe_local_file_list(content).await {
-                record_observed_local_file_list(app, state, &config, &message, files).await?;
+                let has_folders = files.iter().any(|path| path.is_dir());
+                if has_folders {
+                    let should_prompt = folder_sync_confirmation_required(&config, state).await;
+                    let should_sync = if should_prompt {
+                        let dialog_app = app.clone();
+                        let dialog_paths = files.clone();
+                        tokio::task::spawn_blocking(move || {
+                            confirm_folder_compression(&dialog_app, &dialog_paths)
+                        })
+                        .await
+                        .unwrap_or(false)
+                    } else {
+                        false
+                    };
+                    let sent_count = if should_sync {
+                        match file_transfer::send_compressed_folders_to_trusted_devices(
+                            app.clone(),
+                            state.clone(),
+                            files.iter().filter(|path| path.is_dir()).cloned().collect(),
+                        )
+                        .await
+                        {
+                            Ok(sent_count) => sent_count,
+                            Err(error) => {
+                                let _ = app.emit("sync-error", format!("文件夹压缩同步失败：{error}"));
+                                0
+                            }
+                        }
+                    } else {
+                        0
+                    };
+                    record_local_file_list_history(app, state, &config, &message, sent_count).await?;
+                } else {
+                    record_observed_local_file_list(app, state, &config, &message, files).await?;
+                }
                 changed = true;
             }
             observed_file_list = true;
@@ -1143,6 +1178,16 @@ async fn record_observed_local_file_list(
     } else {
         0
     };
+    record_local_file_list_history(app, state, config, message, sent_count).await
+}
+
+async fn record_local_file_list_history(
+    app: &AppHandle,
+    state: &AppState,
+    config: &AppConfig,
+    message: &ClipboardMessage,
+    sent_count: usize,
+) -> AppResult<()> {
     if should_record_synchronized_content(config.deduplicate_sync_content, sent_count) {
         state
             .mark_content_synchronized(message.content_hash.clone())
@@ -1167,6 +1212,37 @@ async fn record_observed_local_file_list(
     }
 
     Ok(())
+}
+
+async fn folder_sync_confirmation_required(config: &AppConfig, state: &AppState) -> bool {
+    config.sync_direction.allows_send()
+        && state.status().await.running
+        && state
+            .devices()
+            .await
+            .iter()
+            .any(|device| device.connected && device.trusted && device.remote_trusted)
+}
+
+fn confirm_folder_compression(app: &AppHandle, paths: &[PathBuf]) -> bool {
+    let names = paths
+        .iter()
+        .filter(|path| path.is_dir())
+        .filter_map(|path| path.file_name())
+        .map(|name| name.to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("、");
+    app.dialog()
+        .message(format!(
+            "检测到文件夹“{names}”。需要先压缩后同步到已连接设备吗？选择“仅本地保存”则不会同步。"
+        ))
+        .title("文件夹同步")
+        .kind(MessageDialogKind::Info)
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            "压缩并同步".to_string(),
+            "仅本地保存".to_string(),
+        ))
+        .blocking_show()
 }
 
 async fn push_local_history_item(

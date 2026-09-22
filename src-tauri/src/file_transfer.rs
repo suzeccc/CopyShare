@@ -85,6 +85,7 @@ struct ManagedTransfer {
 #[derive(Debug, Clone)]
 struct ManagedTransferFile {
     source_path: Option<PathBuf>,
+    cleanup_source_path: Option<PathBuf>,
     source_size: Option<u64>,
     source_modified_ms: Option<i64>,
     token: Option<String>,
@@ -173,6 +174,38 @@ impl FileTransferManager {
             .map(transfer_snapshot)
             .ok_or_else(|| AppError::InvalidInput("file transfer task not found".to_string()))?;
         file_transfer_store::save(&root, &snapshot)
+    }
+
+    async fn cleanup_source_files(&self, transfer_id: &str) {
+        let paths = self
+            .tasks
+            .lock()
+            .await
+            .get(transfer_id)
+            .into_iter()
+            .flat_map(|entry| entry.files.values())
+            .filter_map(|file| file.cleanup_source_path.clone())
+            .collect::<Vec<_>>();
+        for path in paths {
+            let _ = fs::remove_file(path).await;
+        }
+    }
+
+    async fn update_saved_paths(
+        &self,
+        transfer_id: &str,
+        task: &FileTransferTask,
+    ) -> AppResult<()> {
+        let mut tasks = self.tasks.lock().await;
+        let entry = tasks
+            .get_mut(transfer_id)
+            .ok_or_else(|| AppError::InvalidInput("file transfer task not found".to_string()))?;
+        for file in &task.files {
+            if let Some(target) = entry.task.files.iter_mut().find(|target| target.id == file.id) {
+                target.saved_path = file.saved_path.clone();
+            }
+        }
+        Ok(())
     }
 
     async fn remove_persisted_transfer(
@@ -305,7 +338,7 @@ impl FileTransferManager {
         target_device_id: String,
         file_paths: Vec<PathBuf>,
     ) -> AppResult<FileTransferTask> {
-        self.create_send_offer_files_with_mode(app, state, target_device_id, file_paths, false)
+        self.create_send_offer_files_with_mode(app, state, target_device_id, file_paths, false, false)
             .await
     }
 
@@ -316,7 +349,18 @@ impl FileTransferManager {
         target_device_id: String,
         file_paths: Vec<PathBuf>,
     ) -> AppResult<FileTransferTask> {
-        self.create_send_offer_files_with_mode(app, state, target_device_id, file_paths, true)
+        self.create_send_offer_files_with_mode(app, state, target_device_id, file_paths, true, false)
+            .await
+    }
+
+    pub async fn create_clipboard_send_offer_files_with_cleanup(
+        self: &Arc<Self>,
+        app: &AppHandle,
+        state: &AppState,
+        target_device_id: String,
+        file_paths: Vec<PathBuf>,
+    ) -> AppResult<FileTransferTask> {
+        self.create_send_offer_files_with_mode(app, state, target_device_id, file_paths, true, true)
             .await
     }
 
@@ -327,6 +371,7 @@ impl FileTransferManager {
         target_device_id: String,
         file_paths: Vec<PathBuf>,
         clipboard_sync: bool,
+        cleanup_sources: bool,
     ) -> AppResult<FileTransferTask> {
         let devices = state.devices().await;
         let peer = trusted_transfer_peer(&devices, &target_device_id)?;
@@ -362,6 +407,7 @@ impl FileTransferManager {
                 file_id.clone(),
                 ManagedTransferFile {
                     source_path: Some(PathBuf::from(&selected.path)),
+                    cleanup_source_path: cleanup_sources.then(|| PathBuf::from(&selected.path)),
                     source_size: Some(selected.size),
                     source_modified_ms: source_modified_ms(&source_metadata),
                     token: Some(token.clone()),
@@ -439,6 +485,7 @@ impl FileTransferManager {
             let failed = self
                 .mark_failed(&transfer_id, "target device is not connected or trusted")
                 .await?;
+            self.cleanup_source_files(&transfer_id).await;
             emit_task_failed(app, &failed);
             return Err(AppError::InvalidInput(
                 "target device is not connected or mutually trusted".to_string(),
@@ -1185,8 +1232,12 @@ impl FileTransferManager {
             }
         }
 
-        let (completed, completed_files) = self.finish_receive_selection(&transfer_id).await?;
+        let (mut completed, completed_files) = self.finish_receive_selection(&transfer_id).await?;
         if completed.clipboard_sync && !completed_files.is_empty() {
+            if let Err(error) = restore_completed_folder_archives(&mut completed, &completed_files).await {
+                tracing::warn!("folder archive extraction failed: {error}");
+            }
+            self.update_saved_paths(&transfer_id, &completed).await?;
             if let Err(error) = apply_completed_clipboard_file_selection_sync(
                 &app,
                 &state,
@@ -2026,6 +2077,7 @@ impl FileTransferManager {
                 offered_file.file_id,
                 ManagedTransferFile {
                     source_path: None,
+                    cleanup_source_path: None,
                     source_size: None,
                     source_modified_ms: None,
                     token: Some(offered_file.token),
@@ -2098,6 +2150,9 @@ impl FileTransferManager {
         let mut task = self.mark_status(transfer_id, FileTransferStatus::Rejected).await?;
         if let Some(reason) = reason {
             task = self.mark_error_text(transfer_id, reason).await?;
+        }
+        if task.direction == FileTransferDirection::Send {
+            self.cleanup_source_files(transfer_id).await;
         }
         emit_task_updated(app, &task);
         Ok(task)
@@ -2173,6 +2228,9 @@ impl FileTransferManager {
         };
         if task.status == FileTransferStatus::Completed {
             self.remove_persisted_transfer(&direction, transfer_id).await?;
+            if direction == FileTransferDirection::Send {
+                self.cleanup_source_files(transfer_id).await;
+            }
         } else {
             self.persist_transfer(transfer_id).await?;
         }
@@ -2190,7 +2248,11 @@ impl FileTransferManager {
         transfer_id: &str,
     ) -> AppResult<FileTransferTask> {
         let task = self.cancel_local(transfer_id).await?;
-        self.cleanup_temp(transfer_id).await;
+        if task.direction == FileTransferDirection::Receive {
+            self.cleanup_temp(transfer_id).await;
+        } else {
+            self.cleanup_source_files(transfer_id).await;
+        }
         emit_task_updated(app, &task);
         Ok(task)
     }
@@ -2209,6 +2271,8 @@ impl FileTransferManager {
         };
         if task.direction == FileTransferDirection::Receive {
             self.cleanup_temp(transfer_id).await;
+        } else {
+            self.cleanup_source_files(transfer_id).await;
         }
         emit_task_failed(app, &task);
         Ok(task)
@@ -2596,6 +2660,7 @@ impl FileTransferManager {
                 file_id.to_string(),
                 ManagedTransferFile {
                     source_path: Some(source_path),
+                    cleanup_source_path: None,
                     source_size: Some(size),
                     source_modified_ms: source_modified_ms(&metadata),
                     token: Some(token.to_string()),
@@ -2680,6 +2745,7 @@ impl FileTransferManager {
                     "file-1".to_string(),
                     ManagedTransferFile {
                         source_path: None,
+                        cleanup_source_path: None,
                         source_size: None,
                         source_modified_ms: None,
                         token: Some("token".to_string()),
@@ -2991,6 +3057,72 @@ pub async fn send_clipboard_files_to_trusted_devices(
     Ok(sent_count)
 }
 
+pub async fn send_compressed_folders_to_trusted_devices(
+    app: AppHandle,
+    state: AppState,
+    folders: Vec<PathBuf>,
+) -> AppResult<usize> {
+    let devices = state
+        .devices()
+        .await
+        .into_iter()
+        .filter(|device| device.connected && device.trusted && device.remote_trusted)
+        .collect::<Vec<_>>();
+    let mut sent_count = 0usize;
+    let mut first_error = None;
+
+    for device in devices {
+        let mut archives = Vec::with_capacity(folders.len());
+        for folder in &folders {
+            let folder = folder.clone();
+            let result = tokio::task::spawn_blocking(move || clipboard::compress_folder_to_temp(&folder))
+                .await
+                .map_err(|error| AppError::InvalidInput(format!("文件夹压缩任务失败：{error}")))
+                .and_then(|result| result);
+            match result {
+                Ok(archive) => archives.push(archive),
+                Err(error) => {
+                    first_error.get_or_insert(error);
+                    break;
+                }
+            }
+        }
+        if archives.len() != folders.len() {
+            for archive in archives {
+                let _ = std::fs::remove_file(archive);
+            }
+            continue;
+        }
+        let cleanup_candidates = archives.clone();
+        match manager()
+            .create_clipboard_send_offer_files_with_cleanup(
+                &app,
+                &state,
+                device.id.clone(),
+                archives,
+            )
+            .await
+        {
+            Ok(_) => sent_count += 1,
+            Err(error) => {
+                for archive in cleanup_candidates {
+                    let _ = std::fs::remove_file(archive);
+                }
+                if first_error.is_none() {
+                    first_error = Some(error);
+                }
+            }
+        }
+    }
+
+    if sent_count == 0 {
+        if let Some(error) = first_error {
+            return Err(error);
+        }
+    }
+    Ok(sent_count)
+}
+
 pub async fn accept_file_transfer(
     app: AppHandle,
     state: AppState,
@@ -3098,6 +3230,115 @@ async fn apply_completed_clipboard_file_selection_sync(
     Ok(())
 }
 
+const FOLDER_ARCHIVE_PREFIX: &str = "copyshare-folder-";
+
+async fn restore_completed_folder_archives(
+    task: &mut FileTransferTask,
+    completed_files: &[FileCompleteFile],
+) -> AppResult<()> {
+    let completed_ids = completed_files
+        .iter()
+        .map(|file| file.file_id.as_str())
+        .collect::<HashSet<_>>();
+    for file in task
+        .files
+        .iter_mut()
+        .filter(|file| completed_ids.contains(file.id.as_str()))
+    {
+        let Some(archive) = file.saved_path.as_deref().map(PathBuf::from) else {
+            continue;
+        };
+        if !archive
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with(FOLDER_ARCHIVE_PREFIX))
+        {
+            continue;
+        }
+        let folder = extract_folder_archive(archive).await?;
+        file.saved_path = Some(folder.to_string_lossy().to_string());
+    }
+    Ok(())
+}
+
+async fn extract_folder_archive(archive: PathBuf) -> AppResult<PathBuf> {
+    tokio::task::spawn_blocking(move || extract_folder_archive_blocking(&archive))
+        .await
+        .map_err(|error| AppError::InvalidInput(format!("解压文件夹失败：{error}")))?
+}
+
+fn extract_folder_archive_blocking(archive: &Path) -> AppResult<PathBuf> {
+    #[cfg(target_os = "windows")]
+    {
+        let parent = archive
+            .parent()
+            .ok_or_else(|| AppError::InvalidInput("压缩包路径无效".to_string()))?;
+        let unpack_dir = parent.join(format!(".copyshare-unpack-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&unpack_dir)?;
+        let escape = |value: &Path| value.to_string_lossy().replace('\'', "''");
+        let command = format!(
+            "Expand-Archive -LiteralPath '{}' -DestinationPath '{}' -Force -ErrorAction Stop",
+            escape(archive),
+            escape(&unpack_dir),
+        );
+        let status = std::process::Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-WindowStyle",
+                "Hidden",
+                "-Command",
+                &command,
+            ])
+            .status();
+        if !status.is_ok_and(|status| status.success()) {
+            let _ = std::fs::remove_dir_all(&unpack_dir);
+            return Err(AppError::InvalidInput("解压文件夹失败".to_string()));
+        }
+
+        let mut entries = std::fs::read_dir(&unpack_dir)?
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .collect::<Vec<_>>();
+        let target_name = if entries.len() == 1 {
+            entries[0]
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("文件夹")
+                .to_string()
+        } else {
+            archive
+                .file_stem()
+                .and_then(|name| name.to_str())
+                .unwrap_or("文件夹")
+                .trim_start_matches(FOLDER_ARCHIVE_PREFIX)
+                .rsplit_once('-')
+                .map(|(name, _)| name)
+                .unwrap_or("文件夹")
+                .to_string()
+        };
+        let target = unique_save_path_with_reserved(parent, &target_name, &HashSet::new());
+        if entries.len() == 1 && entries[0].is_dir() {
+            std::fs::rename(entries.remove(0), &target)?;
+        } else {
+            std::fs::create_dir_all(&target)?;
+            for entry in entries {
+                let destination = target.join(entry.file_name().unwrap_or_default());
+                std::fs::rename(entry, destination)?;
+            }
+        }
+        let _ = std::fs::remove_dir_all(&unpack_dir);
+        let _ = std::fs::remove_file(archive);
+        return Ok(target);
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = archive;
+        Err(AppError::InvalidInput("当前系统暂不支持解压文件夹同步".to_string()))
+    }
+}
+
 #[cfg(test)]
 async fn apply_completed_clipboard_file_sync_core<F>(
     state: &AppState,
@@ -3201,10 +3442,19 @@ fn pending_clipboard_file_content_for_file(
     file: &FileTransferFile,
     path: Option<&str>,
 ) -> AppResult<String> {
+    let display_path = path.map(Path::new);
+    let name = display_path
+        .and_then(|path| path.file_name())
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or(&file.name);
+    let size = display_path
+        .map(clipboard::clipboard_path_size)
+        .unwrap_or(file.size);
     serde_json::to_string(&[clipboard::ClipboardFileEntry {
         path: path.unwrap_or_default().to_string(),
-        name: file.name.clone(),
-        size: file.size,
+        name: name.to_string(),
+        size,
         thumbnail: file.thumbnail.clone(),
     }])
     .map_err(Into::into)
@@ -3900,6 +4150,7 @@ fn managed_transfer_from_snapshot(
                 file.file_id,
                 ManagedTransferFile {
                     source_path: file.source_path,
+                    cleanup_source_path: None,
                     source_size: file.source_size,
                     source_modified_ms: file.source_modified_ms,
                     token: None,
@@ -5762,6 +6013,7 @@ mod tests {
                 "file-2".to_string(),
                 ManagedTransferFile {
                     source_path: None,
+                    cleanup_source_path: None,
                     source_size: None,
                     source_modified_ms: None,
                     token: Some("second-token".to_string()),

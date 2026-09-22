@@ -6,6 +6,72 @@ const ENGLISH_CATALOG: &str = include_str!("../../locales/en-US.json");
 const TRADITIONAL_CATALOG: &str = include_str!("../../locales/zh-TW.json");
 const JAPANESE_CATALOG: &str = include_str!("../../locales/ja-JP.json");
 
+const NATIVE_ERROR_SOURCES: &[(&str, &str)] = &[
+    ("clipboard error: ", "剪贴板错误："),
+    (
+        "the clipboard contents were not available in the requested format or the clipboard is empty.",
+        "剪贴板为空或不包含所需格式的内容",
+    ),
+    (
+        "the selected clipboard is not supported with the current system configuration.",
+        "当前系统配置不支持此剪贴板",
+    ),
+    (
+        "the native clipboard is not accessible due to being held by another party.",
+        "剪贴板被其他程序占用，暂时无法访问",
+    ),
+    (
+        "the image or the text that was about the be transferred to/from the clipboard could not be converted to the appropriate format.",
+        "图片或文字无法转换成剪贴板支持的格式",
+    ),
+    (
+        "unknown error while interacting with the clipboard: ",
+        "访问剪贴板时发生未知错误：",
+    ),
+    ("failed to read clipboard image data", "读取剪贴板图片数据失败"),
+    ("failed to read clipboard string", "读取剪贴板文本失败"),
+    ("failed to read clipboard PNG data", "读取剪贴板 PNG 数据失败"),
+    ("unable to register HTML format", "无法注册 HTML 格式"),
+    (
+        "could not place the specified text to the clipboard",
+        "无法将指定文本写入剪贴板",
+    ),
+    ("failed to clear clipboard", "清空剪贴板失败"),
+    ("invalid input: source file path", "路径无效"),
+    ("invalid input: ", "输入无效："),
+    ("i/o error: ", "I/O 错误："),
+    ("json error: ", "JSON 错误："),
+    ("url error: ", "URL 错误："),
+    ("websocket error: ", "WebSocket 错误："),
+    ("unknown device: ", "未知设备："),
+    ("tauri error: ", "Tauri 错误："),
+    ("sync is already running", "同步已在运行"),
+    ("sync is not running", "同步未运行"),
+];
+
+fn replace_ascii_case_insensitive(value: &str, source: &str, replacement: &str) -> String {
+    let source_lower = source.to_ascii_lowercase();
+    let value_lower = value.to_ascii_lowercase();
+    let mut result = String::with_capacity(value.len());
+    let mut cursor = 0;
+
+    while let Some(offset) = value_lower[cursor..].find(&source_lower) {
+        let start = cursor + offset;
+        result.push_str(&value[cursor..start]);
+        result.push_str(replacement);
+        cursor = start + source.len();
+    }
+
+    result.push_str(&value[cursor..]);
+    result
+}
+
+fn normalize_native_error(source: &str) -> String {
+    NATIVE_ERROR_SOURCES.iter().fold(source.to_string(), |value, (source, replacement)| {
+        replace_ascii_case_insensitive(&value, source, replacement)
+    })
+}
+
 fn sorted_catalog(source: &str, fallback: Option<&str>) -> Vec<(String, String)> {
     let mut map: HashMap<String, String> = fallback
         .map(|catalog| serde_json::from_str(catalog).expect("valid fallback locale catalog"))
@@ -78,11 +144,12 @@ pub fn translate_with_protected(
 }
 
 pub fn translate_for_language(language: UiLanguage, source: &str) -> String {
+    let normalized = normalize_native_error(source);
     if effective_language(language) == UiLanguage::ZhCn {
-        return source.to_string();
+        return normalized;
     }
 
-    let mut translated = source.to_string();
+    let mut translated = normalized;
     for (phrase, replacement) in catalog_for_language(effective_language(language)) {
         if translated.contains(phrase) {
             translated = translated.replace(phrase, replacement);
@@ -133,6 +200,19 @@ mod tests {
                 &["我的设置".to_string(), "设置".to_string()],
             ),
             "from 我的设置: 设置"
+        );
+    }
+
+    #[test]
+    fn translates_native_clipboard_image_errors() {
+        let source = "clipboard error: Unknown error while interacting with the clipboard: failed to read clipboard image data";
+        assert_eq!(
+            translate_for_language(UiLanguage::ZhCn, source),
+            "剪贴板错误：访问剪贴板时发生未知错误：读取剪贴板图片数据失败"
+        );
+        assert_eq!(
+            translate_for_language(UiLanguage::EnUs, source),
+            "Clipboard error: An unknown error occurred while accessing the clipboard: Failed to read clipboard image data"
         );
     }
 }
