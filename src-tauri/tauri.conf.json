@@ -16,7 +16,7 @@
         "visible": false,
         "title": "CopyShare",
         "width": 1120,
-        "height": 720,
+        "height": 740,
         "center": true,
         "minWidth": 960,
         "minHeight": 620,
@@ -38,7 +38,7 @@
   },
   "bundle": {
     "active": true,
-    "createUpdaterArtifacts": true,
+    "createUpdaterArtifacts": false,
     "publisher": "suzeccc",
     "targets": "all",
     "icon": [
