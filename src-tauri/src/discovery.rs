@@ -33,6 +33,7 @@ const ACTIVE_DISCOVERY_WAIT: Duration = Duration::from_secs(2);
 const DISCOVERY_OFFLINE_AFTER: ChronoDuration = ChronoDuration::seconds(30);
 const DISCOVERY_SWEEP_INTERVAL: Duration = Duration::from_secs(5);
 const SUBNET_SCAN_DELAY: Duration = Duration::from_millis(4);
+const INACTIVE_DISCOVERED_DEVICE_LIMIT: usize = 100;
 
 static DISCOVERED_DEVICES: OnceLock<Mutex<HashMap<String, DeviceInfo>>> = OnceLock::new();
 static NOTIFIED_ONLINE_DEVICES: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
@@ -334,8 +335,11 @@ async fn cached_devices() -> Vec<DeviceInfo> {
 async fn expire_cached_discovered_devices(app: &AppHandle, state: &AppState) {
     let now = Utc::now();
     let current_cache = cached_devices().await;
-    let expired_cache =
-        expire_stale_discovered_devices(current_cache, now, DISCOVERY_OFFLINE_AFTER);
+    let expired_cache = retain_recent_inactive_devices(expire_stale_discovered_devices(
+        current_cache,
+        now,
+        DISCOVERY_OFFLINE_AFTER,
+    ));
     {
         let mut cache = discovered_devices().lock().await;
         cache.clear();
@@ -362,7 +366,9 @@ async fn expire_cached_discovered_devices(app: &AppHandle, state: &AppState) {
         notifications::notify_device_offline(app, &device);
         let _ = app.emit("device-discovered", device);
     }
-    state.replace_devices(expired_devices).await;
+    state
+        .replace_devices(retain_recent_inactive_devices(expired_devices))
+        .await;
 }
 
 async fn notify_device_online_once(app: &AppHandle, device: &DeviceInfo) {
@@ -430,6 +436,23 @@ pub fn expire_stale_discovered_devices(
             device
         })
         .collect()
+}
+
+fn retain_recent_inactive_devices(mut devices: Vec<DeviceInfo>) -> Vec<DeviceInfo> {
+    devices.sort_by(|left, right| right.last_seen_at.cmp(&left.last_seen_at));
+    let mut inactive_count = 0;
+    devices.retain(|device| {
+        if device.connected
+            || device.status != DeviceStatus::Offline
+            || device.trusted
+            || device.has_connected_before
+        {
+            return true;
+        }
+        inactive_count += 1;
+        inactive_count <= INACTIVE_DISCOVERED_DEVICE_LIMIT
+    });
+    devices
 }
 
 pub fn active_discovery_round_delays() -> Vec<Duration> {
@@ -830,7 +853,8 @@ mod tests {
         discovery_scan_hosts_for_adapters, discovery_scan_hosts_for_config,
         discovered_device_from_payload,
         expire_stale_discovered_devices, merge_discovered_device, merge_scan_ranges,
-        normalize_scan_cidr, parse_discovery_payload, ACTIVE_DISCOVERY_WAIT, SUBNET_SCAN_DELAY,
+        normalize_scan_cidr, parse_discovery_payload, retain_recent_inactive_devices,
+        ACTIVE_DISCOVERY_WAIT, SUBNET_SCAN_DELAY,
     };
 
     #[test]
@@ -1046,6 +1070,37 @@ mod tests {
                 Duration::from_millis(1500),
             ]
         );
+    }
+
+    #[test]
+    fn inactive_discovery_cache_keeps_recent_and_known_devices() {
+        let now = Utc::now();
+        let make_device = |index: usize| DeviceInfo {
+            id: format!("device-{index}"),
+            name: format!("Device {index}"),
+            ip: format!("192.168.1.{index}"),
+            port: 8765,
+            connected: false,
+            trusted: false,
+            remote_trusted: false,
+            has_connected_before: false,
+            last_seen_at: Some(now - ChronoDuration::seconds(index as i64)),
+            status: DeviceStatus::Offline,
+        };
+        let mut devices = (0..102).map(&make_device).collect::<Vec<_>>();
+        devices.push(DeviceInfo { trusted: true, ..make_device(102) });
+        devices.push(DeviceInfo { has_connected_before: true, ..make_device(103) });
+        devices.push(DeviceInfo { connected: true, ..make_device(104) });
+        devices.push(DeviceInfo { status: DeviceStatus::Connecting, ..make_device(105) });
+
+        let retained = retain_recent_inactive_devices(devices);
+        assert_eq!(retained.len(), 104);
+        assert!(retained.iter().any(|device| device.id == "device-99"));
+        assert!(!retained.iter().any(|device| device.id == "device-100"));
+        assert!(retained.iter().any(|device| device.id == "device-102"));
+        assert!(retained.iter().any(|device| device.id == "device-103"));
+        assert!(retained.iter().any(|device| device.id == "device-104"));
+        assert!(retained.iter().any(|device| device.id == "device-105"));
     }
 
     #[test]

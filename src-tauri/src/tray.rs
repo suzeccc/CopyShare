@@ -1,7 +1,7 @@
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    App, AppHandle,
+    App, AppHandle, Emitter,
 };
 use crate::{
     i18n,
@@ -52,7 +52,7 @@ pub fn setup_tray(app: &mut App, state: AppState) -> tauri::Result<()> {
         .icon(TRAY_ICON)
         .tooltip(i18n::translate(&config, "CopyShare - 待启动同步"))
         .menu(&menu)
-        .show_menu_on_left_click(true)
+        .show_menu_on_left_click(false)
         .on_menu_event(move |app, event| match event.id.as_ref() {
             "show" => {
                 notifications::show_main_window(app);
@@ -87,7 +87,7 @@ pub fn setup_tray(app: &mut App, state: AppState) -> tauri::Result<()> {
             } = event
             {
                 let app = tray.app_handle();
-                notifications::show_main_window(app);
+                let _ = app.emit("tray-left-click", ());
             }
         })
         .build(app)?;

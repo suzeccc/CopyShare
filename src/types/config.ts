@@ -30,6 +30,7 @@ export interface AppConfig {
   toggleSyncShortcut: string;
   saveHistory: boolean;
   trustedDevices: string[];
+  trustedCertificates: Record<string, string>;
   syncText: boolean;
   syncImage: boolean;
   syncFiles: boolean;

@@ -11,6 +11,8 @@ test("library backend state and commands are registered", () => {
   assert.match(lib, /mod library;/);
   for (const name of [
     "get_library",
+    "get_library_item_content",
+    "search_library_content",
     "collect_history_item",
     "create_text_snippet",
     "update_library_item",
@@ -50,7 +52,7 @@ test("library mutations surface prune failures after synchronizing state", () =>
   );
   assert.match(
     mutation,
-    /state\.replace_library\(snapshot\.clone\(\)\)\.await;[\s\S]*?if let Some\(error\) = prune_error \{[\s\S]*?return Err\(error\);/,
+    /state\.replace_library\(snapshot\)\.await;[\s\S]*?if let Some\(error\) = prune_error \{[\s\S]*?return Err\(error\);/,
   );
   assert.doesNotMatch(mutation, /failed to prune library resources/);
 });
@@ -64,7 +66,7 @@ test("library file-copy cache creation is serialized with mutations", () => {
   assert.match(copyCommand, /let _guard = state\.lock_library_mutation\(\)\.await;/);
   assert.match(
     copyCommand,
-    /lock_library_mutation\(\)\.await;[\s\S]*?\.library\(\)[\s\S]*?\.await/,
+    /lock_library_mutation\(\)\.await;[\s\S]*?\.library_item\(&id\)[\s\S]*?\.await/,
   );
   assert.match(copyCommand, /commit_file_copy_cache\(&root, &paths\)/);
   assert.match(copyCommand, /discard_file_copy_cache\(&paths\)/);

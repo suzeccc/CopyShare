@@ -49,11 +49,13 @@ export type AppEventName =
   | "device-rejected"
   | "lan-discovery-progress"
   | "clipboard-synced"
+  | "system-clipboard-history-changed"
   | "history-updated"
   | "sync-error"
   | "config-updated"
   | "library-updated"
   | "navigate-to-page"
+  | "tray-left-click"
   | "global-shortcut-triggered"
   | "file-transfer-offer"
   | "file-transfer-updated"
@@ -85,8 +87,12 @@ export function disconnectDevice(deviceId: string): Promise<void> {
   return invoke<void>("disconnect_device", { deviceId });
 }
 
-export function trustDevice(deviceId: string): Promise<void> {
-  return invoke<void>("trust_device", { deviceId });
+export function getPairingCode(deviceId: string): Promise<string> {
+  return invoke<string>("get_pairing_code", { deviceId });
+}
+
+export function trustDevice(deviceId: string, pairingCode: string): Promise<void> {
+  return invoke<void>("trust_device", { deviceId, pairingCode });
 }
 
 export function rejectDevice(deviceId: string): Promise<void> {
@@ -113,12 +119,28 @@ export function getHistory(): Promise<HistoryItem[]> {
   return invoke<HistoryItem[]>("get_history");
 }
 
+export function getHistoryItemContent(historyId: string): Promise<string> {
+  return invoke<string>("get_history_item_content", { historyId });
+}
+
+export function searchHistoryText(query: string): Promise<string[]> {
+  return invoke<string[]>("search_history_text", { query });
+}
+
 export function setHistoryItemPinned(historyId: string, pinned: boolean): Promise<HistoryItem[]> {
   return invoke<HistoryItem[]>("set_history_item_pinned", { historyId, pinned });
 }
 
 export function getLibrary(): Promise<LibrarySnapshot> {
   return invoke<LibrarySnapshot>("get_library");
+}
+
+export function getLibraryItemContent(id: string): Promise<string> {
+  return invoke<string>("get_library_item_content", { id });
+}
+
+export function searchLibraryContent(query: string): Promise<string[]> {
+  return invoke<string[]>("search_library_content", { query });
 }
 
 export function collectHistoryItem(
@@ -170,12 +192,35 @@ export function getLibraryImageThumbnail(id: string, maxSize = 200): Promise<str
   return invoke<string>("get_library_image_thumbnail", { id, maxSize });
 }
 
+export function getLibraryImagePreviewPath(id: string): Promise<string> {
+  return invoke<string>("get_library_image_preview_path", { id });
+}
+
 export function getLibraryVideoPreviewPath(id: string, assetIndex: number): Promise<string> {
   return invoke<string>("get_library_video_preview_path", { id, assetIndex });
 }
 
-export function getClipboardHistory(): Promise<Array<{ id: string; text: string; createdAt?: string; sourceDevice?: string }>> {
-  return invoke<Array<{ id: string; text: string; createdAt?: string; sourceDevice?: string }>>("get_clipboard_history");
+export function getClipboardHistory(): Promise<Array<{ id: string; text: string; needsFullText: boolean; createdAt?: string; sourceDevice?: string }>> {
+  return invoke("get_clipboard_history");
+}
+
+export function getClipboardHistoryItemContent(historyId: string): Promise<string> {
+  return invoke<string>("get_clipboard_history_item_content", { historyId });
+}
+
+export function enableClipboardHistoryEvents(): Promise<boolean> {
+  return invoke<boolean>("enable_clipboard_history_events");
+}
+
+export function setFloatingBallLowMemory(low: boolean): Promise<boolean> {
+  return invoke<boolean>("set_floating_ball_low_memory", { low });
+}
+
+export function getClipboardPreviewItemContent(item: Pick<ClipboardPreviewItem, "id" | "text" | "needsFullText" | "systemHistoryItemId">): Promise<string> {
+  if (!item.needsFullText) return Promise.resolve(item.text);
+  return item.systemHistoryItemId
+    ? getClipboardHistoryItemContent(item.systemHistoryItemId)
+    : getHistoryItemContent(item.id);
 }
 
 export function readClipboardText(): Promise<string> {
@@ -442,7 +487,7 @@ export async function toggleFloatingClipboardHistoryWindow(
   }
 
   if (await existing.isVisible()) {
-    await existing.hide();
+    await existing.close();
     return;
   }
 
@@ -467,8 +512,8 @@ export function showMainWindow(): Promise<void> {
   return invoke<void>("show_main_window");
 }
 
-export function hideMainWindow(): Promise<void> {
-  return invoke<void>("hide_main_window");
+export function hideMainWindow(lowMemory = true): Promise<void> {
+  return invoke<void>("hide_main_window", { lowMemory });
 }
 
 export async function isMainWindowVisible(): Promise<boolean> {
@@ -517,10 +562,6 @@ export function waitForPrimaryMouseRelease(): Promise<void> {
 
 export function closeWindow(): Promise<void> {
   return getCurrentWindow().close();
-}
-
-export function hideWindow(): Promise<void> {
-  return getCurrentWindow().hide();
 }
 
 type WindowGeometry = {

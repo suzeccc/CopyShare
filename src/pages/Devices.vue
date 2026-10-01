@@ -179,7 +179,7 @@ async function openSystemNetworkSettings() {
       <Card>
         <p class="text-sm font-semibold text-white">快速配置</p>
         <p class="mt-2 text-sm leading-6 text-[color:var(--muted-text)]">
-          CopyShare 会自动发现同一局域网内正在运行的设备；也可以手动输入对方 IPv4 地址和端口连接。要双向同步，两台电脑都需要在设备列表里信任对方
+          CopyShare 会自动发现同一局域网内正在运行的设备；也可以手动输入对方 IPv4 地址和端口连接。首次信任时请核对两台电脑显示的配对码，并在双方分别确认
         </p>
         <div data-device-action-grid class="mt-5 grid gap-3 lg:grid-cols-2">
           <div

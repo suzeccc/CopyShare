@@ -301,6 +301,8 @@ pub struct AppConfig {
     pub toggle_sync_shortcut: String,
     pub save_history: bool,
     pub trusted_devices: Vec<String>,
+    #[serde(default)]
+    pub trusted_certificates: std::collections::HashMap<String, String>,
     pub sync_text: bool,
     pub sync_image: bool,
     pub sync_files: bool,
@@ -351,7 +353,7 @@ fn default_true() -> bool {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            config_version: 12,
+            config_version: 13,
             onboarding_completed: false,
             ui_language: UiLanguage::System,
             device_name: "CopyShare".to_string(),
@@ -374,6 +376,7 @@ impl Default for AppConfig {
             toggle_sync_shortcut: default_toggle_sync_shortcut(),
             save_history: true,
             trusted_devices: Vec::new(),
+            trusted_certificates: std::collections::HashMap::new(),
             sync_text: true,
             sync_image: true,
             sync_files: true,

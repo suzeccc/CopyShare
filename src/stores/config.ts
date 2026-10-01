@@ -4,7 +4,7 @@ import { getConfig, onAppEvent, updateConfig } from "@/lib/tauri";
 import type { AppConfig } from "@/types/config";
 
 const defaultConfig: AppConfig = {
-  configVersion: 12,
+  configVersion: 13,
   onboardingCompleted: false,
   uiLanguage: "system",
   deviceName: "CopyShare",
@@ -27,6 +27,7 @@ const defaultConfig: AppConfig = {
   toggleSyncShortcut: "Alt+Shift+S",
   saveHistory: true,
   trustedDevices: [],
+  trustedCertificates: {},
   syncText: true,
   syncImage: true,
   syncFiles: true,

@@ -17,19 +17,21 @@ let visible = true;
 let minimized = false;
 let reads = 0;
 let nextTimer = 0;
+let intervalMs = 0;
 const timers = new Map<number, () => void>();
 const context = vm.createContext({
   isFloating: { value: true },
-  systemClipboardItems: { value: [{ content: "old" }] },
+  systemClipboardItems: { value: [{ text: "old" }] },
+  enableClipboardHistoryEvents: async () => true,
   getCurrentWindow: () => ({
     isVisible: async () => visible,
     isMinimized: async () => minimized,
   }),
-  getClipboardHistory: async () => { reads += 1; return [{ content: "new" }]; },
+  getClipboardHistory: async () => { reads += 1; return [{ id: "system-id", text: "new", needsFullText: false }]; },
   window: {
     clearInterval: (id: number) => timers.delete(id),
     setInterval: (callback: () => void, delay: number) => {
-      assert.equal(delay, 1200);
+      intervalMs = delay;
       timers.set(++nextTimer, callback);
       return nextTimer;
     },
@@ -40,59 +42,68 @@ vm.runInContext(ts.transpile(`
   let clipboardHistoryPollingGeneration = 0;
   let clipboardHistoryPollingDisposed = false;
   let clipboardHistoryRefreshCount = 0;
+  let clipboardHistoryEventsEnabled;
+  let clipboardHistoryEventUnlisten = () => {};
   ${visibility}
   ${polling}
 `), context);
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
 
-await vm.runInContext("startClipboardHistoryPolling()", context);
+await vm.runInContext("startClipboardHistoryUpdates()", context);
 await flush();
 assert.equal(reads, 1);
 assert.equal(timers.size, 1);
+assert.equal(intervalMs, 30000);
+await vm.runInContext("refreshSystemClipboardHistory(true)", context);
+assert.equal(reads, 2);
+assert.equal(context.systemClipboardItems.value[0].systemHistoryItemId, "system-id");
 
 // Native visibility, not focus, determines whether polling may run.
 visible = false;
 timers.values().next().value!();
 await flush();
-assert.equal(reads, 1);
+assert.equal(reads, 2);
 assert.equal(timers.size, 0);
-assert.equal(context.systemClipboardItems.value[0].content, "new");
-await vm.runInContext("startClipboardHistoryPolling()", context);
+assert.equal(context.systemClipboardItems.value[0].text, "new");
+await vm.runInContext("startClipboardHistoryUpdates()", context);
 assert.equal(timers.size, 0);
 
 visible = true;
-await vm.runInContext("startClipboardHistoryPolling()", context);
+await vm.runInContext("startClipboardHistoryUpdates()", context);
 await flush();
-assert.equal(reads, 2);
+assert.equal(reads, 3);
 assert.equal(timers.size, 1);
 minimized = true;
 timers.values().next().value!();
 await flush();
-assert.equal(reads, 2);
+assert.equal(reads, 3);
 assert.equal(timers.size, 0);
 
 // Explicit quick-panel requests may refresh while the main window is hidden.
 await vm.runInContext("refreshSystemClipboardHistory()", context);
-assert.equal(reads, 3);
+assert.equal(reads, 4);
 minimized = false;
+vm.runInContext("clipboardHistoryEventsEnabled = undefined", context);
+context.enableClipboardHistoryEvents = async () => false;
 await Promise.all([
-  vm.runInContext("startClipboardHistoryPolling()", context),
-  vm.runInContext("startClipboardHistoryPolling()", context),
+  vm.runInContext("startClipboardHistoryUpdates()", context),
+  vm.runInContext("startClipboardHistoryUpdates()", context),
 ]);
 await flush();
 assert.equal(timers.size, 1);
+assert.equal(intervalMs, 1200);
 context.isFloating.value = false;
-await vm.runInContext("startClipboardHistoryPolling()", context);
+await vm.runInContext("startClipboardHistoryUpdates()", context);
 assert.equal(timers.size, 0);
 
 // Unmount/mode changes invalidate an in-flight visibility check.
 context.isFloating.value = true;
-const starting = vm.runInContext("startClipboardHistoryPolling()", context);
-vm.runInContext("stopClipboardHistoryPolling()", context);
+const starting = vm.runInContext("startClipboardHistoryUpdates()", context);
+vm.runInContext("stopClipboardHistoryUpdates()", context);
 await starting;
 assert.equal(timers.size, 0);
-assert.match(shell, /onMainWindowFocusChanged\(\(\) => \{\s*void startClipboardHistoryPolling\(\)/);
-assert.match(shell, /onBeforeUnmount\([\s\S]*?stopClipboardHistoryPolling\(\);\s*windowFocusUnlisten\?\.\(\)/);
+assert.match(shell, /onMainWindowFocusChanged\(\(\) => \{\s*void startClipboardHistoryUpdates\(\)/);
+assert.match(shell, /onBeforeUnmount\([\s\S]*?stopClipboardHistoryUpdates\(\);\s*clipboardHistoryEventUnlisten\?\.\(\)/);
 vm.runInContext("clipboardHistoryPollingDisposed = true", context);
-await vm.runInContext("startClipboardHistoryPolling()", context);
+await vm.runInContext("startClipboardHistoryUpdates()", context);
 assert.equal(timers.size, 0);

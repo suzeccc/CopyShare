@@ -1,15 +1,19 @@
 import { createPinia } from "pinia";
 import { createApp } from "vue";
 
-import App from "./App.vue";
 import { initializeI18n, setUiLanguage } from "./i18n";
 import { getConfig, onAppEvent } from "./lib/tauri";
-import router from "./router";
 import { useConfigStore } from "./stores/config";
 import type { UiLanguage } from "./types/config";
 import "./style.css";
 
 async function bootstrap() {
+  const utilityWindow = /^#\/(?:media-preview|floating-clipboard)(?:[?/]|$)/.test(window.location.hash);
+  const appModule = utilityWindow ? import("./UtilityApp.vue") : import("./App.vue");
+  const [{ default: App }, { default: router }] = await Promise.all([
+    appModule,
+    import("./router"),
+  ]);
   const isTauriRuntime = "__TAURI_INTERNALS__" in window;
   const initialConfig = isTauriRuntime
     ? await getConfig().catch(() => null)

@@ -29,7 +29,7 @@ assert.match(clipboardPage, /<TransitionGroup[\s\S]*name="clipboard-card-stagger
 assert.match(clipboardPage, /data-clipboard-stagger-list/);
 assert.match(clipboardPage, /data-clipboard-stagger-list[\s\S]*class="[^"]*\brelative\b[^"]*"/);
 assert.match(clipboardPage, /v-for="\(\s*item,\s*index\s*\) in filteredRecentSyncItems"/);
-assert.match(clipboardPage, /v-for="\(\s*item,\s*index\s*\) in filteredAllClipboardItems"/);
+assert.match(clipboardPage, /v-for="\{ item, index, virtualRow \} in visibleHistoryRows"/);
 assert.match(clipboardPage, /--clipboard-row-index:\s*\$\{index\}/);
 assert.match(style, /\.clipboard-card-stagger-enter-active[\s\S]*transition-delay:\s*calc\(var\(--clipboard-row-index\) \* 38ms\)/);
 assert.match(style, /\.clipboard-card-stagger-leave-active\s*\{[\s\S]*position:\s*absolute/);

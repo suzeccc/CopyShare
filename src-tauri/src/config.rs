@@ -4,7 +4,7 @@ use tauri::{AppHandle, Manager};
 
 use crate::{
     discovery,
-    error::AppResult,
+    error::{AppError, AppResult},
     models::{
         new_device_id, AppConfig, MAX_FILE_SIZE_LIMIT_MIB, MIN_FILE_SIZE_LIMIT_MIB,
     },
@@ -13,7 +13,9 @@ use crate::{
 };
 
 const CONFIG_FILE: &str = "config.json";
-const CURRENT_CONFIG_VERSION: u16 = 12;
+const KEYRING_SERVICE: &str = "CopyShare";
+const KEYRING_USER: &str = "translation-api-key";
+const CURRENT_CONFIG_VERSION: u16 = 13;
 const LEGACY_DEFAULT_FILE_SIZE_LIMIT_MIB: u32 = 2048;
 
 pub fn load_config(app: &AppHandle) -> AppResult<AppConfig> {
@@ -23,6 +25,19 @@ pub fn load_config(app: &AppHandle) -> AppResult<AppConfig> {
         save_config(app, &config)?;
         return Ok(config);
     };
+    if config.translation_api_key.is_empty() {
+        config.translation_api_key = match keyring_entry().and_then(|entry| entry.get_password()) {
+            Ok(key) => key,
+            Err(keyring::Error::NoEntry) => String::new(),
+            Err(error) => {
+                tracing::warn!("could not load translation API key from system credential store: {error}");
+                String::new()
+            }
+        };
+    } else {
+        // Migrate legacy plaintext config only after the credential store accepts the key.
+        save_config(app, &config)?;
+    }
     let mut changed = ensure_config_device_id(&mut config);
     changed |= migrate_config(&mut config);
     changed |= normalize_config(&mut config);
@@ -34,9 +49,31 @@ pub fn load_config(app: &AppHandle) -> AppResult<AppConfig> {
 
 pub fn save_config(app: &AppHandle, config: &AppConfig) -> AppResult<()> {
     let path = config_path(app)?;
+    let normalized = config_for_disk(config);
+    if !config.translation_api_key.is_empty() {
+        keyring_entry()
+            .and_then(|entry| entry.set_password(&config.translation_api_key))
+            .map_err(|error| AppError::InvalidInput(format!("无法安全保存 AI API Key：{error}")))?;
+    }
+    safe_json_store::save(&path, &normalized)
+}
+
+fn config_for_disk(config: &AppConfig) -> AppConfig {
     let mut normalized = config.clone();
     normalize_config(&mut normalized);
-    safe_json_store::save(&path, &normalized)
+    normalized.translation_api_key.clear();
+    normalized
+}
+
+pub fn clear_translation_api_key() -> AppResult<()> {
+    match keyring_entry().and_then(|entry| entry.delete_credential()) {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(error) => Err(AppError::InvalidInput(format!("无法删除 AI API Key：{error}"))),
+    }
+}
+
+fn keyring_entry() -> Result<keyring::Entry, keyring::Error> {
+    keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER)
 }
 
 fn config_path(app: &AppHandle) -> AppResult<PathBuf> {
@@ -75,6 +112,11 @@ fn migrate_config(config: &mut AppConfig) -> bool {
     }
     if config.config_version < 11 {
         config.onboarding_completed = true;
+    }
+    if config.config_version < 13 {
+        // Old trust records had no authenticated device identity.
+        config.trusted_devices.clear();
+        config.trusted_certificates.clear();
     }
     config.config_version = CURRENT_CONFIG_VERSION;
     true
@@ -148,6 +190,25 @@ mod tests {
     use crate::models::AppConfig;
 
     #[test]
+    fn api_key_never_enters_config_json() {
+        let mut config = AppConfig::default();
+        config.translation_api_key = "secret-canary".to_string();
+        let saved = serde_json::to_string(&super::config_for_disk(&config)).unwrap();
+        assert!(!saved.contains("secret-canary"));
+        assert!(saved.contains("\"translationApiKey\":\"\""));
+    }
+
+    #[test]
+    fn old_unauthenticated_trust_requires_new_pairing() {
+        let mut config = AppConfig::default();
+        config.config_version = 12;
+        config.trusted_devices.push("device-old".into());
+        assert!(super::migrate_config(&mut config));
+        assert!(config.trusted_devices.is_empty());
+        assert_eq!(config.config_version, 13);
+    }
+
+    #[test]
     fn startup_window_mode_defaults_to_floating_and_preserves_explicit_main() {
         use crate::models::StartupWindowMode;
 
@@ -183,7 +244,7 @@ mod tests {
     fn default_config_matches_mvp_scope() {
         let config = AppConfig::default();
 
-        assert_eq!(config.config_version, 12);
+        assert_eq!(config.config_version, 13);
         assert!(!config.onboarding_completed);
         assert_eq!(config.ui_language, crate::models::UiLanguage::System);
         assert_eq!(config.port, 8765);
@@ -301,7 +362,7 @@ mod tests {
         let mut config: AppConfig = serde_json::from_value(json).unwrap();
 
         assert!(super::migrate_config(&mut config));
-        assert_eq!(config.config_version, 12);
+        assert_eq!(config.config_version, 13);
         assert!(config.onboarding_completed);
         assert!(config.sync_image);
         assert!(config.sync_files);
@@ -313,7 +374,7 @@ mod tests {
         config.notification_clipboard_preview = false;
         config.notify_device_status = false;
         assert!(!super::migrate_config(&mut config));
-        assert_eq!(config.config_version, 12);
+        assert_eq!(config.config_version, 13);
         assert!(config.onboarding_completed);
         assert!(!config.sync_image);
         assert!(!config.sync_files);
@@ -334,7 +395,7 @@ mod tests {
         };
 
         assert!(super::migrate_config(&mut config));
-        assert_eq!(config.config_version, 12);
+        assert_eq!(config.config_version, 13);
         assert!(config.onboarding_completed);
         assert!(!config.sync_text);
         assert!(!config.sync_image);
@@ -353,7 +414,7 @@ mod tests {
         };
 
         assert!(super::migrate_config(&mut config));
-        assert_eq!(config.config_version, 12);
+        assert_eq!(config.config_version, 13);
         assert!(config.onboarding_completed);
         assert!(!config.quick_panel_shortcut_enabled);
         assert_eq!(config.quick_panel_shortcut, "Alt+Shift+Q");
@@ -373,7 +434,7 @@ mod tests {
         };
 
         assert!(super::migrate_config(&mut config));
-        assert_eq!(config.config_version, 12);
+        assert_eq!(config.config_version, 13);
         assert!(config.onboarding_completed);
         assert_eq!(config.max_send_file_size_mib, 3072);
         assert_eq!(config.max_receive_file_size_mib, 1024);

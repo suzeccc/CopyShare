@@ -1,5 +1,9 @@
 export type AppWindowMode = "main" | "floating" | "ball";
 
+export function trayClickAction(mode: AppWindowMode): "shake" | "show" {
+  return mode === "ball" ? "shake" : "show";
+}
+
 export const MAIN_WINDOW_BOUNDS = {
   width: 1120,
   height: 740,

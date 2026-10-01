@@ -22,6 +22,7 @@ pub fn trust_device(config: &mut AppConfig, device_id: impl Into<String>) {
 
 pub fn untrust_device(config: &mut AppConfig, device_id: &str) {
     config.trusted_devices.retain(|trusted| trusted != device_id);
+    config.trusted_certificates.remove(device_id);
 }
 
 pub fn normalize_trusted_devices(config: &mut AppConfig) -> bool {

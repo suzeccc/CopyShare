@@ -7,7 +7,12 @@ import {
   getFloatingBallDockPosition,
   getFloatingWindowPointerPosition,
   getFloatingWindowTopRightPosition,
+  trayClickAction,
 } from "../src/lib/windowMode.ts";
+
+assert.equal(trayClickAction("ball"), "shake");
+assert.equal(trayClickAction("floating"), "show");
+assert.equal(trayClickAction("main"), "show");
 
 assert.equal(FLOATING_WINDOW_BOUNDS.width, 340);
 assert.equal(FLOATING_WINDOW_BOUNDS.height, 392);

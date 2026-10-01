@@ -21,6 +21,8 @@ export type ClipboardPreviewItem = {
   fileTransferStatus?: FileTransferStatus;
   isPinned?: boolean;
   pinnedAt?: string;
+  needsFullText?: boolean;
+  systemHistoryItemId?: string;
 };
 
 export const CLIPBOARD_PREVIEW_LIMIT = 20;
@@ -132,6 +134,9 @@ export function getRecentClipboardItems(
       fileTransferStatus: item.fileTransferStatus,
       isPinned: item.isPinned,
       pinnedAt: item.pinnedAt,
+      ...(item.contentType === "text" && (item.content?.length ?? 0) >= 1024
+        ? { needsFullText: true }
+        : {}),
     }))
     .filter((item) => item.text.length > 0)
     .slice(0, limit);
@@ -157,6 +162,7 @@ export function filterClipboardItems(
   items: ClipboardPreviewItem[],
   category: ClipboardCategory,
   query: string,
+  fullTextMatches?: ReadonlySet<string>,
 ): ClipboardPreviewItem[] {
   const normalizedQuery = query.trim().toLowerCase();
   return items.filter((item) => {
@@ -167,7 +173,7 @@ export function filterClipboardItems(
     if (!normalizedQuery) {
       return true;
     }
-    return [item.text, item.sourceDevice ?? "", type.label]
+    return Boolean(fullTextMatches?.has(item.id)) || [item.text, item.sourceDevice ?? "", type.label]
       .join(" ")
       .toLowerCase()
       .includes(normalizedQuery);
@@ -205,7 +211,11 @@ export function getFloatingClipboardItems(
       fileTransferStatus: item.fileTransferStatus,
     }))
     .filter((item) => item.text.length > 0)
-    .map((item) => appTextItems.get(item.text) ?? item)
+    .map((item) => appTextItems.get(item.text)
+      // ponytail: a long Windows clipboard entry matches its shortened app copy by prefix;
+      // use hashes if distinct texts sharing 1024 initial characters become common.
+      ?? appPreviewItems.find((app) => app.needsFullText && item.text.startsWith(app.text))
+      ?? item)
     .slice(0, limit);
   const mergedItems: ClipboardPreviewItem[] = [...recentSystemItems];
 

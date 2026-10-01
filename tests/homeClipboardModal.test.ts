@@ -25,7 +25,7 @@ assert.match(clipboardPage, /allClipboardItems\.value\.slice\(0, CLIPBOARD_PREVI
 assert.match(clipboardPage, /filteredRecentSyncItems/);
 assert.match(clipboardPage, /filteredAllClipboardItems/);
 assert.match(clipboardPage, /filterClipboardItems\(\s*recentSyncItems\.value,\s*activeClipboardCategory\.value,\s*""\s*\)/);
-assert.match(clipboardPage, /filterClipboardItems\(\s*allClipboardItems\.value,\s*activeClipboardCategory\.value,\s*clipboardSearch\.value\s*\)/);
+assert.match(clipboardPage, /filterClipboardItems\(\s*allClipboardItems\.value,\s*activeClipboardCategory\.value,\s*clipboardSearch\.value\s*,/);
 
 assert.match(clipboardPage, /data-more-clipboard-button/);
 assert.match(clipboardPage, /@click="showClipboardHistoryModal = true"/);
@@ -33,7 +33,8 @@ assert.match(clipboardPage, /data-clipboard-history-modal/);
 assert.match(clipboardPage, /v-if="showClipboardHistoryModal"/);
 assert.match(clipboardPage, /@click\.self="showClipboardHistoryModal = false"/);
 assert.match(clipboardPage, /@click="showClipboardHistoryModal = false"/);
-assert.match(clipboardPage, /v-for="\(\s*item,\s*index\s*\) in filteredAllClipboardItems"/);
+assert.match(clipboardPage, /v-for="\{ item, index, virtualRow \} in visibleHistoryRows"/);
+assert.match(clipboardPage, /const historyRowVirtualizer = useVirtualizer/);
 assert.match(clipboardPage, /data-clipboard-history-row/);
 assert.match(clipboardPage, /data-clipboard-type-label/);
 assert.match(clipboardPage, /clipboardTypeIcon/);

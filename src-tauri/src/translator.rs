@@ -22,7 +22,9 @@ fn cached_translation_client(
             return Ok(client.clone());
         }
     }
-    let mut builder = reqwest::Client::builder().timeout(timeout);
+    let mut builder = reqwest::Client::builder()
+        .timeout(timeout)
+        .redirect(reqwest::redirect::Policy::none());
     if !proxy_url.is_empty() {
         let proxy = reqwest::Proxy::all(proxy_url).map_err(|error| {
             AppError::InvalidInput(format!("代理配置无效（{proxy_url}）：{error}"))
@@ -72,6 +74,7 @@ async fn translate_ai(
     } else {
         format!("{}/v1/chat/completions", api_url.trim_end_matches('/'))
     };
+    validate_ai_url(&full_url)?;
     let model = if model.is_empty() {
         "gpt-4o-mini"
     } else {
@@ -134,6 +137,17 @@ async fn translate_ai(
         target_text: translated,
         engine: TranslationEngine::Ai,
     })
+}
+
+pub(crate) fn validate_ai_url(value: &str) -> AppResult<()> {
+    let url = url::Url::parse(value)
+        .map_err(|_| AppError::InvalidInput("AI API 地址无效".to_string()))?;
+    if url.scheme() != "https" || url.host_str().is_none() {
+        return Err(AppError::InvalidInput(
+            "AI API 地址必须使用 HTTPS，避免泄露 API Key 和翻译内容".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 async fn translate_google(
@@ -213,6 +227,13 @@ mod tests {
         io::{AsyncReadExt, AsyncWriteExt},
         net::TcpListener,
     };
+
+    #[test]
+    fn ai_key_is_only_sent_to_https_urls() {
+        assert!(validate_ai_url("https://api.example.test/v1/chat/completions").is_ok());
+        assert!(validate_ai_url("http://api.example.test/v1/chat/completions").is_err());
+        assert!(validate_ai_url("not a url").is_err());
+    }
 
     #[tokio::test]
     async fn cached_client_reuses_connections_and_rebuilds_for_proxy_changes() {

@@ -35,7 +35,7 @@ const status = computed(() => {
       if (props.device.status === "online") {
         return {
           label: "待连接",
-          detail: "已在局域网发现此设备。点击连接后，再按现有流程确认是否信任",
+          detail: "已在局域网发现此设备。连接后请核对两台电脑上的配对码",
           badgeClass: "border-[color:var(--accent-line)] bg-[color:var(--accent-soft)] text-[color:var(--accent-text)]",
           dotClass: "bg-[color:var(--theme-accent)] shadow-[0_0_14px_var(--accent-glow)]",
           cardClass: "border-[color:var(--accent-line)] bg-[color:var(--panel-bg-soft)]",
@@ -74,7 +74,7 @@ const status = computed(() => {
     if (props.device.remoteTrusted) {
       return {
         label: "对方已信任，等待本机确认",
-        detail: "对方已经信任本机，点击信任设备后即可双向同步",
+        detail: "对方已经信任本机。核对两边配对码并确认后即可双向同步",
         badgeClass: "border-[color:var(--accent-line)] bg-[color:var(--accent-soft)] text-[color:var(--accent-text)]",
         dotClass: "bg-[color:var(--theme-accent)] shadow-[0_0_14px_var(--accent-glow)]",
         cardClass: "border-[color:var(--accent-line)] bg-[color:var(--panel-bg-soft)]",

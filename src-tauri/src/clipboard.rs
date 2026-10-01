@@ -6,7 +6,7 @@ use std::{
 use base64::{engine::general_purpose::STANDARD, Engine};
 use image::{ColorType, ImageEncoder};
 use serde::{Deserialize, Serialize};
-use tauri::{image::Image, AppHandle};
+use tauri::{image::Image, AppHandle, Emitter};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
 use crate::error::{AppError, AppResult};
@@ -1035,9 +1035,87 @@ pub async fn read_clipboard_history_text(limit: usize) -> AppResult<Vec<Clipboar
     Ok(items)
 }
 
+#[cfg(target_os = "windows")]
+pub async fn read_clipboard_history_item_text(id: &str) -> AppResult<String> {
+    use windows::ApplicationModel::DataTransfer::{
+        Clipboard, ClipboardHistoryItemsResultStatus, StandardDataFormats,
+    };
+
+    let result = Clipboard::GetHistoryItemsAsync()
+        .map_err(|error| AppError::Clipboard(error.to_string()))?
+        .get()
+        .map_err(|error| AppError::Clipboard(error.to_string()))?;
+    if result
+        .Status()
+        .map_err(|error| AppError::Clipboard(error.to_string()))?
+        != ClipboardHistoryItemsResultStatus::Success
+    {
+        return Err(AppError::Clipboard("无法读取系统剪贴板历史".into()));
+    }
+    for item in result
+        .Items()
+        .map_err(|error| AppError::Clipboard(error.to_string()))?
+    {
+        if item
+            .Id()
+            .map_err(|error| AppError::Clipboard(error.to_string()))?
+            .to_string()
+            != id
+        {
+            continue;
+        }
+        let content = item
+            .Content()
+            .map_err(|error| AppError::Clipboard(error.to_string()))?;
+        let text_format =
+            StandardDataFormats::Text().map_err(|error| AppError::Clipboard(error.to_string()))?;
+        if !content
+            .Contains(&text_format)
+            .map_err(|error| AppError::Clipboard(error.to_string()))?
+        {
+            break;
+        }
+        return content
+            .GetTextAsync()
+            .map_err(|error| AppError::Clipboard(error.to_string()))?
+            .get()
+            .map(|text| text.to_string().trim().to_string())
+            .map_err(|error| AppError::Clipboard(error.to_string()));
+    }
+    Err(AppError::InvalidInput("系统剪贴板历史记录已不存在".into()))
+}
+
+#[cfg(target_os = "windows")]
+pub fn enable_history_events(app: AppHandle) -> bool {
+    use std::sync::OnceLock;
+    use windows::ApplicationModel::DataTransfer::{Clipboard, ClipboardHistoryChangedEventArgs};
+    use windows::Foundation::EventHandler;
+
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        let handler = EventHandler::<ClipboardHistoryChangedEventArgs>::new(move |_, _| {
+            let _ = app.emit("system-clipboard-history-changed", ());
+            Ok(())
+        });
+        Clipboard::HistoryChanged(&handler).is_ok()
+    })
+}
+
 #[cfg(not(target_os = "windows"))]
 pub async fn read_clipboard_history_text(_limit: usize) -> AppResult<Vec<ClipboardTextItem>> {
     Ok(Vec::new())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub async fn read_clipboard_history_item_text(_id: &str) -> AppResult<String> {
+    Err(AppError::InvalidInput(
+        "系统剪贴板历史仅支持 Windows".into(),
+    ))
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn enable_history_events(_app: AppHandle) -> bool {
+    false
 }
 
 #[cfg(test)]

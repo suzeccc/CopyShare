@@ -8,7 +8,8 @@ import Plus from "lucide-vue-next/dist/esm/icons/plus.js";
 import Search from "lucide-vue-next/dist/esm/icons/search.js";
 import Sparkles from "lucide-vue-next/dist/esm/icons/sparkles.js";
 import { storeToRefs } from "pinia";
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch, type ComponentPublicInstance } from "vue";
+import { useVirtualizer } from "@tanstack/vue-virtual";
 
 import LibraryCard from "@/components/library/LibraryCard.vue";
 import LibraryMetadataDialog from "@/components/library/LibraryMetadataDialog.vue";
@@ -20,7 +21,7 @@ import {
   writeLibraryLayout,
   type LibraryLayout,
 } from "@/lib/libraryLayout";
-import { convertLocalFileSrc, getLibraryStorageSize, getLibraryVideoPreviewPath, openMediaPreviewWindow } from "@/lib/tauri";
+import { convertLocalFileSrc, getLibraryImagePreviewPath, getLibraryItemContent, getLibraryStorageSize, getLibraryVideoPreviewPath, openMediaPreviewWindow } from "@/lib/tauri";
 import { useLibraryStore } from "@/stores/library";
 import { useToastStore } from "@/stores/toasts";
 import type {
@@ -75,7 +76,83 @@ const snippetOpen = ref(false);
 const metadataItem = ref<LibraryItem | null>(null);
 const metadataOpen = ref(false);
 const draggedPinnedId = ref<string | null>(null);
+const pageRoot = ref<HTMLElement | null>(null);
+const libraryListElement = ref<HTMLElement | null>(null);
+const gridColumnCount = ref(1);
+const virtualScrollMargin = ref(0);
+const itemRows = computed(() => {
+  const columns = libraryLayout.value === "grid" ? gridColumnCount.value : 1;
+  const rows: LibraryItem[][] = [];
+  for (let index = 0; index < filteredItems.value.length; index += columns) {
+    rows.push(filteredItems.value.slice(index, index + columns));
+  }
+  return rows;
+});
+const rowVirtualizer = useVirtualizer(computed(() => ({
+  count: itemRows.value.length,
+  getScrollElement: () => libraryListElement.value?.closest<HTMLElement>("[data-main-scroll-container]") ?? null,
+  estimateSize: () => libraryLayout.value === "grid" ? 260 : 150,
+  getItemKey: (index: number) => itemRows.value[index]?.[0]?.id ?? index,
+  gap: 8,
+  overscan: 4,
+  scrollMargin: virtualScrollMargin.value,
+})));
+const virtualRows = computed(() => rowVirtualizer.value.getVirtualItems());
 let storageRefreshId = 0;
+let snippetRequestId = 0;
+
+let layoutObserver: ResizeObserver | undefined;
+
+function updateVirtualizerLayout() {
+  const list = libraryListElement.value;
+  if (!list) return;
+  const scrollElement = list.closest<HTMLElement>("[data-main-scroll-container]");
+  if (scrollElement) {
+    virtualScrollMargin.value = list.getBoundingClientRect().top
+      - scrollElement.getBoundingClientRect().top
+      + scrollElement.scrollTop;
+  }
+  if (libraryLayout.value === "list") {
+    gridColumnCount.value = 1;
+    return;
+  }
+  const gap = Number.parseFloat(window.getComputedStyle(list).columnGap) || 8;
+  const nextColumnCount = Math.max(1, Math.floor((list.clientWidth + gap) / (280 + gap)));
+  if (nextColumnCount !== gridColumnCount.value) {
+    gridColumnCount.value = nextColumnCount;
+    rowVirtualizer.value.measure();
+  }
+}
+
+function measureVirtualRow(element: Element | ComponentPublicInstance | null) {
+  if (element instanceof HTMLElement) rowVirtualizer.value.measureElement(element);
+}
+
+watch(
+  [libraryLayout, filteredItems],
+  async () => {
+    await nextTick();
+    updateVirtualizerLayout();
+    rowVirtualizer.value.measure();
+  },
+  { flush: "post" },
+);
+
+watch([query, items], ([value], _, onCleanup) => {
+  if (!value.trim()) {
+    void libraryStore.searchContent(value);
+    return;
+  }
+  const timer = window.setTimeout(() => void libraryStore.searchContent(value), 150);
+  onCleanup(() => window.clearTimeout(timer));
+}, { immediate: true });
+
+watch(libraryListElement, async (list, previous) => {
+  if (previous) layoutObserver?.unobserve(previous);
+  if (list) layoutObserver?.observe(list);
+  await nextTick();
+  updateVirtualizerLayout();
+}, { flush: "post" });
 
 function setLibraryLayout(layout: LibraryLayout) {
   libraryLayout.value = layout;
@@ -115,13 +192,27 @@ watch(
 );
 
 function openNewSnippet() {
+  snippetRequestId += 1;
   snippetItem.value = null;
   snippetOpen.value = true;
 }
 
-function openSnippetEditor(item: LibraryItem) {
-  snippetItem.value = item;
-  snippetOpen.value = true;
+async function openSnippetEditor(item: LibraryItem) {
+  const requestId = ++snippetRequestId;
+  try {
+    const content = await getLibraryItemContent(item.id);
+    if (requestId !== snippetRequestId) return;
+    snippetItem.value = { ...item, content };
+    snippetOpen.value = true;
+  } catch (error) {
+    toastStore.error(`无法打开片段：${String(error)}`);
+  }
+}
+
+function closeSnippetEditor() {
+  snippetRequestId += 1;
+  snippetOpen.value = false;
+  snippetItem.value = null;
 }
 
 function openMetadataEditor(item: LibraryItem) {
@@ -138,7 +229,7 @@ async function saveSnippet(input: CreateSnippetInput) {
       await libraryStore.createSnippet(input);
       toastStore.success("片段已创建");
     }
-    snippetOpen.value = false;
+    closeSnippetEditor();
   } catch (error) {
     toastStore.error(`保存片段失败：${String(error)}`);
   }
@@ -178,6 +269,20 @@ async function previewVideo(item: LibraryItem, assetIndex: number) {
   }
 }
 
+async function previewImage(item: LibraryItem) {
+  try {
+    const path = await getLibraryImagePreviewPath(item.id);
+    await openMediaPreviewWindow({
+      kind: "image",
+      historyId: "",
+      title: item.title,
+      src: convertLocalFileSrc(path),
+    });
+  } catch (error) {
+    toastStore.error(`无法预览图片：${String(error)}`);
+  }
+}
+
 async function togglePin(item: LibraryItem) {
   try {
     await libraryStore.setPinned(item.id, !item.isPinned);
@@ -187,12 +292,12 @@ async function togglePin(item: LibraryItem) {
   }
 }
 
-async function convertSnippet(item: LibraryItem) {
+async function addSnippet(item: LibraryItem) {
   try {
-    await libraryStore.convertToSnippet(item.id);
-    toastStore.success("已转换为常用片段");
+    await libraryStore.addToSnippets(item);
+    toastStore.success("已加入常用片段");
   } catch (error) {
-    toastStore.error(`转换失败：${String(error)}`);
+    toastStore.error(`加入常用片段失败：${String(error)}`);
   }
 }
 
@@ -231,6 +336,12 @@ async function dropPinnedItem(targetId: string) {
 }
 
 onMounted(async () => {
+  layoutObserver = new ResizeObserver(updateVirtualizerLayout);
+  if (pageRoot.value) layoutObserver.observe(pageRoot.value);
+  if (libraryListElement.value) layoutObserver.observe(libraryListElement.value);
+  window.addEventListener("resize", updateVirtualizerLayout);
+  await nextTick();
+  updateVirtualizerLayout();
   try {
     await Promise.all([
       libraryStore.load(),
@@ -241,11 +352,15 @@ onMounted(async () => {
   }
 });
 
-onUnmounted(() => libraryStore.disposeSubscription());
+onUnmounted(() => {
+  layoutObserver?.disconnect();
+  window.removeEventListener("resize", updateVirtualizerLayout);
+  libraryStore.disposeSubscription();
+});
 </script>
 
 <template>
-  <div data-library-page class="flex min-h-full flex-col gap-4 pb-4 text-[13px]">
+  <div ref="pageRoot" data-library-page class="flex min-h-full flex-col gap-4 pb-4 text-[13px]">
     <section class="relative overflow-hidden rounded-[14px] border border-[color:var(--main-line)] bg-[color:var(--panel-bg)] p-4">
       <div class="absolute inset-y-0 right-0 w-40 bg-gradient-to-l from-[color:var(--accent-soft)] to-transparent opacity-60" />
       <div class="relative flex flex-wrap items-start justify-between gap-4">
@@ -372,37 +487,57 @@ onUnmounted(() => libraryStore.disposeSubscription());
       {{ warning }}
     </p>
 
+    <p v-if="libraryStore.searchError" class="text-[12px] text-amber-200">
+      正文搜索暂不可用：{{ libraryStore.searchError }}
+    </p>
+
     <div
       v-if="filteredItems.length"
+      ref="libraryListElement"
       data-library-list
       :data-library-layout="libraryLayout"
-      :class="libraryLayout === 'grid'
-        ? 'grid items-stretch grid-cols-[repeat(auto-fill,minmax(min(100%,280px),1fr))] gap-2'
-        : 'grid gap-2'"
+      class="relative"
+      :style="{ height: `${rowVirtualizer.getTotalSize()}px` }"
     >
-      <LibraryCard
-        v-for="item in filteredItems"
-        :key="item.id"
-        :item="item"
-        :busy="libraryStore.isItemBusy(item.id)"
-        :layout="libraryLayout"
-        :draggable="item.isPinned"
-        @dragstart="draggedPinnedId = item.isPinned ? item.id : null"
-        @dragend="draggedPinnedId = null"
-        @dragover.prevent
-        @drop.prevent="dropPinnedItem(item.id)"
-        @copy="copyItem"
-        @preview-video="previewVideo"
-        @pin="togglePin"
-        @edit="openMetadataEditor"
-        @convert-snippet="convertSnippet"
-        @edit-snippet="openSnippetEditor"
-        @remove="removeItem"
-      />
+      <div
+        v-for="virtualRow in virtualRows"
+        :key="String(virtualRow.key)"
+        :ref="measureVirtualRow"
+        :data-index="virtualRow.index"
+        class="absolute left-0 top-0 w-full"
+        :style="{ transform: `translateY(${virtualRow.start - virtualScrollMargin}px)` }"
+      >
+        <div
+          :class="libraryLayout === 'grid'
+            ? 'grid items-stretch grid-cols-[repeat(auto-fill,minmax(min(100%,280px),1fr))] gap-2'
+            : 'grid gap-2'"
+        >
+          <LibraryCard
+            v-for="item in itemRows[virtualRow.index]"
+            :key="item.id"
+            :item="item"
+            :busy="libraryStore.isItemBusy(item.id)"
+            :layout="libraryLayout"
+            :draggable="item.isPinned"
+            @dragstart="draggedPinnedId = item.isPinned ? item.id : null"
+            @dragend="draggedPinnedId = null"
+            @dragover.prevent
+            @drop.prevent="dropPinnedItem(item.id)"
+            @copy="copyItem"
+            @preview-image="previewImage"
+            @preview-video="previewVideo"
+            @pin="togglePin"
+            @edit="openMetadataEditor"
+            @add-snippet="addSnippet"
+            @edit-snippet="openSnippetEditor"
+            @remove="removeItem"
+          />
+        </div>
+      </div>
     </div>
 
     <Card
-      v-else
+      v-if="!filteredItems.length"
       data-library-empty
       class="flex min-h-[280px] flex-1 items-center justify-center text-center"
     >
@@ -411,7 +546,7 @@ onUnmounted(() => libraryStore.disposeSubscription());
           <Sparkles class="h-5 w-5" />
         </div>
         <div>
-          <p class="font-bold text-white">{{ loading ? "正在加载收藏夹" : "这里还没有匹配的内容" }}</p>
+          <p class="font-bold text-white">{{ loading ? "正在加载收藏夹" : libraryStore.searching ? "正在搜索" : "这里还没有匹配的内容" }}</p>
           <p class="mt-1 text-[12px] text-[color:var(--muted-text)]">
         {{ items.length ? "调整搜索或筛选条件" : "从剪贴板历史收藏内容，或新建一个文本片段" }}
           </p>
@@ -423,7 +558,7 @@ onUnmounted(() => libraryStore.disposeSubscription());
       :open="snippetOpen"
       :item="snippetItem"
       @submit="saveSnippet"
-      @cancel="snippetOpen = false"
+      @cancel="closeSnippetEditor"
     />
     <LibraryMetadataDialog
       :open="metadataOpen"

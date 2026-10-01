@@ -28,6 +28,7 @@ import {
 import {
   convertLocalFileSrc,
   copyHistoryItem,
+  getClipboardPreviewItemContent,
   getHistoryFilePreviewPath,
   openFloatingClipboardHistoryWindow,
   openExternalUrl,
@@ -219,12 +220,10 @@ function isFloatingClipboardItemInteractive(item: ClipboardPreviewItem) {
 }
 
 async function openClipboardLink(item: ClipboardPreviewItem) {
-  const url = getClipboardLinkUrl(item.text);
-  if (!url) {
-    return;
-  }
-
   try {
+    const text = await getClipboardPreviewItemContent(item);
+    const url = getClipboardLinkUrl(text);
+    if (!url) return;
     await openExternalUrl(url);
   } catch (error) {
     toastStore.error(`打开链接失败：${String(error)}`);
@@ -235,8 +234,15 @@ function clipboardFileSummary(item: ClipboardPreviewItem) {
   return splitClipboardFileSummary(item.text);
 }
 
-function openFullClipboardItem(item: ClipboardPreviewItem) {
+async function openFullClipboardItem(item: ClipboardPreviewItem) {
   selectedClipboardItem.value = item;
+  if (!item.needsFullText) return;
+  try {
+    const text = await getClipboardPreviewItemContent(item);
+    if (selectedClipboardItem.value?.id === item.id) selectedClipboardItem.value = { ...item, text };
+  } catch (error) {
+    toastStore.error(`无法展开历史记录：${String(error)}`);
+  }
 }
 </script>
 
@@ -458,6 +464,8 @@ function openFullClipboardItem(item: ClipboardPreviewItem) {
               :text="item.text"
               :content-type="item.contentType"
               :history-item-id="item.id"
+              :system-history-item-id="item.systemHistoryItemId"
+              :full-text-from-history="item.needsFullText"
               :file-transfer-id="item.fileTransferId"
               :file-transfer-file-id="item.fileTransferFileId"
               :file-transfer-status="item.fileTransferStatus"
@@ -499,6 +507,9 @@ function openFullClipboardItem(item: ClipboardPreviewItem) {
           <CopyTextButton
             :text="selectedClipboardItem.text"
             content-type="text"
+            :history-item-id="selectedClipboardItem.id"
+            :system-history-item-id="selectedClipboardItem.systemHistoryItemId"
+            :full-text-from-history="selectedClipboardItem.needsFullText"
             label="复制完整内容"
             copied-label="已复制"
           />

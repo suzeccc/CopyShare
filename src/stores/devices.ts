@@ -4,6 +4,7 @@ import {
   connectDevice,
   disconnectDevice,
   getDevices,
+  getPairingCode,
   onAppEvent,
   rejectDevice,
   trustDevice,
@@ -19,6 +20,7 @@ import {
   getDeviceDisconnectNotice,
   getDeviceRejectedNotice,
   historicalDevices,
+  limitInactiveDiscoveredDevices,
   markDeviceDisconnected,
   markDeviceRejected,
   markDeviceTrusted,
@@ -116,7 +118,10 @@ export const useDevicesStore = defineStore("devices", {
     },
     async trust(deviceId: string) {
       this.error = null;
-      await trustDevice(deviceId);
+      const localCode = await getPairingCode(deviceId);
+      const pairingCode = window.prompt(`本机配对码：${localCode}\n请查看另一台电脑上的配对码。只有两边完全一致时，输入另一台电脑显示的配对码以信任设备：`);
+      if (pairingCode === null) return;
+      await trustDevice(deviceId, pairingCode);
       this.devices = markDeviceTrusted(this.devices, deviceId);
       await useStatusStore().refresh();
     },
@@ -127,7 +132,7 @@ export const useDevicesStore = defineStore("devices", {
       await useStatusStore().refresh();
     },
     upsert(device: DeviceInfo) {
-      this.devices = upsertDevice(this.devices, device);
+      this.devices = limitInactiveDiscoveredDevices(upsertDevice(this.devices, device));
     },
     clearDisconnectNotice() {
       this.disconnectNotice = null;

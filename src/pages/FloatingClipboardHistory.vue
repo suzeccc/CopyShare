@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import Clipboard from "lucide-vue-next/dist/esm/icons/clipboard.js";
 import MoreHorizontal from "lucide-vue-next/dist/esm/icons/ellipsis.js";
-import Minus from "lucide-vue-next/dist/esm/icons/minus.js";
 import Pin from "lucide-vue-next/dist/esm/icons/pin.js";
 import RefreshCw from "lucide-vue-next/dist/esm/icons/refresh-cw.js";
 import X from "lucide-vue-next/dist/esm/icons/x.js";
-import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch, type ComponentPublicInstance } from "vue";
+import { defaultRangeExtractor, useVirtualizer } from "@tanstack/vue-virtual";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import ClipboardFileDownloadStatus from "@/components/history/ClipboardFileDownloadStatus.vue";
@@ -28,10 +28,10 @@ import {
 import {
   FLOATING_CLIPBOARD_HISTORY_STORAGE_KEY,
   closeWindow,
-  hideWindow,
   convertLocalFileSrc,
   getConfig,
   getHistoryFilePreviewPath,
+  getClipboardPreviewItemContent,
   type FloatingClipboardHistoryPayload,
   onAppEvent,
   openExternalUrl,
@@ -47,9 +47,31 @@ import type { AppConfig, AppTheme } from "@/types/config";
 const toastStore = useToastStore();
 const historyStore = useHistoryStore();
 const clipboardItems = ref<ClipboardPreviewItem[]>([]);
-const loading = ref(false);
 const selectedClipboardItem = ref<ClipboardPreviewItem | null>(null);
 const activeClipboardIndex = ref(0);
+const historyListElement = ref<HTMLElement | null>(null);
+const rowVirtualizer = useVirtualizer(computed(() => ({
+  count: clipboardItems.value.length,
+  getScrollElement: () => historyListElement.value,
+  estimateSize: () => 93,
+  getItemKey: (index: number) => clipboardItems.value[index]?.id ?? index,
+  gap: 4,
+  overscan: 4,
+  rangeExtractor: (range: Parameters<typeof defaultRangeExtractor>[0]) =>
+    [...new Set([...defaultRangeExtractor(range), activeClipboardIndex.value])]
+      .filter((index) => index < clipboardItems.value.length)
+      .sort((a, b) => a - b),
+})));
+const visibleRows = computed(() => rowVirtualizer.value.getVirtualItems().map((virtualRow) => ({
+  virtualRow,
+  index: virtualRow.index,
+  item: clipboardItems.value[virtualRow.index]!,
+})));
+watch(clipboardItems, () => rowVirtualizer.value.measure());
+
+function measureHistoryRow(element: Element | ComponentPublicInstance | null) {
+  if (element instanceof HTMLElement) rowVirtualizer.value.measureElement(element);
+}
 let refreshUnlisten: UnlistenFn | null = null;
 let themeUnlisten: UnlistenFn | null = null;
 let isUnmounted = false;
@@ -116,15 +138,20 @@ function applyFloatingClipboardPayload(payload: FloatingClipboardHistoryPayload)
 }
 
 function refreshFloatingClipboardItems() {
-  loading.value = true;
-  try {
-    const payload = readFloatingClipboardHistoryPayload();
-    if (payload) {
-      applyFloatingClipboardPayload(payload);
-    }
-  } finally {
-    loading.value = false;
+  const payload = readFloatingClipboardHistoryPayload();
+  if (payload) {
+    applyFloatingClipboardPayload(payload);
   }
+}
+
+function refreshFloatingClipboardItemsOnClick(event: MouseEvent) {
+  if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    (event.currentTarget as HTMLButtonElement).querySelector("svg")?.animate(
+      [{ transform: "rotate(0deg)" }, { transform: "rotate(360deg)" }],
+      { duration: 500, easing: "ease-in-out" },
+    );
+  }
+  refreshFloatingClipboardItems();
 }
 
 async function bindRefreshEvents() {
@@ -185,17 +212,29 @@ function clipboardFileSize(item: ClipboardPreviewItem) {
   return splitClipboardFileSummary(item.text).size;
 }
 
-function openFullClipboardItem(item: ClipboardPreviewItem) {
+async function openFullClipboardItem(item: ClipboardPreviewItem) {
   selectedClipboardItem.value = item;
+  if (!item.needsFullText) return;
+  try {
+    const text = await getClipboardPreviewItemContent(item);
+    if (selectedClipboardItem.value?.id === item.id) selectedClipboardItem.value = { ...item, text };
+  } catch (error) {
+    toastStore.error(`无法展开历史记录：${String(error)}`);
+  }
 }
 
 async function openClipboardLink(item: ClipboardPreviewItem) {
-  const url = getClipboardLinkUrl(item.text);
-  if (!url) {
-    openFullClipboardItem(item);
-    return;
+  try {
+    const text = await getClipboardPreviewItemContent(item);
+    const url = getClipboardLinkUrl(text);
+    if (!url) {
+      await openFullClipboardItem(item);
+      return;
+    }
+    await openExternalUrl(url);
+  } catch (error) {
+    toastStore.error(`打开链接失败：${String(error)}`);
   }
-  await openExternalUrl(url);
 }
 
 async function openHistoryImagePreview(item: ClipboardPreviewItem) {
@@ -225,11 +264,7 @@ async function openHistoryVideoPreview(item: ClipboardPreviewItem) {
 }
 
 function focusActiveClipboardRow() {
-  void nextTick(() => {
-    document
-      .querySelector<HTMLElement>('[data-floating-clipboard-history-row][data-active="true"]')
-      ?.scrollIntoView({ block: "nearest" });
-  });
+  rowVirtualizer.value.scrollToIndex(activeClipboardIndex.value, { align: "auto" });
 }
 
 function moveActiveClipboardItem(offset: number) {
@@ -239,7 +274,8 @@ function moveActiveClipboardItem(offset: number) {
   focusActiveClipboardRow();
 }
 
-function copyActiveClipboardItem() {
+async function copyActiveClipboardItem() {
+  await nextTick();
   const row = document.querySelector<HTMLElement>(
     '[data-floating-clipboard-history-row][data-active="true"]',
   );
@@ -272,7 +308,7 @@ function handleQuickPanelKeydown(event: KeyboardEvent) {
     const target = event.target instanceof HTMLElement ? event.target : null;
     if (target?.closest("button, input, textarea, select, a")) return;
     event.preventDefault();
-    copyActiveClipboardItem();
+    void copyActiveClipboardItem();
   }
 }
 
@@ -322,19 +358,9 @@ onUnmounted(() => {
           type="button"
           title="刷新"
           data-window-control
-          @click="refreshFloatingClipboardItems"
+          @click="refreshFloatingClipboardItemsOnClick"
         >
-          <RefreshCw class="h-4 w-4" :class="{ 'animate-spin': loading }" />
-        </button>
-        <button
-          class="grid h-8 w-8 place-items-center rounded-lg border border-[color:var(--floating-control-line)] bg-[color:var(--floating-control-bg)] text-[color:var(--floating-control-text)] transition hover:bg-[color:var(--floating-control-bg-hover)]"
-          type="button"
-          aria-label="隐藏窗口"
-          title="隐藏窗口"
-          data-window-control
-          @click="hideWindow"
-        >
-          <Minus class="h-4 w-4" />
+          <RefreshCw class="h-4 w-4" />
         </button>
         <button
           class="grid h-8 w-8 place-items-center rounded-lg border border-[color:var(--floating-control-line)] bg-[color:var(--floating-control-bg)] text-[color:var(--floating-control-text)] transition hover:bg-red-500/75 hover:text-white"
@@ -349,15 +375,18 @@ onUnmounted(() => {
       </div>
     </header>
 
-    <main class="min-h-0 flex-1 overflow-y-auto p-3">
-      <div v-if="clipboardItems.length" class="space-y-1">
+    <main ref="historyListElement" class="min-h-0 flex-1 overflow-y-auto p-3">
+      <div v-if="clipboardItems.length" class="relative" :style="{ height: `${rowVirtualizer.getTotalSize()}px` }">
         <article
-          v-for="(item, index) in clipboardItems"
+          v-for="{ item, index, virtualRow } in visibleRows"
           :key="item.id"
+          :ref="measureHistoryRow"
+          :data-index="index"
           v-clipboard-overflow
           data-floating-clipboard-history-row
           :data-active="activeClipboardIndex === index"
-          class="floating-clipboard-row grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2 rounded-md border-b border-[color:var(--floating-stat-line)] px-2 py-2.5 transition last:border-b-0"
+          class="floating-clipboard-row absolute left-0 top-0 grid w-full grid-cols-[minmax(0,1fr)_auto] items-start gap-2 rounded-md border-b border-[color:var(--floating-stat-line)] px-2 py-2.5 transition-colors"
+          :style="{ transform: `translateY(${virtualRow.start}px)` }"
           @mouseenter="activeClipboardIndex = index"
           @mousedown="activeClipboardIndex = index"
         >
@@ -472,6 +501,8 @@ onUnmounted(() => {
                 :text="item.text"
                 :content-type="item.contentType"
                 :history-item-id="item.id"
+                :system-history-item-id="item.systemHistoryItemId"
+                :full-text-from-history="item.needsFullText"
                 :file-transfer-id="item.fileTransferId"
                 :file-transfer-file-id="item.fileTransferFileId"
                 :file-transfer-status="item.fileTransferStatus"
@@ -521,6 +552,9 @@ onUnmounted(() => {
           <CopyTextButton
             :text="selectedClipboardItem.text"
             content-type="text"
+            :history-item-id="selectedClipboardItem.id"
+            :system-history-item-id="selectedClipboardItem.systemHistoryItemId"
+            :full-text-from-history="selectedClipboardItem.needsFullText"
             label="复制完整内容"
             copied-label="已复制"
           />

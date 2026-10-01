@@ -5,7 +5,7 @@ use std::{
 };
 
 use tauri_plugin_notification::NotificationExt;
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 use crate::{
     config as app_config,
@@ -43,11 +43,10 @@ pub fn configure_process_app_id(app: &AppHandle) {
 }
 
 pub fn show_main_window(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
-        let _ = window.unminimize();
-        let _ = window.set_focus();
-    }
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let _ = crate::commands::show_main_window(app).await;
+    });
 }
 
 pub fn notify_clipboard_received(

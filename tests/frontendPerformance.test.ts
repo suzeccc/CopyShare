@@ -3,6 +3,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 const router = readFileSync("src/router/index.ts", "utf8");
+const main = readFileSync("src/main.ts", "utf8");
 const qrCode = readFileSync("src/lib/qrCode.ts", "utf8");
 const libraryStore = readFileSync("src/stores/library.ts", "utf8");
 const statusStore = readFileSync("src/stores/status.ts", "utf8");
@@ -30,7 +31,8 @@ for (const page of [
   assert.match(router, new RegExp(`const ${page} = \\(\\) => import\\("@/pages/${page}\\.vue"\\)`));
 }
 
-assert.match(router, /import Home from "@\/pages\/Home\.vue"/);
+assert.match(router, /const Home = \(\) => import\("@\/pages\/Home\.vue"\)/);
+assert.match(main, /const appModule = utilityWindow \? import\("\.\/UtilityApp\.vue"\) : import\("\.\/App\.vue"\)/);
 assert.match(qrCode, /if \(!url\)[\s\S]*return "";[\s\S]*import\("qrcode"\)/);
 assert.match(libraryStore, /savedItemsByHistoryId\(state\): ReadonlyMap<string, LibraryItem>/);
 assert.match(libraryStore, /this\.savedItemsByHistoryId\.get\(historyId\)/);

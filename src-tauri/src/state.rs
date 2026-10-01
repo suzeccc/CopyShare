@@ -64,6 +64,7 @@ struct PeerHandle {
     join: JoinHandle<()>,
     device_id: Option<String>,
     endpoint: Option<String>,
+    certificate_fingerprint: Option<String>,
     capabilities: HashSet<String>,
     remote_trusted: bool,
     latency_ms: Option<u64>,
@@ -72,8 +73,8 @@ struct PeerHandle {
 #[derive(Clone)]
 pub(crate) enum PeerOutboundSender {
     Bounded {
-        control: mpsc::Sender<WireMessage>,
-        clipboard: watch::Sender<Option<WireMessage>>,
+        control: mpsc::Sender<Arc<str>>,
+        clipboard: watch::Sender<Option<Arc<str>>>,
     },
     #[cfg(test)]
     TestUnbounded(mpsc::UnboundedSender<WireMessage>),
@@ -87,8 +88,8 @@ impl From<mpsc::UnboundedSender<WireMessage>> for PeerOutboundSender {
 }
 
 pub(crate) struct PeerOutboundReceiver {
-    control: mpsc::Receiver<WireMessage>,
-    clipboard: watch::Receiver<Option<WireMessage>>,
+    control: mpsc::Receiver<Arc<str>>,
+    clipboard: watch::Receiver<Option<Arc<str>>>,
     control_closed: bool,
     clipboard_closed: bool,
 }
@@ -96,28 +97,38 @@ pub(crate) struct PeerOutboundReceiver {
 impl PeerOutboundSender {
     async fn send(&self, message: WireMessage) -> bool {
         match self {
-            Self::Bounded { control, clipboard } => {
-                if matches!(&message, WireMessage::Clipboard { .. }) {
-                    return clipboard.send(Some(message)).is_ok();
-                }
-
-                matches!(
-                    tokio::time::timeout(
-                        PEER_CONTROL_ENQUEUE_TIMEOUT,
-                        control.send(message),
-                    )
-                    .await,
-                    Ok(Ok(()))
-                )
+            Self::Bounded { .. } => {
+                let is_clipboard = matches!(&message, WireMessage::Clipboard { .. });
+                let Ok(encoded) = network::encode_wire_message(&message) else {
+                    return false;
+                };
+                self.send_encoded(Arc::from(encoded), is_clipboard).await
             }
             #[cfg(test)]
             Self::TestUnbounded(sender) => sender.send(message).is_ok(),
         }
     }
+
+    async fn send_encoded(&self, message: Arc<str>, is_clipboard: bool) -> bool {
+        match self {
+            Self::Bounded { control, clipboard } => {
+                if is_clipboard {
+                    return clipboard.send(Some(message)).is_ok();
+                }
+                matches!(
+                    tokio::time::timeout(PEER_CONTROL_ENQUEUE_TIMEOUT, control.send(message)).await,
+                    Ok(Ok(()))
+                )
+            }
+            #[cfg(test)]
+            Self::TestUnbounded(sender) => network::decode_wire_message(&message)
+                .is_ok_and(|decoded| sender.send(decoded).is_ok()),
+        }
+    }
 }
 
 impl PeerOutboundReceiver {
-    pub(crate) async fn recv(&mut self) -> Option<WireMessage> {
+    pub(crate) async fn recv(&mut self) -> Option<String> {
         loop {
             if self.control_closed && self.clipboard_closed {
                 return None;
@@ -127,15 +138,15 @@ impl PeerOutboundReceiver {
                 biased;
                 outbound = self.control.recv(), if !self.control_closed => {
                     match outbound {
-                        Some(message) => return Some(message),
+                        Some(message) => return Some(message.to_string()),
                         None => self.control_closed = true,
                     }
                 }
                 changed = self.clipboard.changed(), if !self.clipboard_closed => {
                     match changed {
                         Ok(()) => {
-                            if let Some(message) = self.clipboard.borrow_and_update().clone() {
-                                return Some(message);
+                            if let Some(message) = self.clipboard.borrow_and_update().as_ref() {
+                                return Some(message.to_string());
                             }
                         }
                         Err(_) => self.clipboard_closed = true,
@@ -216,7 +227,11 @@ impl AppState {
         let device_id = config.device_id.clone();
         let history = history::load_history(app)?;
         let library = library::load_library(app);
-        let devices = device_store::load_devices(app)?;
+        let mut devices = device_store::load_devices(app)?;
+        for device in &mut devices {
+            device.trusted = security::is_device_id_trusted(&config, &device.id)
+                && config.trusted_certificates.contains_key(&device.id);
+        }
 
         *self.inner.config.write().await = config.clone();
         *self.inner.history.write().await = history;
@@ -303,6 +318,22 @@ impl AppState {
             .cloned()
     }
 
+    pub async fn history_item_content(&self, id: &str) -> Option<String> {
+        self.inner.history.read().await.iter()
+            .find(|item| item.id == id && item.content_type == crate::models::ClipboardContentType::Text)
+            .map(|item| item.content.clone())
+    }
+
+    pub async fn search_history_text(&self, query: String) -> AppResult<Vec<String>> {
+        let inner = self.inner.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            let items = inner.history.blocking_read();
+            history::search_text_ids(&items, &query)
+        })
+        .await
+        .map_err(|error| AppError::Tauri(format!("历史搜索执行失败：{error}")))
+    }
+
     pub async fn frontend_history(&self) -> Vec<HistoryItem> {
         history::history_items_for_frontend(&self.inner.history.read().await)
     }
@@ -330,6 +361,37 @@ impl AppState {
 
     pub async fn library(&self) -> LibrarySnapshot {
         self.inner.library.read().await.clone()
+    }
+
+    pub async fn frontend_library(&self) -> LibrarySnapshot {
+        library::frontend_snapshot(&*self.inner.library.read().await)
+    }
+
+    pub async fn library_item(&self, id: &str) -> Option<crate::models::LibraryItem> {
+        self.inner
+            .library
+            .read()
+            .await
+            .items
+            .iter()
+            .find(|item| item.id == id)
+            .cloned()
+    }
+
+    pub async fn library_item_content(&self, id: &str) -> Option<String> {
+        self.inner.library.read().await.items.iter()
+            .find(|item| item.id == id)
+            .map(|item| item.content.clone())
+    }
+
+    pub async fn search_library_content(&self, query: String) -> AppResult<Vec<String>> {
+        let inner = self.inner.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            let library = inner.library.blocking_read();
+            library::search_content_ids(&library.items, &query)
+        })
+        .await
+        .map_err(|error| AppError::Tauri(format!("收藏搜索执行失败：{error}")))
     }
 
     pub async fn replace_library(&self, snapshot: LibrarySnapshot) {
@@ -878,6 +940,7 @@ impl AppState {
                 join,
                 device_id: device_id.clone(),
                 endpoint: endpoint.clone(),
+                certificate_fingerprint: None,
                 capabilities: HashSet::new(),
                 remote_trusted: false,
                 latency_ms: None,
@@ -1043,9 +1106,17 @@ impl AppState {
             .collect::<Vec<_>>();
         drop(manual_trust_required);
         drop(peers);
+        if senders.is_empty() {
+            return 0;
+        }
+        let is_clipboard = matches!(&message, WireMessage::Clipboard { .. });
+        let Ok(encoded) = network::encode_wire_message(&message) else {
+            return 0;
+        };
+        let encoded: Arc<str> = Arc::from(encoded);
         let sends = senders.into_iter().map(|sender| {
-            let message = message.clone();
-            async move { sender.send(message).await }
+            let encoded = encoded.clone();
+            async move { sender.send_encoded(encoded, is_clipboard).await }
         });
         futures_util::future::join_all(sends)
             .await
@@ -1186,6 +1257,22 @@ impl AppState {
             .get(connection_id)
             .map(|peer| peer.device_id.as_deref() == Some(device_id))
             .unwrap_or(false)
+    }
+
+    pub async fn set_peer_certificate_fingerprint(&self, connection_id: &str, fingerprint: String) {
+        if let Some(peer) = self.inner.peers.lock().await.get_mut(connection_id) {
+            peer.certificate_fingerprint = Some(fingerprint);
+        }
+    }
+
+    pub async fn peer_certificate_fingerprint(&self, device_key: &str) -> Option<String> {
+        self.inner.peers.lock().await.iter().find_map(|(connection_id, peer)| {
+            if connection_id == device_key || peer_matches_key(peer, device_key) {
+                peer.certificate_fingerprint.clone()
+            } else {
+                None
+            }
+        })
     }
 
     pub async fn trust_keys_for_device(&self, device_id: &str) -> Vec<String> {
@@ -3092,10 +3179,40 @@ mod trusted_broadcast_tests {
         assert!(sender.send(clipboard("message-2", "second")).await);
         assert!(sender.send(clipboard("message-3", "latest")).await);
 
-        let WireMessage::Clipboard { content, .. } = receiver.recv().await.unwrap() else {
+        let WireMessage::Clipboard { content, .. } =
+            network::decode_wire_message(&receiver.recv().await.unwrap()).unwrap()
+        else {
             panic!("latest clipboard should be delivered");
         };
         assert_eq!(content, "latest");
+    }
+
+    #[tokio::test]
+    async fn trusted_peers_share_one_encoded_clipboard_message() {
+        let state = AppState::new();
+        let mut config = AppConfig::default();
+        config.trusted_devices = vec!["device-a".into(), "device-b".into()];
+        let (first_sender, first_receiver) = peer_outbound_channel();
+        let (second_sender, second_receiver) = peer_outbound_channel();
+        for (connection, device, sender) in [
+            ("connection-a", "device-a", first_sender),
+            ("connection-b", "device-b", second_sender),
+        ] {
+            let join = tauri::async_runtime::spawn(std::future::pending());
+            state.register_peer(connection.into(), sender, join).await;
+            state.attach_peer_device(connection, device.into(), None).await;
+        }
+
+        assert_eq!(state.broadcast_trusted(&config, clipboard_message()).await, 2);
+        let first = first_receiver.clipboard.borrow();
+        let second = second_receiver.clipboard.borrow();
+        let first = first.as_ref().unwrap();
+        let second = second.as_ref().unwrap();
+        assert!(Arc::ptr_eq(first, second));
+        assert!(matches!(
+            network::decode_wire_message(first).unwrap(),
+            WireMessage::Clipboard { content, .. } if content == "hello"
+        ));
     }
 
     #[tokio::test]
@@ -3121,10 +3238,13 @@ mod trusted_broadcast_tests {
             })
             .await);
 
-        assert!(matches!(receiver.recv().await, Some(WireMessage::Ping { .. })));
         assert!(matches!(
-            receiver.recv().await,
-            Some(WireMessage::Clipboard { .. })
+            network::decode_wire_message(&receiver.recv().await.unwrap()).unwrap(),
+            WireMessage::Ping { .. }
+        ));
+        assert!(matches!(
+            network::decode_wire_message(&receiver.recv().await.unwrap()).unwrap(),
+            WireMessage::Clipboard { .. }
         ));
     }
 
@@ -3145,8 +3265,8 @@ mod trusted_broadcast_tests {
             })
             .await);
         assert!(matches!(
-            receiver.recv().await,
-            Some(WireMessage::Ping { timestamp: 1, .. })
+            network::decode_wire_message(&receiver.recv().await.unwrap()).unwrap(),
+            WireMessage::Ping { timestamp: 1, .. }
         ));
     }
 }

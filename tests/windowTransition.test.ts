@@ -21,7 +21,7 @@ const style = readFileSync("src/style.css", "utf8");
 
 assert.match(appShell, /const animatePanels = previousMode !== nextMode[\s\S]*previousMode !== "ball"[\s\S]*nextMode !== "ball";/);
 assert.match(appShell, /const hideNativeWindow = previousMode === "ball" && nextMode !== "ball";/);
-assert.match(appShell, /if \(hideNativeWindow\) \{[\s\S]*await hideMainWindow\(\);[\s\S]*nativeWindowHidden = true;/);
+assert.match(appShell, /if \(hideNativeWindow\) \{[\s\S]*await hideMainWindow\(false\);[\s\S]*nativeWindowHidden = true;/);
 assert.match(appShell, /if \(nativeWindowHidden\) \{[\s\S]*await showMainWindow\(\);/);
 assert.doesNotMatch(appShell.match(/const animatePanels = ([\s\S]*?);/)?.[1] ?? "", /prefers-reduced-motion/);
 assert.match(appShell, /panelTransitionPhase\.value = "exit";[\s\S]*WINDOW_MODE_EXIT_MS[\s\S]*isResizingWindow\.value = true;[\s\S]*await resizeWindow\(pointer\);[\s\S]*windowMode\.value = nextMode/);

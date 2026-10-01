@@ -10,7 +10,7 @@ import Pin from "lucide-vue-next/dist/esm/icons/pin.js";
 import PinOff from "lucide-vue-next/dist/esm/icons/pin-off.js";
 import Play from "lucide-vue-next/dist/esm/icons/play.js";
 import Trash2 from "lucide-vue-next/dist/esm/icons/trash-2.js";
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 import type { LibraryLayout } from "@/lib/libraryLayout";
 import { isClipboardVideoFile } from "@/lib/historyPreview";
@@ -27,18 +27,20 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
   copy: [LibraryItem];
+  "preview-image": [LibraryItem];
   "preview-video": [LibraryItem, number];
   pin: [LibraryItem];
   edit: [LibraryItem];
   remove: [LibraryItem];
-  "convert-snippet": [LibraryItem];
+  "add-snippet": [LibraryItem];
   "edit-snippet": [LibraryItem];
 }>();
 
 const thumbnail = ref("");
 const unavailable = ref("");
+const cardElement = ref<HTMLElement | null>(null);
 const canEditSnippet = computed(() => props.item.role === "snippet");
-const canConvertSnippet = computed(() =>
+const canAddSnippet = computed(() =>
   props.item.role === "saved" && props.item.contentType === "text",
 );
 const previewText = computed(() => props.item.content || props.item.summary);
@@ -64,22 +66,53 @@ function formatTime(value: string) {
   }).format(date);
 }
 
-async function loadThumbnail() {
-  thumbnail.value = "";
-  unavailable.value = "";
-  if (props.item.contentType !== "image") return;
+let observer: IntersectionObserver | undefined;
+let thumbnailRequest = 0;
+
+async function loadThumbnail(itemId: string, request: number) {
   try {
-    thumbnail.value = await getLibraryImageThumbnail(props.item.id, 320);
+    const next = await getLibraryImageThumbnail(itemId, 160);
+    if (request === thumbnailRequest && itemId === props.item.id) thumbnail.value = next;
   } catch (error) {
-    unavailable.value = `图片资源不可用：${String(error)}`;
+    if (request === thumbnailRequest && itemId === props.item.id) {
+      unavailable.value = `图片资源不可用：${String(error)}`;
+    }
   }
 }
 
-watch(() => props.item.id, loadThumbnail, { immediate: true });
+function observeThumbnail() {
+  const request = ++thumbnailRequest;
+  observer?.disconnect();
+  thumbnail.value = "";
+  unavailable.value = "";
+  if (props.item.contentType !== "image" || !cardElement.value) return;
+
+  const itemId = props.item.id;
+  if (typeof IntersectionObserver === "undefined") {
+    void loadThumbnail(itemId, request);
+    return;
+  }
+
+  observer = new IntersectionObserver(([entry]) => {
+    if (!entry.isIntersecting) return;
+    observer?.disconnect();
+    observer = undefined;
+    void loadThumbnail(itemId, request);
+  }, { rootMargin: "200px" });
+  observer.observe(cardElement.value);
+}
+
+watch(() => [props.item.id, props.item.contentType], observeThumbnail, { flush: "post" });
+onMounted(observeThumbnail);
+onBeforeUnmount(() => {
+  thumbnailRequest++;
+  observer?.disconnect();
+});
 </script>
 
 <template>
   <article
+    ref="cardElement"
     data-library-card
     class="library-card group relative grid min-w-0 gap-[14px] overflow-hidden rounded-xl border border-[color:var(--main-line-soft)] bg-[color:var(--panel-bg)] p-4 transition duration-150 hover:border-[color:var(--main-line)] hover:bg-[color:var(--main-bg-soft)]"
     :class="{
@@ -122,12 +155,25 @@ watch(() => props.item.id, loadThumbnail, { immediate: true });
     </div>
 
     <div data-library-card-preview class="grid min-w-0 gap-2.5">
-      <img
-        v-if="thumbnail"
-        :src="`data:image/png;base64,${thumbnail}`"
-        :alt="item.title"
-        class="library-image-preview max-h-48 w-full rounded-lg border border-[color:var(--main-line-soft)] bg-black/20 object-contain"
-      />
+      <button
+        v-if="item.contentType === 'image'"
+        data-library-preview-image
+        type="button"
+        class="w-full rounded-lg text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color:var(--accent-line)]"
+        :aria-label="`预览图片：${item.title}`"
+        :title="`预览图片：${item.title}`"
+        @click="emit('preview-image', item)"
+      >
+        <img
+          v-if="thumbnail"
+          :src="`data:image/png;base64,${thumbnail}`"
+          :alt="item.title"
+          loading="lazy"
+          decoding="async"
+          class="library-image-preview max-h-48 w-full rounded-lg border border-[color:var(--main-line-soft)] bg-black/20 object-contain"
+        />
+        <span v-else class="grid h-24 place-items-center rounded-lg border border-[color:var(--main-line-soft)] bg-black/20"><ImageIcon class="h-5 w-5" /></span>
+      </button>
       <div
         v-else-if="item.contentType === 'fileList'"
         class="library-file-preview grid gap-1 overflow-hidden rounded-lg border border-[color:var(--main-line-soft)] bg-[color:var(--field-bg)] px-3 py-2"
@@ -137,7 +183,7 @@ watch(() => props.item.id, loadThumbnail, { immediate: true });
             v-if="isClipboardVideoFile({ contentType: 'fileList', text: asset.fileName })"
             data-library-preview-video
             type="button"
-            class="flex min-w-0 items-center gap-2 text-left text-[color:var(--accent-text)] hover:underline focus-visible:rounded-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color:var(--accent-line)]"
+            class="flex w-full min-w-0 items-center gap-2 text-left text-[color:var(--accent-text)] hover:underline focus-visible:rounded-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color:var(--accent-line)]"
             :title="`预览视频：${asset.fileName}`"
             :aria-label="`预览视频：${asset.fileName}`"
             @click="emit('preview-video', item, index)"
@@ -206,14 +252,14 @@ watch(() => props.item.id, loadThumbnail, { immediate: true });
         <Pencil class="h-3.5 w-3.5" />信息
       </button>
       <button
-        v-if="canConvertSnippet"
-        data-library-convert-snippet
+        v-if="canAddSnippet"
+        data-library-add-snippet
         type="button"
         class="library-action"
         :disabled="busy"
-        @click="emit('convert-snippet', item)"
+        @click="emit('add-snippet', item)"
       >
-        <MessageSquareText class="h-3.5 w-3.5" />转为片段
+        <MessageSquareText class="h-3.5 w-3.5" />加入常用片段
       </button>
       <button
         v-if="canEditSnippet"

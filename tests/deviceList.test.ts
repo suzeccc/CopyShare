@@ -5,6 +5,7 @@ import {
   dedupeDevices,
   hasConnectedDeviceEndpoint,
   historicalDevices,
+  limitInactiveDiscoveredDevices,
   markDeviceRejected,
   markDeviceDisconnected,
   markDeviceTrusted,
@@ -301,3 +302,22 @@ assert.deepEqual(
   ),
   ["new-device", "device-remote"],
 );
+
+const inactiveDevices = Array.from({ length: 102 }, (_, index) => ({
+  ...device(`inactive-${index}`, false),
+  ip: `10.194.34.${index}`,
+  lastSeenAt: new Date(Date.UTC(2026, 8, 27, 0, 0, 0) - index * 1000).toISOString(),
+}));
+const retainedDevices = limitInactiveDiscoveredDevices([
+  ...inactiveDevices,
+  { ...device("trusted-old", false), ip: "10.194.35.1", trusted: true },
+  { ...device("connected-old", true), ip: "10.194.35.2" },
+  { ...device("connecting-old", false), ip: "10.194.35.3", status: "connecting" as const },
+]);
+assert.equal(retainedDevices.length, 103);
+assert.equal(retainedDevices.some((item) => item.id === "inactive-99"), true);
+assert.equal(retainedDevices.some((item) => item.id === "inactive-100"), false);
+assert.equal(retainedDevices.some((item) => item.id === "trusted-old"), true);
+assert.equal(retainedDevices.some((item) => item.id === "connected-old"), true);
+assert.equal(retainedDevices.some((item) => item.id === "connecting-old"), true);
+assert.equal(mergeRefreshedDevices(inactiveDevices, []).length, 100);

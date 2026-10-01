@@ -1,5 +1,19 @@
 import type { DeviceInfo } from "@/types/device";
 
+const INACTIVE_DISCOVERED_DEVICE_LIMIT = 100;
+
+export function limitInactiveDiscoveredDevices(devices: DeviceInfo[]): DeviceInfo[] {
+  const recentInactiveIds = new Set(devices
+    .filter((device) => !device.connected && device.status === "offline" && !device.trusted && !device.hasConnectedBefore)
+    .sort((left, right) =>
+      (Date.parse(right.lastSeenAt ?? "") || 0) - (Date.parse(left.lastSeenAt ?? "") || 0))
+    .slice(0, INACTIVE_DISCOVERED_DEVICE_LIMIT)
+    .map((device) => device.id));
+  return devices.filter((device) =>
+    device.connected || device.status !== "offline" || device.trusted || device.hasConnectedBefore
+    || recentInactiveIds.has(device.id));
+}
+
 export function upsertDevice(devices: DeviceInfo[], device: DeviceInfo): DeviceInfo[] {
   const existing = devices.find(
     (item) =>
@@ -27,7 +41,7 @@ export function mergeRefreshedDevices(
   currentDevices: DeviceInfo[],
   refreshedDevices: DeviceInfo[],
 ): DeviceInfo[] {
-  return dedupeDevices([...currentDevices, ...refreshedDevices]);
+  return limitInactiveDiscoveredDevices(dedupeDevices([...currentDevices, ...refreshedDevices]));
 }
 
 export function connectedTrustedDevices(devices: DeviceInfo[]): DeviceInfo[] {

@@ -1,9 +1,10 @@
 use std::{
     cmp::Reverse,
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fs,
     io::{self, Read, Write},
     path::{Component, Path, PathBuf},
+    sync::{Arc, Mutex, OnceLock, Weak},
 };
 
 use chrono::Utc;
@@ -34,6 +35,25 @@ const FILE_COUNT_LIMIT: usize = 100;
 const FILE_SIZE_LIMIT: u64 = 500 * 1024 * 1024;
 const FILE_TOTAL_SIZE_LIMIT: u64 = 1024 * 1024 * 1024;
 const ASSET_BUFFER_SIZE: usize = 64 * 1024;
+const LIST_PREVIEW_CHARS: usize = 1024;
+
+static THUMBNAIL_LOCKS: OnceLock<Mutex<HashMap<PathBuf, Weak<Mutex<()>>>>> = OnceLock::new();
+
+fn thumbnail_lock(path: &Path) -> Arc<Mutex<()>> {
+    let mut locks = THUMBNAIL_LOCKS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    if locks.len() > 128 {
+        locks.retain(|_, lock| lock.strong_count() > 0);
+    }
+    if let Some(lock) = locks.get(path).and_then(Weak::upgrade) {
+        return lock;
+    }
+    let lock = Arc::new(Mutex::new(()));
+    locks.insert(path.to_path_buf(), Arc::downgrade(&lock));
+    lock
+}
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum LibraryCopyPayload {
@@ -148,6 +168,47 @@ fn sort_library_items(mut items: Vec<LibraryItem>) -> Vec<LibraryItem> {
         )
     });
     items
+}
+
+pub fn frontend_snapshot(snapshot: &LibrarySnapshot) -> LibrarySnapshot {
+    LibrarySnapshot {
+        items: snapshot.items.iter().map(|item| {
+            let preview_end = item.content.char_indices()
+                .nth(LIST_PREVIEW_CHARS)
+                .map_or(item.content.len(), |(index, _)| index);
+            LibraryItem {
+                id: item.id.clone(),
+                role: item.role.clone(),
+                content_type: item.content_type.clone(),
+                title: item.title.clone(),
+                content: item.content[..preview_end].to_string(),
+                summary: item.summary.clone(),
+                assets: item.assets.clone(),
+                source_history_id: item.source_history_id.clone(),
+                source_content_hash: item.source_content_hash.clone(),
+                source_device: item.source_device.clone(),
+                content_hash: item.content_hash.clone(),
+                tags: item.tags.clone(),
+                note: item.note.clone(),
+                is_pinned: item.is_pinned,
+                pin_order: item.pin_order,
+                created_at: item.created_at,
+                updated_at: item.updated_at,
+            }
+        }).collect(),
+        warning: snapshot.warning.clone(),
+    }
+}
+
+pub fn search_content_ids(items: &[LibraryItem], query: &str) -> Vec<String> {
+    let query = query.trim().to_lowercase();
+    if query.is_empty() {
+        return Vec::new();
+    }
+    items.iter()
+        .filter(|item| item.content.to_lowercase().contains(&query))
+        .map(|item| item.id.clone())
+        .collect()
 }
 
 pub fn load_library(app: &tauri::AppHandle) -> LibrarySnapshot {
@@ -928,6 +989,11 @@ pub fn image_thumbnail(root: &Path, item: &LibraryItem, max_size: u32) -> AppRes
     let size = max_size.clamp(32, 800);
     let directory = root.join(LIBRARY_THUMBNAIL_DIR);
     let target = directory.join(format!("{}-{size}.png", asset.sha256));
+    if target.exists() {
+        return Ok(base64::engine::general_purpose::STANDARD.encode(fs::read(target)?));
+    }
+    let lock = thumbnail_lock(&target);
+    let _guard = lock.lock().unwrap_or_else(|error| error.into_inner());
     let bytes = if target.exists() {
         fs::read(&target)?
     } else {
@@ -952,6 +1018,22 @@ pub fn image_thumbnail(root: &Path, item: &LibraryItem, max_size: u32) -> AppRes
         bytes
     };
     Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
+}
+
+pub fn image_preview_path(root: &Path, item: &LibraryItem) -> AppResult<String> {
+    if item.content_type != ClipboardContentType::Image {
+        return Err(AppError::InvalidInput("收藏项不是图片".into()));
+    }
+    let asset = item
+        .assets
+        .iter()
+        .find(|asset| asset.kind == LibraryAssetKind::Image)
+        .ok_or_else(|| AppError::InvalidInput("收藏图片资源缺失".into()))?;
+    let path = resolve_asset_path(root, asset)?;
+    if copy_and_hash(fs::File::open(&path)?, io::sink())? != (asset.size, asset.sha256.clone()) {
+        return Err(AppError::InvalidInput("收藏图片资源损坏".into()));
+    }
+    Ok(path.to_string_lossy().into_owned())
 }
 
 pub fn video_preview_path(root: &Path, item: &LibraryItem, asset_index: usize) -> AppResult<String> {
@@ -1063,6 +1145,7 @@ mod tests {
         let items = collect_history_item(&root, &[], &history, false).unwrap();
         let managed = resolve_asset_path(&root, &items[0].assets[0]).unwrap();
         assert_eq!(std::fs::read(&managed).unwrap(), png);
+        assert_eq!(image_preview_path(&root, &items[0]).unwrap(), managed.to_string_lossy());
         assert!(matches!(
             copy_payload(&root, &items[0]).unwrap(),
             LibraryCopyPayload::Image(_)
@@ -1074,6 +1157,23 @@ mod tests {
         let decoded = image::load_from_memory(&thumbnail).unwrap();
         assert_eq!((decoded.width(), decoded.height()), (32, 16));
         assert!(root.join(LIBRARY_THUMBNAIL_DIR).exists());
+        std::fs::write(&managed, b"corrupt").unwrap();
+        assert!(image_preview_path(&root, &items[0]).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn saved_text_and_its_snippet_delete_independently() {
+        let root = temp_dir("saved-snippet-independent");
+        let history = history_fixture("history-text", ClipboardContentType::Text, "Body".into());
+        let saved = collect_history_item(&root, &[], &history, false).unwrap();
+        let saved_id = saved[0].id.clone();
+        let with_snippet = create_snippet(&saved, &saved[0].title, &saved[0].content, vec![], "").unwrap();
+        let snippet_id = with_snippet.iter().find(|item| item.role == LibraryRole::Snippet).unwrap().id.clone();
+        assert_ne!(saved_id, snippet_id);
+        assert_eq!(with_snippet.len(), 2);
+        assert_eq!(remove_item(&with_snippet, &saved_id).unwrap()[0].id, snippet_id);
+        assert_eq!(remove_item(&with_snippet, &snippet_id).unwrap()[0].id, saved_id);
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -1358,6 +1458,51 @@ mod tests {
         assert!(!resolve_asset_path(&root, &first).unwrap().exists());
         assert_eq!(library_storage_size(&root).unwrap(), 0);
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn concurrent_thumbnail_requests_share_one_cached_file() {
+        let root = temp_dir("concurrent-thumbnail");
+        let image = image::RgbaImage::from_pixel(1024, 1024, image::Rgba([20, 40, 60, 255]));
+        let mut png = Vec::new();
+        image::codecs::png::PngEncoder::new(&mut png)
+            .write_image(&image, 1024, 1024, image::ColorType::Rgba8.into())
+            .unwrap();
+        let history = history_fixture(
+            "history-image",
+            ClipboardContentType::Image,
+            base64::engine::general_purpose::STANDARD.encode(&png),
+        );
+        let item = collect_history_item(&root, &[], &history, false).unwrap().remove(0);
+        let barrier = Arc::new(std::sync::Barrier::new(3));
+        let handles = (0..2).map(|_| {
+            let root = root.clone();
+            let item = item.clone();
+            let barrier = barrier.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                image_thumbnail(&root, &item, 160).unwrap()
+            })
+        }).collect::<Vec<_>>();
+        barrier.wait();
+        let results = handles.into_iter().map(|handle| handle.join().unwrap()).collect::<Vec<_>>();
+        assert_eq!(results[0], results[1]);
+        assert_eq!(fs::read_dir(root.join(LIBRARY_THUMBNAIL_DIR)).unwrap().count(), 1);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn list_preview_is_bounded_but_full_content_stays_searchable() {
+        let content = format!("{}needle", "🦀".repeat(1200));
+        let item = new_snippet("Long snippet", &content, vec![], "").unwrap();
+        let id = item.id.clone();
+        let snapshot = LibrarySnapshot { items: vec![item], warning: None };
+
+        let frontend = frontend_snapshot(&snapshot);
+        assert_eq!(frontend.items[0].content.chars().count(), LIST_PREVIEW_CHARS);
+        assert!(!frontend.items[0].content.contains("needle"));
+        assert_eq!(snapshot.items[0].content, content);
+        assert_eq!(search_content_ids(&snapshot.items, "NEEDLE"), vec![id]);
     }
 
     #[test]

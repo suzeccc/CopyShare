@@ -1046,7 +1046,7 @@ async function clearLocalCache() {
           >
             <span class="grid min-w-0 flex-1 gap-1">
               <span class="text-[14px] font-bold text-white">API 密钥（必填）</span>
-              <span class="text-[13px] text-[color:var(--muted-text)]">仅保存在本机配置文件中</span>
+              <span class="text-[13px] text-[color:var(--muted-text)]">保存在本机系统凭据存储中</span>
             </span>
             <input
               v-model="draft.translationApiKey"

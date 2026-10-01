@@ -1,8 +1,11 @@
 use std::{
+    collections::hash_map::DefaultHasher,
     fs,
+    hash::{Hash, Hasher},
     io::Write,
     path::{Path, PathBuf},
     process::Command,
+    sync::{Mutex, MutexGuard},
 };
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -26,6 +29,25 @@ const HISTORY_THUMBNAIL_EXTENSION: &str = "png";
 const SUMMARY_LIMIT: usize = 80;
 const HISTORY_LIMIT: usize = 100;
 const DEFAULT_THUMBNAIL_SIZE: u32 = 200;
+const FRONTEND_TEXT_PREVIEW_CHARS: usize = 1024;
+
+// ponytail: two striped locks cap full-image decodes; use per-key locks plus a semaphore if throughput suffers.
+static THUMBNAIL_GENERATION_LOCKS: [Mutex<()>; 2] = [Mutex::new(()), Mutex::new(())];
+
+fn thumbnail_generation_lock(path: &Path) -> MutexGuard<'static, ()> {
+    let mut hasher = DefaultHasher::new();
+    path.hash(&mut hasher);
+    THUMBNAIL_GENERATION_LOCKS[hasher.finish() as usize % THUMBNAIL_GENERATION_LOCKS.len()]
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+}
+
+fn write_thumbnail_cache(path: &Path, bytes: &[u8]) -> AppResult<()> {
+    let temp = path.with_file_name(format!(".{}.tmp", Uuid::new_v4()));
+    let result = fs::write(&temp, bytes).and_then(|_| fs::rename(&temp, path));
+    let _ = fs::remove_file(&temp);
+    Ok(result?)
+}
 
 pub fn load_history(app: &AppHandle) -> AppResult<Vec<HistoryItem>> {
     load_history_from_dir(&app.path().app_data_dir()?)
@@ -299,19 +321,31 @@ fn history_content(message: &ClipboardMessage) -> String {
 fn history_items_for_disk(items: &[HistoryItem]) -> Vec<HistoryItem> {
     items
         .iter()
-        .map(strip_frontend_heavy_content)
+        .map(|item| strip_heavy_content(item, false))
         .collect()
 }
 
 pub fn history_items_for_frontend(items: &[HistoryItem]) -> Vec<HistoryItem> {
-    items.iter().map(strip_frontend_heavy_content).collect()
+    items.iter().map(history_item_for_frontend).collect()
 }
 
 pub fn history_item_for_frontend(item: &HistoryItem) -> HistoryItem {
-    strip_frontend_heavy_content(item)
+    strip_heavy_content(item, true)
 }
 
-fn strip_frontend_heavy_content(item: &HistoryItem) -> HistoryItem {
+pub fn search_text_ids(items: &[HistoryItem], query: &str) -> Vec<String> {
+    let query = query.trim().to_lowercase();
+    if query.is_empty() {
+        return Vec::new();
+    }
+    items.iter()
+        .filter(|item| item.content_type == ClipboardContentType::Text
+            && item.content.to_lowercase().contains(&query))
+        .map(|item| item.id.clone())
+        .collect()
+}
+
+fn strip_heavy_content(item: &HistoryItem, text_preview: bool) -> HistoryItem {
     HistoryItem {
         id: item.id.clone(),
         direction: item.direction.clone(),
@@ -319,6 +353,10 @@ fn strip_frontend_heavy_content(item: &HistoryItem) -> HistoryItem {
         summary: item.summary.clone(),
         content: if item.content_type == ClipboardContentType::Image {
             String::new()
+        } else if text_preview && item.content_type == ClipboardContentType::Text {
+            let end = item.content.char_indices().nth(FRONTEND_TEXT_PREVIEW_CHARS)
+                .map_or(item.content.len(), |(index, _)| index);
+            item.content[..end].to_string()
         } else {
             item.content.clone()
         },
@@ -479,12 +517,16 @@ pub fn get_history_file_thumbnail(
     if thumbnail_path.exists() {
         return Ok(base64::engine::general_purpose::STANDARD.encode(fs::read(thumbnail_path)?));
     }
+    let _guard = thumbnail_generation_lock(&thumbnail_path);
+    if thumbnail_path.exists() {
+        return Ok(base64::engine::general_purpose::STANDARD.encode(fs::read(thumbnail_path)?));
+    }
 
     if let Some(thumbnail) = embedded_video_thumbnail(item)? {
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(thumbnail.trim())
             .map_err(|error| crate::error::AppError::Clipboard(error.to_string()))?;
-        fs::write(&thumbnail_path, &bytes)?;
+        write_thumbnail_cache(&thumbnail_path, &bytes)?;
         return Ok(base64::engine::general_purpose::STANDARD.encode(bytes));
     }
 
@@ -493,7 +535,7 @@ pub fn get_history_file_thumbnail(
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(thumbnail.trim())
         .map_err(|error| crate::error::AppError::Clipboard(error.to_string()))?;
-    fs::write(&thumbnail_path, &bytes)?;
+    write_thumbnail_cache(&thumbnail_path, &bytes)?;
     Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
 }
 
@@ -751,6 +793,10 @@ fn get_history_image_thumbnail_from_dirs(
     if thumbnail_path.exists() {
         return Ok(base64::engine::general_purpose::STANDARD.encode(fs::read(thumbnail_path)?));
     }
+    let _guard = thumbnail_generation_lock(&thumbnail_path);
+    if thumbnail_path.exists() {
+        return Ok(base64::engine::general_purpose::STANDARD.encode(fs::read(thumbnail_path)?));
+    }
 
     let content = image_content_from_dir(image_dir, item)?;
     let bytes = base64::engine::general_purpose::STANDARD
@@ -779,7 +825,7 @@ fn get_history_image_thumbnail_from_dirs(
         .write_to(&mut output, image::ImageFormat::Png)
         .map_err(|error| crate::error::AppError::Clipboard(error.to_string()))?;
     let data = output.into_inner();
-    fs::write(&thumbnail_path, &data)?;
+    write_thumbnail_cache(&thumbnail_path, &data)?;
     Ok(base64::engine::general_purpose::STANDARD.encode(data))
 }
 
@@ -937,6 +983,25 @@ mod tests {
 
         assert_eq!(item.summary.len(), 83);
         assert_eq!(item.content.len(), 120);
+    }
+
+    #[test]
+    fn long_text_is_short_in_frontend_but_full_on_disk_and_searchable() {
+        let content = format!("{}needle", "🦀".repeat(1200));
+        let message = ClipboardMessage {
+            message_id: "long".into(), source_device_id: "d".into(),
+            source_device_name: "Device".into(), content_type: ClipboardContentType::Text,
+            content: content.clone(), content_hash: "hash".into(), timestamp: 1,
+            origin_sequence: None, event_version: None,
+        };
+        let item = make_history_item(HistoryDirection::Local, "Device", &message);
+        let preview = history_item_for_frontend(&item);
+        let disk = history_items_for_disk(&[item.clone()]);
+
+        assert_eq!(preview.content.chars().count(), FRONTEND_TEXT_PREVIEW_CHARS);
+        assert!(!preview.content.contains("needle"));
+        assert_eq!(disk[0].content, content);
+        assert_eq!(search_text_ids(&[item], "NEEDLE"), vec![preview.id]);
     }
 
     #[test]
@@ -1276,7 +1341,15 @@ mod tests {
         };
         save_history_images(&image_dir, &[item.clone()])?;
 
-        let thumb = get_history_image_thumbnail_from_dirs(&image_dir, &thumb_dir, &item, 200)?;
+        let handles = (0..2).map(|_| {
+            let image_dir = image_dir.clone();
+            let thumb_dir = thumb_dir.clone();
+            let item = item.clone();
+            std::thread::spawn(move || get_history_image_thumbnail_from_dirs(&image_dir, &thumb_dir, &item, 200))
+        }).collect::<Vec<_>>();
+        let thumbs = handles.into_iter().map(|handle| handle.join().unwrap()).collect::<AppResult<Vec<_>>>()?;
+        assert_eq!(thumbs[0], thumbs[1]);
+        let thumb = &thumbs[0];
         let decoded = image::load_from_memory(
             &STANDARD.decode(thumb).expect("thumbnail should be base64 PNG"),
         )
@@ -1285,6 +1358,7 @@ mod tests {
         assert_eq!(decoded.width(), 200);
         assert_eq!(decoded.height(), 50);
         assert!(thumb_dir.join("wide-image-200.png").exists());
+        assert_eq!(fs::read_dir(&thumb_dir)?.count(), 1);
 
         fs::remove_dir_all(image_dir)?;
         fs::remove_dir_all(thumb_dir)?;

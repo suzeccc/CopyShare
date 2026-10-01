@@ -69,7 +69,7 @@ test("library page, navigation, cards and dialogs expose the complete phase-one 
     "data-library-copy",
     "data-library-pin",
     "data-library-edit",
-    "data-library-convert-snippet",
+    "data-library-add-snippet",
     "data-library-edit-snippet",
     "data-library-remove",
   ]) assert.match(card, new RegExp(hook));

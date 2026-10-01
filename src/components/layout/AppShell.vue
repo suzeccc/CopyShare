@@ -28,6 +28,7 @@ import {
   enterFloatingWindow,
   enterBallWindow,
   dockBallWindow,
+  enableClipboardHistoryEvents,
   exitApp,
   getClipboardHistory,
   hideMainWindow,
@@ -38,12 +39,13 @@ import {
   readClipboardText,
   recognizeClipboardImage,
   restoreMainWindow,
+  setFloatingBallLowMemory,
   showMainWindow,
   toggleFloatingClipboardHistoryWindow,
   translateText,
   updateFloatingClipboardHistoryWindow,
 } from "@/lib/tauri";
-import { getLatencyLabel, type AppWindowMode } from "@/lib/windowMode";
+import { getLatencyLabel, trayClickAction, type AppWindowMode } from "@/lib/windowMode";
 import { WINDOW_MODE_ENTER_MS, WINDOW_MODE_EXIT_MS, type WindowTransitionPointer } from "@/lib/windowTransition";
 import router from "@/router";
 import { useHistoryStore } from "@/stores/history";
@@ -75,6 +77,7 @@ const isResizingWindow = ref(false);
 const panelTransitionPhase = ref<"exit" | "enter" | null>(null);
 const isCollapsingToBall = ref(false);
 const windowModeFailed = ref(false);
+const floatingBall = ref<InstanceType<typeof FloatingBall> | null>(null);
 const ballReturnMode = ref<"main" | "floating">("floating");
 const systemClipboardItems = ref<ClipboardPreviewItem[]>([]);
 const mainScrollRef = ref<HTMLElement | null>(null);
@@ -85,9 +88,12 @@ let clipboardHistoryTimer: number | undefined;
 let clipboardHistoryPollingGeneration = 0;
 let clipboardHistoryPollingDisposed = false;
 let clipboardHistoryRefreshCount = 0;
+let clipboardHistoryEventsEnabled: boolean | undefined;
+let clipboardHistoryEventUnlisten: (() => void) | undefined;
 let windowFocusUnlisten: (() => void) | undefined;
 let closeRequestUnlisten: (() => void) | undefined;
 let globalShortcutUnlisten: (() => void) | undefined;
+let trayClickUnlisten: (() => void) | undefined;
 let windowModeChange: Promise<void> = Promise.resolve();
 let ballMenu: Menu | null = null;
 
@@ -194,10 +200,12 @@ onBeforeUnmount(() => {
   delete document.body.dataset.windowMode;
   delete document.documentElement.dataset.appTheme;
   delete document.body.dataset.appTheme;
-  stopClipboardHistoryPolling();
+  stopClipboardHistoryUpdates();
+  clipboardHistoryEventUnlisten?.();
   windowFocusUnlisten?.();
   closeRequestUnlisten?.();
   globalShortcutUnlisten?.();
+  trayClickUnlisten?.();
   if (ballMenu) void ballMenu.close();
 });
 
@@ -206,8 +214,16 @@ onMounted(async () => {
   await windowModeChange;
   emit("ready");
   try {
+    clipboardHistoryEventUnlisten = await onAppEvent<void>("system-clipboard-history-changed", () => {
+      if (isFloating.value) void refreshSystemClipboardHistory(true);
+    });
+    if (clipboardHistoryPollingDisposed) clipboardHistoryEventUnlisten();
+  } catch (error) {
+    console.error("failed to register clipboard history listener", error);
+  }
+  try {
     windowFocusUnlisten = await onMainWindowFocusChanged(() => {
-      void startClipboardHistoryPolling();
+      void startClipboardHistoryUpdates();
     });
     if (clipboardHistoryPollingDisposed) windowFocusUnlisten();
   } catch (error) {
@@ -229,7 +245,16 @@ onMounted(async () => {
   } catch (error) {
     console.error("failed to register global shortcut listener", error);
   }
-  await startClipboardHistoryPolling();
+  try {
+    trayClickUnlisten = await onAppEvent<void>("tray-left-click", () => {
+      if (trayClickAction(windowMode.value) === "shake") floatingBall.value?.shake();
+      else void showMainWindow();
+    });
+    if (clipboardHistoryPollingDisposed) trayClickUnlisten();
+  } catch (error) {
+    console.error("failed to register tray click listener", error);
+  }
+  await startClipboardHistoryUpdates();
 });
 
 async function initializeStartupWindow() {
@@ -264,7 +289,7 @@ async function refreshSystemClipboardHistory(visibleOnly = false) {
   clipboardHistoryRefreshCount += 1;
   try {
     if (visibleOnly && !(await isMainWindowVisible())) {
-      stopClipboardHistoryPolling();
+      stopClipboardHistoryUpdates();
       return;
     }
     systemClipboardItems.value = (await getClipboardHistory()).map((item) => ({
@@ -272,6 +297,7 @@ async function refreshSystemClipboardHistory(visibleOnly = false) {
       contentHash: "",
       contentType: "text",
       syncStatus: "unsynced",
+      systemHistoryItemId: item.id,
     }));
   } catch {
     systemClipboardItems.value = [];
@@ -280,14 +306,14 @@ async function refreshSystemClipboardHistory(visibleOnly = false) {
   }
 }
 
-function stopClipboardHistoryPolling() {
+function stopClipboardHistoryUpdates() {
   clipboardHistoryPollingGeneration += 1;
   window.clearInterval(clipboardHistoryTimer);
   clipboardHistoryTimer = undefined;
 }
 
-async function startClipboardHistoryPolling() {
-  stopClipboardHistoryPolling();
+async function startClipboardHistoryUpdates() {
+  stopClipboardHistoryUpdates();
   const generation = clipboardHistoryPollingGeneration;
   if (clipboardHistoryPollingDisposed || !isFloating.value) return;
   try {
@@ -296,16 +322,22 @@ async function startClipboardHistoryPolling() {
     return;
   }
   if (generation !== clipboardHistoryPollingGeneration || !isFloating.value) return;
+  if (clipboardHistoryEventsEnabled === undefined) {
+    clipboardHistoryEventsEnabled = clipboardHistoryEventUnlisten
+      ? await enableClipboardHistoryEvents().catch(() => false)
+      : false;
+  }
+  if (generation !== clipboardHistoryPollingGeneration || !isFloating.value) return;
   void refreshSystemClipboardHistory(true);
   clipboardHistoryTimer = window.setInterval(() => {
     void refreshSystemClipboardHistory(true);
-  }, 1200);
+  }, clipboardHistoryEventsEnabled ? 30000 : 1200);
 }
 
 watch(
   isFloating,
   () => {
-    void startClipboardHistoryPolling();
+    void startClipboardHistoryUpdates();
   },
   { immediate: true },
 );
@@ -342,8 +374,9 @@ function switchWindowMode(
     isResizingWindow.value = true;
     await nextTick();
     try {
+      if (previousMode === "ball") await setFloatingBallLowMemory(false).catch(() => false);
       if (hideNativeWindow) {
-        await hideMainWindow();
+        await hideMainWindow(false);
         nativeWindowHidden = true;
       }
       await resizeWindow(pointer);
@@ -361,6 +394,7 @@ function switchWindowMode(
       }
       toastStore.error("窗口切换失败，请重试");
     } finally {
+      if (windowMode.value === "ball") await setFloatingBallLowMemory(true).catch(() => false);
       panelTransitionPhase.value = animatePanels && !windowModeFailed.value ? "enter" : null;
       isResizingWindow.value = false;
       await nextTick();
@@ -589,6 +623,7 @@ async function rejectPromptDevice() {
     ]"
   >
     <FloatingBall
+      ref="floatingBall"
       v-if="isBall"
       v-show="!isResizingWindow && !windowModeFailed"
       :running="statusStore.status.running"
@@ -743,7 +778,7 @@ async function rejectPromptDevice() {
             <div class="min-w-0">
               <p class="text-base font-semibold text-white">是否信任这台设备？</p>
               <p class="mt-1 text-sm leading-6 text-slate-300">
-                信任后才会同步本机剪贴板。另一台电脑也需要信任本机，才能双向同步
+                请先核对两台电脑显示的配对码；双方确认信任后才会同步剪贴板
               </p>
             </div>
           </div>

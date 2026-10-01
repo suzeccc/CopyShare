@@ -5,11 +5,31 @@ import { startWindowDrag, waitForPrimaryMouseRelease } from "@/lib/tauri";
 
 const props = defineProps<{ running: boolean; connectedCount: number }>();
 const emit = defineEmits<{ open: []; menu: []; dock: [] }>();
+const button = ref<HTMLButtonElement | null>(null);
 const pointer = ref<{ x: number; y: number } | null>(null);
 const statusText = computed(() => props.running
   ? props.connectedCount > 0 ? `同步中，已连接 ${props.connectedCount} 台设备` : "同步中，尚未连接设备"
   : "同步已暂停");
 let dragged = false;
+let shakeAnimation: Animation | undefined;
+
+function shake() {
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  shakeAnimation?.cancel();
+  shakeAnimation = button.value?.animate(
+    [
+      { transform: "translateX(0)" },
+      { transform: "translateX(-5px)" },
+      { transform: "translateX(5px)" },
+      { transform: "translateX(-3px)" },
+      { transform: "translateX(3px)" },
+      { transform: "translateX(0)" },
+    ],
+    { duration: 420, easing: "ease-in-out" },
+  );
+}
+
+defineExpose({ shake });
 
 function pointerDown(event: PointerEvent) {
   if (event.button !== 0) return;
@@ -42,6 +62,7 @@ function keydown(event: KeyboardEvent) {
 <template>
   <div data-floating-ball class="grid h-full w-full place-items-center bg-transparent p-[2px]">
     <button
+      ref="button"
       data-floating-ball-button
       type="button"
       class="floating-ball relative grid h-full w-full place-items-center rounded-full"

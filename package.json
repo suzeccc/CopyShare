@@ -12,6 +12,7 @@
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
+    "@tanstack/vue-virtual": "^3.13.39",
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-autostart": "^2.0.0",
     "@tauri-apps/plugin-global-shortcut": "^2.3.2",

@@ -31,7 +31,7 @@ const historyModalSource =
 assert.ok(historyModalSource, "clipboard history modal must keep a stable height");
 assert.match(
   historyModalSource,
-  /v-if="filteredAllClipboardItems\.length" class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto p-5"/,
+  /v-if="filteredAllClipboardItems\.length" ref="historyListElement" class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto p-5"/,
 );
 assert.match(
   historyModalSource,

@@ -20,7 +20,7 @@ assert.match(clipboardPage, /@click="openClipboardImagePreview\(item\)"/);
 assert.match(clipboardPage, /<DirectImagePreview/);
 
 assert.match(historyModal, /class="flex h-full max-h-full w-full max-w-4xl flex-col/);
-assert.match(historyModal, /v-if="filteredAllClipboardItems\.length" class="min-h-0 flex-1/);
+assert.match(historyModal, /v-if="filteredAllClipboardItems\.length" ref="historyListElement" class="min-h-0 flex-1/);
 assert.match(historyModal, /v-else class="m-5 grid min-h-0 flex-1 place-items-center/);
 
 assert.match(imageThumb, /variant\?: "thumb" \| "preview"/);

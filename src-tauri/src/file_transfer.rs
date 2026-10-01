@@ -12,10 +12,11 @@ use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::{
     fs::{self, File, OpenOptions},
-    io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt, SeekFrom},
-    net::TcpStream,
+    io::{AsyncRead, AsyncReadExt, AsyncSeekExt, AsyncWrite, AsyncWriteExt, SeekFrom},
     sync::Mutex,
 };
+#[cfg(test)]
+use tokio::net::TcpStream;
 use uuid::Uuid;
 
 use crate::{
@@ -33,6 +34,7 @@ use crate::{
     },
     network,
     notifications,
+    secure_transport,
     state::AppState,
 };
 
@@ -495,20 +497,30 @@ impl FileTransferManager {
         Ok(task)
     }
 
-    pub async fn serve_download_connection(
+    pub async fn serve_download_connection<S>(
         self: Arc<Self>,
         app: AppHandle,
-        stream: TcpStream,
-    ) -> AppResult<()> {
-        self.serve_download_connection_inner(Some(&app), stream)
+        state: AppState,
+        stream: S,
+        fingerprint: String,
+    ) -> AppResult<()>
+    where
+        S: AsyncRead + AsyncWrite + Unpin,
+    {
+        self.serve_download_connection_inner(Some(&app), Some(&state), Some(&fingerprint), stream)
             .await
     }
 
-    async fn serve_download_connection_inner(
+    async fn serve_download_connection_inner<S>(
         self: Arc<Self>,
         app: Option<&AppHandle>,
-        mut stream: TcpStream,
-    ) -> AppResult<()> {
+        state: Option<&AppState>,
+        fingerprint: Option<&str>,
+        mut stream: S,
+    ) -> AppResult<()>
+    where
+        S: AsyncRead + AsyncWrite + Unpin,
+    {
         let request = match file_transfer_http::read_head(&mut stream).await {
             Ok(request) => request,
             Err(_) => {
@@ -526,6 +538,20 @@ impl FileTransferManager {
             write_http_response(&mut stream, 403, "Forbidden", b"forbidden").await?;
             return Ok(());
         };
+        if let (Some(state), Some(fingerprint)) = (state, fingerprint) {
+            let config = state.config().await;
+            if receiver_device_id.as_deref()
+                .and_then(|id| config.trusted_certificates.get(id))
+                .map(String::as_str) != Some(fingerprint)
+                || !receiver_device_id.as_deref().is_some_and(|id| config.trusted_devices.iter().any(|trusted| trusted == id))
+            {
+                write_http_response(&mut stream, 403, "Forbidden", b"untrusted device").await?;
+                return Ok(());
+            }
+        } else if !cfg!(test) {
+            write_http_response(&mut stream, 403, "Forbidden", b"untrusted device").await?;
+            return Ok(());
+        }
         let requested_range = match file_transfer_http::parse_open_range(request.header("range")) {
             Ok(range) => range,
             Err(_) => {
@@ -1842,9 +1868,13 @@ impl FileTransferManager {
             token,
             plan.receiver_device_id.as_deref(),
         );
+        let config = state.config().await;
+        let certificate = config.trusted_certificates.get(peer_device_id)
+            .ok_or_else(|| AppError::InvalidInput("文件发送设备需要重新配对".to_string()))?;
         let actual_hash = receive_http_to_part(
             host,
             port,
+            Some(certificate),
             &request_target,
             offset,
             plan.receiver_device_id.is_some(),
@@ -4261,6 +4291,7 @@ async fn hash_partial_file(path: &Path, expected_size: u64) -> AppResult<(u64, S
 async fn receive_http_to_part<F, Fut>(
     host: &str,
     port: u16,
+    expected_fingerprint: Option<&str>,
     request_target: &str,
     offset: u64,
     force_range: bool,
@@ -4274,9 +4305,20 @@ where
     F: FnMut(u64) -> Fut,
     Fut: Future<Output = AppResult<()>>,
 {
-    let mut stream = TcpStream::connect((host, port)).await.map_err(|error| {
-        AppError::ConnectionTimeout(format!("file transfer connection failed: {error}"))
-    })?;
+    let mut stream: Box<dyn TransferStream> = if let Some(fingerprint) = expected_fingerprint {
+        Box::new(secure_transport::connect(
+            host, port, secure_transport::Protocol::File, Some(fingerprint),
+        ).await?.0)
+    } else {
+        #[cfg(test)]
+        {
+            Box::new(TcpStream::connect((host, port)).await?)
+        }
+        #[cfg(not(test))]
+        {
+            return Err(AppError::InvalidInput("文件发送设备需要重新配对".to_string()));
+        }
+    };
     let range = if offset > 0 || force_range {
         format!("Range: bytes={offset}-\r\n")
     } else {
@@ -4369,6 +4411,9 @@ where
     }
     Ok(actual_hash)
 }
+
+trait TransferStream: AsyncRead + AsyncWrite + Unpin + Send {}
+impl<T: AsyncRead + AsyncWrite + Unpin + Send> TransferStream for T {}
 
 fn trusted_transfer_peer(devices: &[DeviceInfo], device_id: &str) -> AppResult<DeviceInfo> {
     let device = devices
@@ -4494,8 +4539,8 @@ fn http_status_code(first_line: &str) -> Option<u16> {
     }
 }
 
-async fn write_http_response(
-    stream: &mut TcpStream,
+async fn write_http_response<S: AsyncWrite + Unpin>(
+    stream: &mut S,
     status: u16,
     reason: &str,
     body: &[u8],
@@ -5152,7 +5197,7 @@ mod tests {
         let server = tokio::spawn(async move {
             let (stream, _) = listener.accept().await.unwrap();
             server_manager
-                .serve_download_connection_inner(None, stream)
+                .serve_download_connection_inner(None, None, None, stream)
                 .await
                 .unwrap();
         });
@@ -5169,6 +5214,7 @@ mod tests {
         let actual_hash = receive_http_to_part(
             "127.0.0.1",
             address.port(),
+            None,
             &target,
             offset,
             true,
@@ -5298,7 +5344,7 @@ mod tests {
         let server = tokio::spawn(async move {
             let (stream, _) = listener.accept().await.unwrap();
             server_manager
-                .serve_download_connection_inner(None, stream)
+                .serve_download_connection_inner(None, None, None, stream)
                 .await
                 .unwrap();
         });
@@ -5366,6 +5412,7 @@ mod tests {
         let actual_hash = receive_http_to_part(
             "127.0.0.1",
             address.port(),
+            None,
             "/file-download?transferId=t&fileId=f&token=token",
             offset,
             false,
@@ -5411,6 +5458,7 @@ mod tests {
         let result = receive_http_to_part(
             "127.0.0.1",
             address.port(),
+            None,
             "/file-download?transferId=t&fileId=f&token=token",
             offset,
             false,
@@ -5490,6 +5538,7 @@ mod tests {
             let result = receive_http_to_part(
                 "127.0.0.1",
                 address.port(),
+                None,
                 "/file-download?transferId=t&fileId=f&token=token",
                 offset,
                 false,

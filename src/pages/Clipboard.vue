@@ -8,7 +8,8 @@ import Search from "lucide-vue-next/dist/esm/icons/search.js";
 import Star from "lucide-vue-next/dist/esm/icons/star.js";
 import Video from "lucide-vue-next/dist/esm/icons/video.js";
 import X from "lucide-vue-next/dist/esm/icons/x.js";
-import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch, type ComponentPublicInstance } from "vue";
+import { useVirtualizer } from "@tanstack/vue-virtual";
 
 import Button from "@/components/ui/Button.vue";
 import Card from "@/components/ui/Card.vue";
@@ -39,7 +40,9 @@ import {
 import {
   convertLocalFileSrc,
   copyHistoryItem,
+  getHistoryItemContent,
   getHistoryFilePreviewPath,
+  searchHistoryText,
   openExternalUrl,
   openHistoryFileLocation,
   openTransferFolder,
@@ -56,6 +59,12 @@ const clipboardSearch = ref("");
 const activeClipboardCategory = ref<ClipboardCategory>(CLIPBOARD_CATEGORIES[0]);
 const clipboardCategories = CLIPBOARD_CATEGORIES;
 const expandedClipboardItemIds = ref<Set<string>>(new Set());
+const expandedTextById = ref<Record<string, string>>({});
+const matchingHistoryIds = ref<ReadonlySet<string>>(new Set());
+const searchQuery = ref("");
+const searchError = ref("");
+const searching = ref(false);
+let searchRequest = 0;
 const previewImageItem = ref<ClipboardPreviewItem | null>(null);
 const previewVideoItem = ref<ClipboardPreviewItem | null>(null);
 const previewVideoSrc = ref("");
@@ -75,12 +84,66 @@ const allClipboardItems = computed(() =>
 const recentSyncItems = computed(() =>
   allClipboardItems.value.slice(0, CLIPBOARD_PREVIEW_LIMIT),
 );
+watch([showClipboardHistoryModal, () => historyStore.items], ([open]) => {
+  const retained = new Set((open ? allClipboardItems.value : recentSyncItems.value).map((item) => item.id));
+  expandedClipboardItemIds.value = new Set([...expandedClipboardItemIds.value].filter((id) => retained.has(id)));
+  expandedTextById.value = Object.fromEntries(
+    Object.entries(expandedTextById.value).filter(([id]) => retained.has(id)),
+  );
+});
 const filteredRecentSyncItems = computed(() =>
   filterClipboardItems(recentSyncItems.value, activeClipboardCategory.value, ""),
 );
 const filteredAllClipboardItems = computed(() =>
-  filterClipboardItems(allClipboardItems.value, activeClipboardCategory.value, clipboardSearch.value),
+  filterClipboardItems(allClipboardItems.value, activeClipboardCategory.value, clipboardSearch.value,
+    searchQuery.value === clipboardSearch.value.trim().toLowerCase() ? matchingHistoryIds.value : undefined),
 );
+const historyListElement = ref<HTMLElement | null>(null);
+const historyRowVirtualizer = useVirtualizer(computed(() => ({
+  count: filteredAllClipboardItems.value.length,
+  getScrollElement: () => historyListElement.value,
+  estimateSize: () => 112,
+  getItemKey: (index: number) => filteredAllClipboardItems.value[index]?.id ?? index,
+  gap: 12,
+  overscan: 4,
+})));
+const visibleHistoryRows = computed(() => historyRowVirtualizer.value.getVirtualItems().map((virtualRow) => ({
+  virtualRow,
+  index: virtualRow.index,
+  item: filteredAllClipboardItems.value[virtualRow.index]!,
+})));
+
+function measureHistoryRow(element: Element | ComponentPublicInstance | null) {
+  if (element instanceof HTMLElement) historyRowVirtualizer.value.measureElement(element);
+}
+
+watch([clipboardSearch, activeClipboardCategory], () => historyRowVirtualizer.value.scrollToOffset(0));
+watch(filteredAllClipboardItems, () => historyRowVirtualizer.value.measure());
+
+watch([clipboardSearch, () => historyStore.items], ([query], _, onCleanup) => {
+  const request = ++searchRequest;
+  searchQuery.value = "";
+  matchingHistoryIds.value = new Set();
+  searchError.value = "";
+  searching.value = Boolean(query.trim());
+  if (!query.trim()) return;
+  const timer = window.setTimeout(async () => {
+    try {
+      const ids = await searchHistoryText(query);
+      if (request === searchRequest) {
+        searchQuery.value = query.trim().toLowerCase();
+        matchingHistoryIds.value = new Set(ids);
+        searching.value = false;
+      }
+    } catch (error) {
+      if (request === searchRequest) {
+        searchError.value = String(error);
+        searching.value = false;
+      }
+    }
+  }, 150);
+  onCleanup(() => window.clearTimeout(timer));
+});
 const videoGallery = computed(() => mediaPreviewItems(
   showClipboardHistoryModal.value ? filteredAllClipboardItems.value : filteredRecentSyncItems.value, "video",
 ));
@@ -185,14 +248,31 @@ function isClipboardItemExpanded(item: ClipboardPreviewItem) {
   return expandedClipboardItemIds.value.has(item.id);
 }
 
-function toggleClipboardItemExpanded(item: ClipboardPreviewItem) {
+function clipboardText(item: ClipboardPreviewItem) {
+  return expandedTextById.value[item.id] ?? item.text;
+}
+
+async function toggleClipboardItemExpanded(item: ClipboardPreviewItem) {
   const next = new Set(expandedClipboardItemIds.value);
   if (next.has(item.id)) {
     next.delete(item.id);
+    const text = { ...expandedTextById.value };
+    delete text[item.id];
+    expandedTextById.value = text;
   } else {
     next.add(item.id);
   }
   expandedClipboardItemIds.value = next;
+  if (next.has(item.id) && item.needsFullText) {
+    try {
+      const content = await getHistoryItemContent(item.id);
+      if (expandedClipboardItemIds.value.has(item.id)) {
+        expandedTextById.value = { ...expandedTextById.value, [item.id]: content };
+      }
+    } catch (error) {
+      toastStore.error(`无法展开历史记录：${String(error)}`);
+    }
+  }
 }
 
 function clipboardFileTitle(item: ClipboardPreviewItem) {
@@ -331,12 +411,10 @@ function handleClipboardVideoLoaded() {
 }
 
 async function openClipboardLink(item: ClipboardPreviewItem) {
-  const url = getClipboardLinkUrl(item.text);
-  if (!url) {
-    return;
-  }
-
   try {
+    const text = item.needsFullText ? await getHistoryItemContent(item.id) : item.text;
+    const url = getClipboardLinkUrl(text);
+    if (!url) return;
     await openExternalUrl(url);
   } catch (error) {
     toastStore.error(`打开链接失败：${String(error)}`);
@@ -582,6 +660,7 @@ function clipboardTime(value: string | undefined) {
                   :text="item.text"
                   :content-type="item.contentType"
                   :history-item-id="item.id"
+                  :full-text-from-history="item.needsFullText"
                   :file-transfer-id="item.fileTransferId"
                   :file-transfer-file-id="item.fileTransferFileId"
                   :file-transfer-status="item.fileTransferStatus"
@@ -677,7 +756,7 @@ function clipboardTime(value: string | undefined) {
               type="button"
               @click.stop="openClipboardLink(item)"
             >
-              {{ item.text }}
+              {{ clipboardText(item) }}
             </button>
             <p
               v-else
@@ -690,7 +769,7 @@ function clipboardTime(value: string | undefined) {
                 isClipboardItemExpandable(item) ? 'pr-14' : '',
               ]"
             >
-              {{ item.text }}
+              {{ clipboardText(item) }}
             </p>
             <button
               v-if="isClipboardItemExpandable(item)"
@@ -786,6 +865,7 @@ function clipboardTime(value: string | undefined) {
                   placeholder="搜索剪切板..."
                 />
               </label>
+              <p v-if="searchError" class="text-xs text-amber-300">全文搜索暂不可用：{{ searchError }}</p>
               <div
                 data-clipboard-category-tabs
                 class="clipboard-category-tabs"
@@ -809,16 +889,23 @@ function clipboardTime(value: string | undefined) {
             </div>
           </div>
 
-          <div v-if="filteredAllClipboardItems.length" class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto p-5">
+          <div v-if="filteredAllClipboardItems.length" ref="historyListElement" class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto p-5">
             <TransitionGroup
               name="clipboard-card-stagger"
               tag="div"
               data-clipboard-stagger-list
-              class="relative grid gap-3"
+              class="relative"
+              :style="{ height: `${historyRowVirtualizer.getTotalSize()}px` }"
             >
-              <article
-                v-for="(item, index) in filteredAllClipboardItems"
+              <div
+                v-for="{ item, index, virtualRow } in visibleHistoryRows"
                 :key="item.id"
+                :ref="measureHistoryRow"
+                :data-index="index"
+                class="absolute left-0 top-0 w-full"
+                :style="{ top: `${virtualRow.start}px` }"
+              >
+              <article
                 data-clipboard-history-row
                 class="clipboard-preview-card group relative min-h-[86px] overflow-hidden rounded-xl border border-[color:var(--clipboard-card-line)] bg-[color:var(--clipboard-card-bg)] px-5 py-2.5 shadow-[var(--clipboard-card-shadow)] transition-colors duration-150 ease-out hover:z-10 hover:border-[color:var(--clipboard-card-line-hover)] hover:bg-[color:var(--clipboard-card-bg-hover)] hover:shadow-[var(--clipboard-card-shadow-hover)]"
                 :class="{
@@ -877,6 +964,7 @@ function clipboardTime(value: string | undefined) {
                         :text="item.text"
                         :content-type="item.contentType"
                         :history-item-id="item.id"
+                        :full-text-from-history="item.needsFullText"
                         :file-transfer-id="item.fileTransferId"
                         :file-transfer-file-id="item.fileTransferFileId"
                         :file-transfer-status="item.fileTransferStatus"
@@ -972,7 +1060,7 @@ function clipboardTime(value: string | undefined) {
                     type="button"
                     @click.stop="openClipboardLink(item)"
                   >
-                    {{ item.text }}
+                    {{ clipboardText(item) }}
                   </button>
                   <p
                     v-else
@@ -985,7 +1073,7 @@ function clipboardTime(value: string | undefined) {
                       isClipboardItemExpandable(item) ? 'pr-14' : '',
                     ]"
                   >
-                    {{ item.text }}
+                    {{ clipboardText(item) }}
                   </p>
                   <button
                     v-if="isClipboardItemExpandable(item)"
@@ -1033,10 +1121,11 @@ function clipboardTime(value: string | undefined) {
                   </div>
                 </div>
               </article>
+              </div>
             </TransitionGroup>
           </div>
           <p v-else class="m-5 grid min-h-0 flex-1 place-items-center rounded-xl border border-dashed border-[color:var(--main-line-soft)] px-3 text-center text-sm text-[color:var(--subtle-text)]">
-            暂无匹配内容
+            {{ searching ? "正在搜索" : "暂无匹配内容" }}
           </p>
         </section>
       </div>

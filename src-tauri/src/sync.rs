@@ -5,11 +5,13 @@ use chrono::Utc;
 use futures_util::{SinkExt, StreamExt};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::TcpListener;
 #[cfg(test)]
 use tokio::sync::mpsc;
 use tokio::sync::{oneshot, watch};
-use tokio_tungstenite::{accept_async, connect_async, tungstenite::Message, WebSocketStream};
+use tokio_tungstenite::{accept_async, client_async, tungstenite::Message, WebSocketStream};
+#[cfg(test)]
+use tokio_tungstenite::connect_async;
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use uuid::Uuid;
 
@@ -28,6 +30,7 @@ use crate::{
     network,
     notifications,
     security,
+    secure_transport,
     state::{peer_outbound_channel, AppState},
 };
 use crate::models::AppConfig;
@@ -55,6 +58,11 @@ pub use crate::sync_engine::{content_hash, SyncEngine};
 
 pub async fn run_sync_runtime(app: AppHandle, state: AppState, mut stop_rx: watch::Receiver<bool>) {
     let config = state.config().await;
+    if let Err(error) = secure_transport::local_fingerprint() {
+        state.set_error(error.to_string()).await;
+        let _ = app.emit("sync-error", error.to_string());
+        return;
+    }
     let local_ip = network::preferred_local_ip(&config.trusted_devices, config.port)
         .map(|ip| ip.to_string());
 
@@ -95,24 +103,24 @@ pub async fn run_sync_runtime(app: AppHandle, state: AppState, mut stop_rx: watc
                         let app_for_task = app.clone();
                         let state_for_task = state.clone();
                         tauri::async_runtime::spawn(async move {
-                            if is_file_transfer_http_stream(&stream).await {
-                                if let Err(error) = file_transfer::manager()
-                                    .serve_download_connection(app_for_task.clone(), stream)
-                                    .await
-                                {
-                                    emit_sync_error(
-                                        &app_for_task,
-                                        &state_for_task,
-                                        format!("文件下载请求失败：{error}"),
-                                    )
-                                    .await;
+                            match secure_transport::accept(stream).await {
+                                Ok((stream, secure_transport::Protocol::File, fingerprint)) => {
+                                    if let Err(error) = file_transfer::manager()
+                                        .serve_download_connection(app_for_task.clone(), state_for_task.clone(), stream, fingerprint)
+                                        .await
+                                    {
+                                        emit_sync_error(&app_for_task, &state_for_task, format!("文件下载请求失败：{error}")).await;
+                                    }
                                 }
-                                return;
-                            }
-
-                            match accept_async(stream).await {
-                                Ok(socket) => {
-                                    let _ = spawn_socket(app_for_task, state_for_task, connection_id, socket).await;
+                                Ok((stream, secure_transport::Protocol::WebSocket, fingerprint)) => {
+                                    match accept_async(stream).await {
+                                        Ok(socket) => {
+                                            let _ = spawn_socket(app_for_task, state_for_task, connection_id, socket, fingerprint).await;
+                                        }
+                                        Err(error) => {
+                                            eprintln!("CopyShare ignored an invalid incoming connection from {connection_id}: {error}");
+                                        }
+                                    }
                                 }
                                 Err(error) => {
                                     eprintln!(
@@ -140,21 +148,6 @@ pub async fn run_sync_runtime(app: AppHandle, state: AppState, mut stop_rx: watc
         .set_running(false, None, "同步已停止".to_string())
         .await;
     emit_status(&app, &state).await;
-}
-
-async fn is_file_transfer_http_stream(stream: &TcpStream) -> bool {
-    let mut buffer = [0_u8; 128];
-    match tokio::time::timeout(Duration::from_secs(2), stream.peek(&mut buffer)).await {
-        Ok(Ok(read)) => is_file_transfer_http_request_prefix(&buffer[..read]),
-        _ => false,
-    }
-}
-
-fn is_file_transfer_http_request_prefix(bytes: &[u8]) -> bool {
-    let Ok(text) = std::str::from_utf8(bytes) else {
-        return false;
-    };
-    text.starts_with("GET /file-transfer ") || text.starts_with("GET /file-transfer?")
 }
 
 pub fn start_clipboard_monitor(app: AppHandle, state: AppState) {
@@ -306,26 +299,32 @@ async fn connect_to_peer_internal(
     }
 
     let url = network::normalize_peer_endpoint(&ip, port)?;
-    let connect_result = tokio::time::timeout(CONNECT_TIMEOUT, connect_async(url.clone())).await;
-    let (socket, _) = match connect_result {
-        Ok(Ok(result)) => result,
-        Ok(Err(error)) => {
+    let address = url::Url::parse(&url)?;
+    let host = address.host_str().ok_or_else(|| AppError::InvalidInput("设备地址无效".to_string()))?;
+    let config = state.config().await;
+    let expected = known_device.as_ref().and_then(|device| config.trusted_certificates.get(&device.id));
+    if !manual_confirmation && expected.is_none() {
+        return Err(AppError::InvalidInput("设备需要重新配对".to_string()));
+    }
+    let connect_result = secure_transport::connect(host, port, secure_transport::Protocol::WebSocket, expected.map(String::as_str)).await;
+    let (stream, fingerprint) = match connect_result {
+        Ok(result) => result,
+        Err(error) => {
             eprintln!("CopyShare connection to {ip}:{port} failed: {error}");
+            if let AppError::InvalidInput(message) = error {
+                return Err(AppError::InvalidInput(message));
+            }
             return Err(AppError::ConnectionTimeout(peer_connection_failure_message(
                 &ip,
                 port,
                 &error.to_string(),
             )));
         }
-        Err(_) => {
-            eprintln!("CopyShare connection to {ip}:{port} timed out");
-            return Err(AppError::ConnectionTimeout(peer_connection_failure_message(
-                &ip,
-                port,
-                "连接超时",
-            )));
-        }
     };
+    // The ws:// URL is an internal endpoint identifier; the supplied stream already uses TLS.
+    let (socket, _) = tokio::time::timeout(CONNECT_TIMEOUT, client_async(url.clone(), stream))
+        .await
+        .map_err(|_| AppError::ConnectionTimeout("WebSocket 握手超时".to_string()))??;
     let connection_id = url.clone();
     if !manual_confirmation {
         let automatic_connection_canceled = !state.status().await.running
@@ -342,7 +341,7 @@ async fn connect_to_peer_internal(
     if manual_confirmation {
         state.mark_peer_confirmation_required(&connection_id).await;
     }
-    spawn_socket(app.clone(), state.clone(), connection_id.clone(), socket).await?;
+    spawn_socket(app.clone(), state.clone(), connection_id.clone(), socket, fingerprint).await?;
     if !manual_confirmation {
         let automatic_connection_canceled = !state.status().await.running
             || match known_device.as_ref() {
@@ -502,6 +501,7 @@ async fn spawn_socket<S>(
     state: AppState,
     connection_id: String,
     socket: WebSocketStream<S>,
+    fingerprint: String,
 ) -> AppResult<()>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
@@ -547,15 +547,8 @@ where
                     let Some(outbound) = outbound else {
                         break;
                     };
-                    match network::encode_wire_message(&outbound) {
-                        Ok(text) => {
-                            if sink.send(Message::Text(text.into())).await.is_err() {
-                                break;
-                            }
-                        }
-                        Err(error) => {
-                            emit_sync_error(&app_for_task, &state_for_task, error.to_string()).await;
-                        }
+                    if sink.send(Message::Text(outbound.into())).await.is_err() {
+                        break;
                     }
                 }
                 inbound = stream.next() => {
@@ -623,7 +616,8 @@ where
         emit_status(&app_for_task, &state_for_task).await;
     });
 
-    state.register_peer(connection_id, sender, join).await;
+    state.register_peer(connection_id.clone(), sender, join).await;
+    state.set_peer_certificate_fingerprint(&connection_id, fingerprint).await;
     let _ = start_sender.send(());
     Ok(())
 }
@@ -647,6 +641,26 @@ async fn handle_wire_text(app: &AppHandle, state: &AppState, connection_id: &str
             ..
         } => {
             let mut config = state.config().await;
+            let Some(fingerprint) = state.peer_certificate_fingerprint(connection_id).await else {
+                emit_sync_error(app, state, "拒绝缺少 TLS 身份的设备连接".to_string()).await;
+                state.remove_peer(connection_id).await;
+                return;
+            };
+            if let Some(expected) = config.trusted_certificates.get(&device_id) {
+                if expected != &fingerprint {
+                    emit_sync_error(app, state, "已信任设备的加密身份发生变化，连接已拒绝".to_string()).await;
+                    state.remove_peer(connection_id).await;
+                    return;
+                }
+            } else if security::is_device_id_trusted(&config, &device_id) {
+                security::untrust_device(&mut config, &device_id);
+                if let Err(error) = app_config::save_config(app, &config) {
+                    emit_sync_error(app, state, error.to_string()).await;
+                    state.remove_peer(connection_id).await;
+                    return;
+                }
+                state.set_config(config.clone()).await;
+            }
             let endpoint = network::endpoint_from_connection_id(connection_id, port)
                 .unwrap_or_else(|_| connection_id.to_string());
             state
@@ -1319,14 +1333,9 @@ async fn resolve_hello_trust(
     let local_manual_connect = state
         .take_peer_confirmation_required(connection_id)
         .await;
-    let was_trusted = security::is_device_id_trusted(config, device_id);
-    let mut config_changed = false;
+    let config_changed = false;
 
-    if local_manual_connect && !was_trusted {
-        security::trust_device(config, device_id);
-        config_changed = true;
-        app_config::normalize_config(config);
-    }
+    // First contact requires explicit approval of the TLS pairing code.
 
     if peer_requested_manual_trust
         && !local_manual_connect
@@ -1981,7 +1990,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn manual_connect_initiator_auto_trusts_peer_after_hello() {
+    async fn manual_connect_requires_explicit_pairing_approval() {
         let state = AppState::new();
         let mut config = AppConfig::default();
         config.device_id = "device-a".to_string();
@@ -2023,16 +2032,16 @@ mod tests {
         )
         .await;
 
-        assert!(decision.trusted);
-        assert!(decision.config_changed);
-        assert!(decision.notify_peer_trusted);
-        assert!(!decision.prompt_required);
-        assert!(config.trusted_devices.contains(&"device-b".to_string()));
-        assert!(state.has_trusted_peers(&config).await);
+        assert!(!decision.trusted);
+        assert!(!decision.config_changed);
+        assert!(!decision.notify_peer_trusted);
+        assert!(decision.prompt_required);
+        assert!(!config.trusted_devices.contains(&"device-b".to_string()));
+        assert!(!state.has_trusted_peers(&config).await);
     }
 
     #[tokio::test]
-    async fn simultaneous_manual_connect_does_not_prompt_on_initiator_side() {
+    async fn simultaneous_manual_connect_still_requires_pairing_approval() {
         let state = AppState::new();
         let mut config = AppConfig::default();
         config.device_id = "device-a".to_string();
@@ -2065,9 +2074,9 @@ mod tests {
         )
         .await;
 
-        assert!(decision.trusted);
-        assert!(decision.notify_peer_trusted);
-        assert!(!decision.prompt_required);
+        assert!(!decision.trusted);
+        assert!(!decision.notify_peer_trusted);
+        assert!(decision.prompt_required);
         assert!(
             !state
                 .manual_trust_required_for_peer(
@@ -2992,19 +3001,6 @@ mod tests {
     fn manual_connect_starts_sync_runtime_when_stopped() {
         assert!(should_start_sync_for_manual_connect(false));
         assert!(!should_start_sync_for_manual_connect(true));
-    }
-
-    #[test]
-    fn sync_listener_routes_only_file_transfer_http_requests() {
-        assert!(is_file_transfer_http_request_prefix(
-            b"GET /file-transfer?transfer_id=t&file_id=f&token=x HTTP/1.1\r\nHost: 192.168.1.10:8765\r\n\r\n"
-        ));
-        assert!(is_file_transfer_http_request_prefix(
-            b"GET /file-transfer HTTP/1.1\r\nHost: 192.168.1.10:8765\r\n\r\n"
-        ));
-        assert!(!is_file_transfer_http_request_prefix(
-            b"GET / HTTP/1.1\r\nHost: 192.168.1.10:8765\r\nUpgrade: websocket\r\n\r\n"
-        ));
     }
 
     #[test]

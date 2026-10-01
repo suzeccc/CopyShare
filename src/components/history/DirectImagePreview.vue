@@ -16,6 +16,7 @@ import {
 
 const props = defineProps<{
   historyId: string;
+  src?: string;
   alt?: string;
   items?: ClipboardPreviewItem[];
   embedded?: boolean;
@@ -225,7 +226,18 @@ onUnmounted(() => {
           @lostpointercapture="finishDrag"
           @dragstart.prevent
         >
+          <img
+            v-if="src"
+            data-direct-image-preview-image
+            :src="src"
+            :alt="currentAlt"
+            draggable="false"
+            class="origin-center h-full w-full select-none object-contain drop-shadow-[0_18px_42px_rgba(0,0,0,0.42)] will-change-transform"
+            :style="imageStyle"
+            @load="imageLoaded"
+          />
           <HistoryImageThumb
+            v-else
             data-direct-image-preview-image
             :key="currentHistoryId"
             :history-id="currentHistoryId"

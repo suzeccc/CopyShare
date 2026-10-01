@@ -2,14 +2,15 @@ import { defineStore } from "pinia";
 
 import {
   collectHistoryItem as collectHistoryItemApi,
-  convertLibraryItemToSnippet,
   copyLibraryItem,
   createTextSnippet,
   getLibrary,
+  getLibraryItemContent,
   onAppEvent,
   removeLibraryItem,
   reorderPinnedLibraryItems,
   setLibraryItemPinned,
+  searchLibraryContent,
   updateLibraryItem,
 } from "../lib/tauri.ts";
 import type {
@@ -31,6 +32,11 @@ export const useLibraryStore = defineStore("library", {
     activeView: "snippets" as LibraryView,
     contentTypeFilter: "all" as LibraryContentFilter,
     selectedTags: [] as string[],
+    searchQuery: "",
+    matchingContentIds: new Set<string>(),
+    searchRequestId: 0,
+    searching: false,
+    searchError: null as string | null,
     busyItemIds: new Set<string>(),
     unlisten: null as null | (() => void),
     subscriptionUsers: 0,
@@ -51,7 +57,8 @@ export const useLibraryStore = defineStore("library", {
         return [item.title, item.content, item.summary, item.note, ...item.tags]
           .join("\n")
           .toLocaleLowerCase()
-          .includes(query);
+          .includes(query)
+          || (state.searchQuery === query && state.matchingContentIds.has(item.id));
       });
     },
     availableTags(state): string[] {
@@ -73,6 +80,34 @@ export const useLibraryStore = defineStore("library", {
       this.items = snapshot.items;
       this.warning = snapshot.warning;
       this.loaded = true;
+      this.searchRequestId += 1;
+      this.searchQuery = "";
+      this.matchingContentIds = new Set();
+      this.searching = false;
+    },
+    async searchContent(query: string) {
+      const normalized = query.trim().toLocaleLowerCase();
+      const requestId = ++this.searchRequestId;
+      this.searchError = null;
+      if (!normalized) {
+        this.searchQuery = "";
+        this.matchingContentIds = new Set();
+        this.searching = false;
+        return;
+      }
+      this.searching = true;
+      try {
+        const ids = await searchLibraryContent(query);
+        if (requestId !== this.searchRequestId) return;
+        this.searchQuery = normalized;
+        this.matchingContentIds = new Set(ids);
+        this.searching = false;
+      } catch (error) {
+        if (requestId === this.searchRequestId) {
+          this.searching = false;
+          this.searchError = String(error);
+        }
+      }
     },
     beginItemAction(id: string) {
       this.busyItemIds = new Set(this.busyItemIds).add(id);
@@ -149,9 +184,13 @@ export const useLibraryStore = defineStore("library", {
       await this.withItemAction(id, async () =>
         updateLibraryItem(id, update));
     },
-    async convertToSnippet(id: string) {
-      await this.withItemAction(id, async () =>
-        convertLibraryItemToSnippet(id));
+    async addToSnippets(item: LibraryItem) {
+      await this.withItemAction(item.id, async () => createTextSnippet({
+        title: item.title,
+        content: await getLibraryItemContent(item.id),
+        tags: item.tags,
+        note: item.note,
+      }));
     },
     async setPinned(id: string, pinned: boolean) {
       await this.withItemAction(id, async () =>

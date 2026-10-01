@@ -6,7 +6,7 @@
 
 **LAN clipboard sync, file transfer, and content productivity for multiple devices**
 
-Sync text, screenshots, images, and files between trusted computers. Download large files on demand with resumable transfers, and keep clipboard history, snippets, local OCR, translation, temporary mobile access, and a desktop floating panel close at hand. The interface is available in Simplified Chinese, Traditional Chinese, English, and Japanese.
+Sync text, screenshots, images, and files between trusted computers over TLS 1.3. Download large files on demand with resumable transfers, and keep clipboard history, snippets, local OCR, translation, temporary mobile access, and a desktop floating panel close at hand. The interface is available in Simplified Chinese, Traditional Chinese, English, and Japanese.
 
 [![Latest release](https://img.shields.io/github/v/release/suzeccc/CopyShare?style=flat-square&color=22c55e)](https://github.com/suzeccc/CopyShare/releases/latest)
 [![Release build](https://img.shields.io/github/actions/workflow/status/suzeccc/CopyShare/release.yml?style=flat-square&label=release)](https://github.com/suzeccc/CopyShare/actions/workflows/release.yml)
@@ -37,11 +37,14 @@ CopyShare is designed for trusted LANs in offices, dorms, and homes. It does not
 1. Install and open CopyShare from [GitHub Releases](https://github.com/suzeccc/CopyShare/releases/latest). The first-run wizard guides you through device name, download folder, automatic sync, and autostart.
 2. Make sure two or more computers can reach each other on the same LAN.
 3. Open **Devices** and wait for automatic discovery. If discovery fails, enter the other device's IPv4 address and listening port (default `8765`).
-4. Approve the trust request on both sides. Previously trusted devices reconnect automatically and join the sync mesh when they return.
+4. On first connection, compare the pairing code shown on both computers. Enter the code shown by the other computer and approve trust on each side. Trusted devices reconnect automatically and join the sync mesh when they return.
 5. Copy text, a screenshot, an image, or files. Text and images sync according to your settings; files appear in the receiving application and are saved only after download.
 
 > [!TIP]
 > If a device cannot be found, open **Settings → Network diagnostics** first. It checks sync, discovery and mobile ports, the Windows network profile, and firewall rules, then provides specific guidance. For the full walkthrough, see the [user guide](docs/用户指南.md).
+
+> [!IMPORTANT]
+> Versions with TLS 1.3 cannot connect to older clients. After upgrading, install the new version on every computer and pair previously trusted devices again.
 
 ## Downloads and platforms
 
@@ -103,8 +106,9 @@ Open [GitHub Releases](https://github.com/suzeccc/CopyShare/releases/latest) and
 
 ### Clipboard history, library, and media previews
 
-- Filter by all, text, image, video, link, or file, and search by keyword.
+- Filter by all, text, image, video, link, or file. Text history supports full-text search.
 - Expand long text, open links in the system browser, and zoom images on a fixed preview canvas.
+- Long text in history and library lists appears as a preview, with full content loaded on demand. Long lists render only visible items to reduce UI memory use and rendering work.
 - Local videos support thumbnails and a dedicated preview window; if the system cannot decode a codec, open the file location instead.
 - History items can be favorited or pinned; favorites are not deleted when ordinary history is cleared.
 - Favorites support titles, tags, notes, and search, and can be converted into reusable text snippets.
@@ -158,10 +162,11 @@ Shortcuts can be enabled, remapped, and restored individually. If a binding conf
 ## Privacy and security boundaries
 
 - Clipboard content is not uploaded to a CopyShare-owned cloud. Sync, library, and OCR data stay on the local machine and connected LAN devices.
-- Device trust limits who can participate in sync, but it is not an end-to-end encrypted channel suitable for the public internet or untrusted shared networks. Use it only on trusted LANs and only trust devices you intentionally authorize.
-- Temporary mobile sessions become invalid after they are closed. Do not share the QR code with untrusted people.
+- Clipboard sync and file downloads between computers use TLS 1.3. Compare the pairing code on both computers and approve trust on each. Older clients cannot connect after this upgrade, and previously trusted devices must pair again.
+- Temporary mobile connections still use LAN HTTP, and the QR code contains an access token. Someone monitoring the same network may read session content. Use this on trusted LANs only; closing the session invalidates the token, and the QR code should remain private.
+- History, library content, and preview caches remain in local app data and WebView storage without separate encryption. Use system disk encryption for sensitive content, or disable and clear the relevant records.
 - When using Google Translate or custom AI translation, the text is sent to the selected translation service. Do not submit sensitive content to external translation services.
-- AI API keys are stored in your own local configuration. Use a dedicated key and manage it carefully.
+- AI API keys are stored in the local system credential store; custom AI translation endpoints must use HTTPS. Use a dedicated key and manage it carefully.
 - Update checks and downloads use GitHub Releases. Other LAN sync features do not depend on a CopyShare cloud.
 - Clipboards may contain passwords, verification codes, and private files. Pause sync or disable the relevant content types before handling sensitive material.
 

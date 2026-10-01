@@ -20,6 +20,7 @@ mod notifications;
 mod ocr;
 mod safe_json_store;
 mod security;
+mod secure_transport;
 mod state;
 mod sync;
 mod sync_engine;
@@ -28,7 +29,6 @@ mod translator;
 mod window_position;
 
 use state::AppState;
-use tauri::Manager;
 use tauri_plugin_autostart::MacosLauncher;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -41,11 +41,7 @@ pub fn run() {
     #[cfg(desktop)]
     {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.unminimize();
-                let _ = window.set_focus();
-            }
+            notifications::show_main_window(app);
         }));
     }
 
@@ -97,20 +93,26 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::get_status,
             commands::set_floating_ball_shape,
+            commands::set_floating_ball_low_memory,
             commands::start_sync,
             commands::stop_sync,
             commands::get_devices,
             commands::connect_device,
             commands::disconnect_device,
             commands::trust_device,
+            commands::get_pairing_code,
             commands::reject_device,
             commands::get_config,
             commands::update_config,
             commands::get_network_diagnostics,
             commands::repair_windows_firewall,
             commands::get_history,
+            commands::get_history_item_content,
+            commands::search_history_text,
             commands::set_history_item_pinned,
             commands::get_library,
+            commands::get_library_item_content,
+            commands::search_library_content,
             commands::collect_history_item,
             commands::create_text_snippet,
             commands::update_library_item,
@@ -121,8 +123,11 @@ pub fn run() {
             commands::copy_library_item,
             commands::get_library_storage_size,
             commands::get_library_image_thumbnail,
+            commands::get_library_image_preview_path,
             commands::get_library_video_preview_path,
             commands::get_clipboard_history,
+            commands::get_clipboard_history_item_content,
+            commands::enable_clipboard_history_events,
             commands::read_clipboard_text,
             commands::recognize_clipboard_image,
             commands::translate_text,

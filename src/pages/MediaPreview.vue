@@ -2,7 +2,6 @@
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useRoute } from "vue-router";
 import FolderOpen from "lucide-vue-next/dist/esm/icons/folder-open.js";
-import Minus from "lucide-vue-next/dist/esm/icons/minus.js";
 import X from "lucide-vue-next/dist/esm/icons/x.js";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
@@ -18,7 +17,6 @@ import {
   getHistoryFilePreviewPath,
   MEDIA_PREVIEW_ITEMS_STORAGE_KEY,
   getConfig,
-  hideWindow,
   onAppEvent,
   openHistoryFileLocation,
   startWindowDrag,
@@ -270,17 +268,6 @@ onUnmounted(() => {
           <FolderOpen class="h-4 w-4" />
         </button>
         <button
-          data-media-preview-minimize-button
-          class="media-preview-window-control"
-          type="button"
-          aria-label="隐藏预览"
-          title="隐藏"
-          data-window-control
-          @click="hideWindow"
-        >
-          <Minus class="h-4 w-4" />
-        </button>
-        <button
           class="media-preview-window-control"
           type="button"
           aria-label="关闭预览"
@@ -294,7 +281,7 @@ onUnmounted(() => {
     </header>
 
     <main v-if="kind === 'image'" data-media-preview-image class="min-h-0 min-w-0 overflow-hidden">
-      <DirectImagePreview :key="videoSession" embedded :history-id="historyId" :alt="title" :items="playlist" @change="handleImageChange" @close="closeWindow" />
+      <DirectImagePreview :key="videoSession" embedded :history-id="historyId" :src="historyId ? undefined : videoSrc" :alt="title" :items="playlist" @change="handleImageChange" @close="closeWindow" />
     </main>
     <main v-else class="min-h-0 min-w-0 overflow-hidden p-3">
       <div class="flex h-full flex-col gap-3">

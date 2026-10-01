@@ -256,6 +256,17 @@ assert.deepEqual(
   ["link"],
 );
 
+const longPreview = getRecentClipboardItems([
+  historyItem({ id: "long", content: "x".repeat(1024), summary: "x" }),
+])[0];
+assert.equal(longPreview.needsFullText, true);
+assert.deepEqual(filterClipboardItems([longPreview], "全部", "hidden", new Set(["long"]))
+  .map((item) => item.id), ["long"]);
+assert.deepEqual(getFloatingClipboardItems(
+  [{ id: "system-long", text: `${"x".repeat(1024)}tail`, contentType: "text", syncStatus: "unsynced" }],
+  [historyItem({ id: "long", content: "x".repeat(1024), summary: "x" })],
+).map((item) => item.id), ["long"]);
+
 assert.deepEqual(
   stripCreatedAt(getFloatingClipboardItems([], [historyItem({ id: "app-1", summary: "App history", sourceDevice: "Office-PC" })])),
   [{ id: "app-1", text: "App history", contentType: "text", sourceDevice: "Office-PC", syncStatus: "synced" }],

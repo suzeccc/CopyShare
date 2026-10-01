@@ -117,3 +117,58 @@ test("library store shares pending subscriptions and releases after async instal
     (globalThis as any).window = previousWindow;
   }
 });
+
+test("library search finds content omitted from list previews", async () => {
+  const previousWindow = (globalThis as any).window;
+  (globalThis as any).window = {
+    __TAURI_INTERNALS__: {
+      invoke(command: string) {
+        assert.equal(command, "search_library_content");
+        return Promise.resolve(["snippet-1"]);
+      },
+    },
+  };
+  try {
+    const { useLibraryStore } = await import("../src/stores/library.ts");
+    setActivePinia(createPinia());
+    const store = useLibraryStore();
+    const items = structuredClone(fixtures);
+    items[1].content = "Short preview";
+    store.applySnapshot({ items, warning: null });
+    store.query = "hidden ending";
+    assert.deepEqual(store.filteredItems, []);
+    await store.searchContent(store.query);
+    assert.deepEqual(store.filteredItems.map((item) => item.id), ["snippet-1"]);
+    store.query = "other";
+    assert.deepEqual(store.filteredItems, []);
+  } finally {
+    (globalThis as any).window = previousWindow;
+  }
+});
+
+test("library search ignores results from an older snapshot", async () => {
+  const previousWindow = (globalThis as any).window;
+  let resolveSearch!: (ids: string[]) => void;
+  (globalThis as any).window = {
+    __TAURI_INTERNALS__: {
+      invoke(command: string) {
+        assert.equal(command, "search_library_content");
+        return new Promise<string[]>((resolve) => { resolveSearch = resolve; });
+      },
+    },
+  };
+  try {
+    const { useLibraryStore } = await import("../src/stores/library.ts");
+    setActivePinia(createPinia());
+    const store = useLibraryStore();
+    store.applySnapshot({ items: structuredClone(fixtures), warning: null });
+    const stale = store.searchContent("hidden");
+    store.applySnapshot({ items: structuredClone(fixtures), warning: null });
+    resolveSearch(["snippet-1"]);
+    await stale;
+    assert.equal(store.searchQuery, "");
+    assert.equal(store.matchingContentIds.size, 0);
+  } finally {
+    (globalThis as any).window = previousWindow;
+  }
+});

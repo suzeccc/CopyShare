@@ -9,6 +9,7 @@ import { computed, onBeforeUnmount, ref } from "vue";
 import { copyTextToClipboard, getCopyableText, type CopyTextResult } from "@/lib/clipboard";
 import {
   copyHistoryItem,
+  getClipboardHistoryItemContent,
   type CopyHistoryResult,
 } from "@/lib/tauri";
 import { useHistoryStore } from "@/stores/history";
@@ -28,6 +29,8 @@ const props = withDefaults(
     iconOnly?: boolean;
     contentType?: ClipboardContentType;
     historyItemId?: string;
+    systemHistoryItemId?: string;
+    fullTextFromHistory?: boolean;
     fileTransferId?: string;
     fileTransferFileId?: string;
     fileTransferStatus?: FileTransferStatus;
@@ -47,7 +50,7 @@ const toastStore = useToastStore();
 const historyStore = useHistoryStore();
 let resetTimer: number | undefined;
 const requiresHistoryCopy = computed(
-  () => props.contentType === "image" || props.contentType === "fileList",
+  () => props.contentType === "image" || props.contentType === "fileList" || Boolean(props.fullTextFromHistory),
 );
 const fileDownloadActive = computed(() =>
   props.contentType === "fileList"
@@ -101,7 +104,13 @@ const buttonLabel = computed(() => {
 });
 
 async function copyText() {
-  if (requiresHistoryCopy.value) {
+  if (props.systemHistoryItemId && props.fullTextFromHistory) {
+    try {
+      result.value = await copyTextToClipboard(await getClipboardHistoryItemContent(props.systemHistoryItemId));
+    } catch {
+      result.value = "failed";
+    }
+  } else if (requiresHistoryCopy.value) {
     if (!props.historyItemId) {
       result.value = "empty";
     } else {

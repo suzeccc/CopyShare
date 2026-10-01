@@ -1,4 +1,7 @@
+use serde::Serialize;
 use std::{process::Command, time::Duration};
+#[cfg(windows)]
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use tauri::{AppHandle, Emitter, Manager, State};
 use url::Url;
@@ -20,6 +23,7 @@ use crate::{
         LibrarySnapshot, MobileSessionView, OcrResponse, SelectedTransferFile, TranslateResponse,
     },
     security,
+    secure_transport,
     state::AppState,
     sync,
     tray,
@@ -35,6 +39,53 @@ pub async fn get_status(state: State<'_, AppState>) -> AppResult<AppStatus> {
 #[tauri::command]
 pub fn set_floating_ball_shape(app: AppHandle, enabled: bool) -> AppResult<()> {
     window_position::set_floating_ball_shape(&app, enabled)
+}
+
+#[cfg(windows)]
+static FLOATING_BALL_LOW_MEMORY: AtomicBool = AtomicBool::new(false);
+
+#[cfg(windows)]
+async fn set_webview_memory_target(
+    window: tauri::WebviewWindow,
+    low: bool,
+) -> AppResult<bool> {
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        ICoreWebView2_19, COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW,
+        COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL,
+    };
+    use windows::core::Interface;
+
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    window.with_webview(move |webview| {
+        let result = (|| {
+            let core = unsafe { webview.controller().CoreWebView2()? };
+            let modern = core.cast::<ICoreWebView2_19>()?;
+            let level = if low {
+                COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW
+            } else {
+                COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL
+            };
+            unsafe { modern.SetMemoryUsageTargetLevel(level) }
+        })();
+        let _ = sender.send(result.is_ok());
+    })?;
+    Ok(receiver.await.unwrap_or(false))
+}
+
+#[cfg(windows)]
+#[tauri::command]
+pub async fn set_floating_ball_low_memory(
+    window: tauri::WebviewWindow,
+    low: bool,
+) -> AppResult<bool> {
+    FLOATING_BALL_LOW_MEMORY.store(low, Ordering::Relaxed);
+    set_webview_memory_target(window, low).await
+}
+
+#[cfg(not(windows))]
+#[tauri::command]
+pub async fn set_floating_ball_low_memory(_low: bool) -> AppResult<bool> {
+    Ok(false)
 }
 
 #[tauri::command]
@@ -108,10 +159,21 @@ pub async fn trust_device(
     app: AppHandle,
     state: State<'_, AppState>,
     device_id: String,
+    pairing_code: String,
 ) -> AppResult<()> {
     let mut next_config = state.config().await;
+    let fingerprint = state
+        .peer_certificate_fingerprint(&device_id)
+        .await
+        .ok_or_else(|| AppError::InvalidInput("请先建立加密连接，再信任设备".to_string()))?;
+    if pairing_code.trim().to_uppercase() != secure_transport::pairing_code(&fingerprint)? {
+        return Err(AppError::InvalidInput("两台设备的配对码不一致，已拒绝信任".to_string()));
+    }
     for key in state.trust_keys_for_device(&device_id).await {
-        security::trust_device(&mut next_config, key);
+        security::trust_device(&mut next_config, &key);
+        if next_config.trusted_devices.iter().any(|trusted| trusted == &key) {
+            next_config.trusted_certificates.insert(key, fingerprint.clone());
+        }
     }
     config::normalize_config(&mut next_config);
     config::save_config(&app, &next_config)?;
@@ -124,6 +186,15 @@ pub async fn trust_device(
     tray::update_tray_status(&app, state.inner()).await;
     app.emit("config-updated", next_config)?;
     Ok(())
+}
+
+#[tauri::command]
+pub async fn get_pairing_code(state: State<'_, AppState>, device_id: String) -> AppResult<String> {
+    let fingerprint = state
+        .peer_certificate_fingerprint(&device_id)
+        .await
+        .ok_or_else(|| AppError::InvalidInput("请先连接设备，再查看配对码".to_string()))?;
+    secure_transport::pairing_code(&fingerprint)
 }
 
 #[tauri::command]
@@ -178,19 +249,28 @@ pub async fn update_config(
     };
 
     let mut next_config = config;
+    if !next_config.translation_api_url.trim().is_empty() {
+        translator::validate_ai_url(next_config.translation_api_url.trim())?;
+    }
     next_config.device_name = device_name;
+    next_config.trusted_devices = current.trusted_devices.clone();
+    next_config.trusted_certificates = current.trusted_certificates.clone();
     next_config.device_id = if next_config.device_id.trim().is_empty() {
         current.device_id.clone()
     } else {
         next_config.device_id.trim().to_string()
     };
     config::normalize_config(&mut next_config);
+    let clear_api_key = !current.translation_api_key.is_empty() && next_config.translation_api_key.is_empty();
     let current_auto_start =
         autostart::is_autostart_enabled(&app).unwrap_or(current.auto_start);
     if autostart::should_update_autostart(current_auto_start, next_config.auto_start) {
         autostart::set_autostart(&app, next_config.auto_start)?;
     }
     config::save_config(&app, &next_config)?;
+    if clear_api_key {
+        config::clear_translation_api_key()?;
+    }
     state.set_config(next_config.clone()).await;
     tray::update_tray_locale(&app, &next_config)?;
     tray::update_tray_status(&app, state.inner()).await;
@@ -239,6 +319,17 @@ async fn collect_network_diagnostics(state: AppState) -> AppResult<NetworkDiagno
 #[tauri::command]
 pub async fn get_history(state: State<'_, AppState>) -> AppResult<Vec<HistoryItem>> {
     Ok(state.frontend_history().await)
+}
+
+#[tauri::command]
+pub async fn get_history_item_content(state: State<'_, AppState>, history_id: String) -> AppResult<String> {
+    state.history_item_content(&history_id).await
+        .ok_or_else(|| AppError::InvalidInput("文本历史记录不存在".into()))
+}
+
+#[tauri::command]
+pub async fn search_history_text(state: State<'_, AppState>, query: String) -> AppResult<Vec<String>> {
+    state.search_history_text(query).await
 }
 
 #[tauri::command]
@@ -310,17 +401,29 @@ where
         items: next,
         warning: None,
     };
-    state.replace_library(snapshot.clone()).await;
-    app.emit("library-updated", snapshot.clone())?;
+    let frontend_snapshot = library::frontend_snapshot(&snapshot);
+    state.replace_library(snapshot).await;
+    app.emit("library-updated", frontend_snapshot.clone())?;
     if let Some(error) = prune_error {
         return Err(error);
     }
-    Ok(snapshot)
+    Ok(frontend_snapshot)
 }
 
 #[tauri::command]
 pub async fn get_library(state: State<'_, AppState>) -> AppResult<LibrarySnapshot> {
-    Ok(state.library().await)
+    Ok(state.frontend_library().await)
+}
+
+#[tauri::command]
+pub async fn get_library_item_content(state: State<'_, AppState>, id: String) -> AppResult<String> {
+    state.library_item_content(&id).await
+        .ok_or_else(|| AppError::InvalidInput("收藏项不存在".into()))
+}
+
+#[tauri::command]
+pub async fn search_library_content(state: State<'_, AppState>, query: String) -> AppResult<Vec<String>> {
+    state.search_library_content(query).await
 }
 
 #[tauri::command]
@@ -425,11 +528,8 @@ pub async fn copy_library_item(
 ) -> AppResult<()> {
     let _guard = state.lock_library_mutation().await;
     let item = state
-        .library()
+        .library_item(&id)
         .await
-        .items
-        .into_iter()
-        .find(|item| item.id == id)
         .ok_or_else(|| AppError::InvalidInput("收藏项不存在".into()))?;
     let root = app.path().app_data_dir()?;
     let copy_root = root.clone();
@@ -474,11 +574,8 @@ pub async fn get_library_image_thumbnail(
     max_size: u32,
 ) -> AppResult<String> {
     let item = state
-        .library()
+        .library_item(&id)
         .await
-        .items
-        .into_iter()
-        .find(|item| item.id == id)
         .ok_or_else(|| AppError::InvalidInput("收藏项不存在".into()))?;
     let root = app.path().app_data_dir()?;
     tauri::async_runtime::spawn_blocking(move || library::image_thumbnail(&root, &item, max_size))
@@ -487,8 +584,46 @@ pub async fn get_library_image_thumbnail(
 }
 
 #[tauri::command]
-pub async fn get_clipboard_history() -> AppResult<Vec<ClipboardTextItem>> {
-    clipboard::read_clipboard_history_text(3).await
+pub async fn get_clipboard_history() -> AppResult<Vec<SystemClipboardPreview>> {
+    Ok(clipboard::read_clipboard_history_text(3)
+        .await?
+        .into_iter()
+        .map(SystemClipboardPreview::from)
+        .collect())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SystemClipboardPreview {
+    id: String,
+    text: String,
+    needs_full_text: bool,
+    created_at: Option<chrono::DateTime<chrono::Utc>>,
+    source_device: String,
+}
+
+impl From<ClipboardTextItem> for SystemClipboardPreview {
+    fn from(item: ClipboardTextItem) -> Self {
+        let mut chars = item.text.chars();
+        let text: String = chars.by_ref().take(1024).collect();
+        Self {
+            id: item.id,
+            text,
+            needs_full_text: chars.next().is_some(),
+            created_at: item.created_at,
+            source_device: item.source_device,
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn get_clipboard_history_item_content(history_id: String) -> AppResult<String> {
+    clipboard::read_clipboard_history_item_text(&history_id).await
+}
+
+#[tauri::command]
+pub fn enable_clipboard_history_events(app: AppHandle) -> bool {
+    clipboard::enable_history_events(app)
 }
 
 #[tauri::command]
@@ -499,11 +634,8 @@ pub async fn get_library_video_preview_path(
     asset_index: usize,
 ) -> AppResult<String> {
     let item = state
-        .library()
+        .library_item(&id)
         .await
-        .items
-        .into_iter()
-        .find(|item| item.id == id)
         .ok_or_else(|| AppError::InvalidInput("收藏项不存在".into()))?;
     let root = app.path().app_data_dir()?;
     tauri::async_runtime::spawn_blocking(move || {
@@ -511,6 +643,22 @@ pub async fn get_library_video_preview_path(
     })
     .await
     .map_err(|error| AppError::Tauri(format!("收藏视频读取失败：{error}")))?
+}
+
+#[tauri::command]
+pub async fn get_library_image_preview_path(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> AppResult<String> {
+    let item = state
+        .library_item(&id)
+        .await
+        .ok_or_else(|| AppError::InvalidInput("收藏项不存在".into()))?;
+    let root = app.path().app_data_dir()?;
+    tauri::async_runtime::spawn_blocking(move || library::image_preview_path(&root, &item))
+        .await
+        .map_err(|error| AppError::Tauri(format!("收藏图片读取失败：{error}")))?
 }
 
 #[tauri::command]
@@ -972,6 +1120,12 @@ fn open_url_with_system_browser(url: &str) -> AppResult<()> {
 #[tauri::command]
 pub async fn show_main_window(app: AppHandle) -> AppResult<()> {
     if let Some(window) = app.get_webview_window("main") {
+        #[cfg(windows)]
+        let _ = set_webview_memory_target(
+            window.clone(),
+            FLOATING_BALL_LOW_MEMORY.load(Ordering::Relaxed),
+        )
+        .await;
         window.show()?;
         window.unminimize()?;
         window.set_focus()?;
@@ -980,9 +1134,15 @@ pub async fn show_main_window(app: AppHandle) -> AppResult<()> {
 }
 
 #[tauri::command]
-pub async fn hide_main_window(app: AppHandle) -> AppResult<()> {
+pub async fn hide_main_window(app: AppHandle, low_memory: bool) -> AppResult<()> {
     if let Some(window) = app.get_webview_window("main") {
         window.hide()?;
+        #[cfg(windows)]
+        if low_memory {
+            let _ = set_webview_memory_target(window, true).await;
+        }
+        #[cfg(not(windows))]
+        let _ = low_memory;
     }
     Ok(())
 }
@@ -1063,8 +1223,22 @@ pub async fn wait_for_primary_mouse_release() {
 
 #[cfg(test)]
 mod tests {
-    use super::update_blocks_transfer;
-    use crate::models::FileTransferStatus::*;
+    use super::{update_blocks_transfer, SystemClipboardPreview};
+    use crate::models::{ClipboardTextItem, FileTransferStatus::*};
+
+    #[test]
+    fn system_clipboard_preview_keeps_unicode_boundary_and_marks_full_text() {
+        let item = ClipboardTextItem {
+            id: "system-id".into(),
+            text: format!("{}后", "🙂".repeat(1024)),
+            source_device: String::new(),
+            created_at: None,
+        };
+        let preview = SystemClipboardPreview::from(item);
+        assert_eq!(preview.text.chars().count(), 1024);
+        assert!(preview.needs_full_text);
+        assert_eq!(preview.id, "system-id");
+    }
 
     #[test]
     fn update_requires_running_and_reconnecting_transfers_to_pause() {
