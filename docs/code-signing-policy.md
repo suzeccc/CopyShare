@@ -1,6 +1,6 @@
 # Code signing policy
 
-Status: application pending. CopyShare's Windows installers are currently unsigned.
+Status: signing is not yet active. CopyShare's Windows installers are currently unsigned.
 
 Free code signing provided by [SignPath.io](https://signpath.io/), certificate by [SignPath Foundation](https://signpath.org/), if the project is accepted. The verified Windows publisher will be SignPath Foundation.
 
