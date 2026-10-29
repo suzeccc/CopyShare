@@ -88,6 +88,9 @@ jobs:
           releaseBody: |
             CopyShare desktop release.
 
+            Code signing policy: https://github.com/${{ github.repository }}/blob/main/docs/code-signing-policy.md
+            Windows code signing is pending approval; installers are currently unsigned.
+
             Assets include:
             - Windows x64 NSIS installer
             - macOS Apple Silicon

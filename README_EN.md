@@ -161,6 +161,8 @@ Shortcuts can be enabled, remapped, and restored individually. If a binding conf
 
 ## Privacy and security boundaries
 
+[Code signing policy](docs/code-signing-policy.md): Windows code signing through SignPath Foundation is pending approval; current installers are unsigned.
+
 - Clipboard content is not uploaded to a CopyShare-owned cloud. Sync, library, and OCR data stay on the local machine and connected LAN devices.
 - Clipboard sync and file downloads between computers use TLS 1.3. Compare the pairing code on both computers and approve trust on each. Older clients cannot connect after this upgrade, and previously trusted devices must pair again.
 - Temporary mobile connections still use LAN HTTP, and the QR code contains an access token. Someone monitoring the same network may read session content. Use this on trusted LANs only; closing the session invalidates the token, and the QR code should remain private.
